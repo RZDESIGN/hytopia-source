@@ -7,6 +7,7 @@ import {
   Box3,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
   Frustum,
   Group,
@@ -51,6 +52,12 @@ const BLEND_MODE_ADDITIVE = 0;
 
 const MAX_UPDATE_SKIP_FRAMES = 4;
 const NEAR_DISTANCE_SQUARED = 16 * 16; // 1 Chunk = 16 Blocks
+const BLOB_SHADOW_Y_OFFSET = 0.02;
+const BLOB_SHADOW_BASE_OPACITY = 0.35;
+const BLOB_SHADOW_MIN_SCALE = 0.35;
+const BLOB_SHADOW_MAX_SCALE = 1.2;
+const BLOB_SHADOW_MAX_HEIGHT = 8;
+const BLOB_SHADOW_MAX_GROUND_SCAN = 12;
 
 // Working variables
 const vec2 = new Vector2();
@@ -64,6 +71,8 @@ const rotatedCenterOffset = new Vector3();
 const worldCenter = new Vector3();
 const localCenter = new Vector3();
 const nextQuaternion = new Quaternion();
+const shadowGlobalCoordinate: Vector3LikeMutable = { x: 0, y: 0, z: 0 };
+const shadowLocalCoordinate: Vector3LikeMutable = { x: 0, y: 0, z: 0 };
 
 // Hack to access a non-public Three.js properties without TypeScript errors.
 // TODO: Since the properties are not officially exposed, they could be renamed or made
@@ -171,6 +180,7 @@ export interface EntityData {
 }
 
 export default class Entity {
+  private static _blobShadowGeometry: CircleGeometry | null = null;
   protected _game: Game;
   private _id: EntityId;
   private _animationTargets: Set<Object3D> = new Set();
@@ -258,6 +268,8 @@ export default class Entity {
   private _targetScale: Vector3;
   private _tintColor: Color | null;
   private _clientColorCorrection: Color | null = null;
+  private _blobShadow: Mesh | null = null;
+  private _blobShadowGroundY: number | null = null;
   private _localBoundingBox: Box3 | null = null;
   private _worldBoundingBox: Box3 | null = null;
   protected _globalCoordinate: Vector3LikeMutable;
@@ -491,6 +503,163 @@ export default class Entity {
     }
 
     this._entityRoot.visible = visible;
+    if (!visible && this._blobShadow) {
+      this._blobShadow.visible = false;
+    }
+  }
+
+  private _areBlobShadowsEnabled(): boolean {
+    return this._game.settingsManager.qualityPerfTradeoff.blobShadows?.enabled ?? false;
+  }
+
+  private _ensureBlobShadow(): void {
+    if (this._blobShadow || !this._areBlobShadowsEnabled() || this._attached) {
+      return;
+    }
+
+    if (Entity._blobShadowGeometry === null) {
+      Entity._blobShadowGeometry = new CircleGeometry(1, 12);
+    }
+
+    const material = new MeshBasicMaterial({
+      color: 0x000000,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0,
+    });
+    const shadow = new Mesh(Entity._blobShadowGeometry, material);
+    shadow.rotation.x = -Math.PI * 0.5;
+    shadow.frustumCulled = false;
+    shadow.matrixAutoUpdate = false;
+    shadow.matrixWorldAutoUpdate = false;
+    shadow.visible = false;
+
+    this._blobShadow = shadow;
+    this._game.renderer.addToScene(shadow);
+  }
+
+  private _clearBlobShadow(): void {
+    if (!this._blobShadow) {
+      return;
+    }
+
+    this._blobShadow.removeFromParent();
+    this._blobShadow.material.dispose();
+    this._blobShadow = null;
+    this._blobShadowGroundY = null;
+  }
+
+  private _getBlobShadowBaseRadius(): number {
+    if (this._blockHalfExtents) {
+      return Math.max(
+        this._blockHalfExtents.x * Math.abs(this._scale.x),
+        this._blockHalfExtents.z * Math.abs(this._scale.z),
+      );
+    }
+
+    if (this._localBoundingBox) {
+      const width = (this._localBoundingBox.max.x - this._localBoundingBox.min.x) * Math.abs(this._scale.x);
+      const depth = (this._localBoundingBox.max.z - this._localBoundingBox.min.z) * Math.abs(this._scale.z);
+      return Math.max(width, depth) * 0.5;
+    }
+
+    return 0.6;
+  }
+
+  private _getEntityFootWorldY(): number {
+    if (this._blockHalfExtents) {
+      return this._entityRoot.position.y - this._blockHalfExtents.y * Math.abs(this._scale.y);
+    }
+
+    if (this._localBoundingBox) {
+      const height = (this._localBoundingBox.max.y - this._localBoundingBox.min.y) * Math.abs(this._scale.y);
+      return this._entityRoot.position.y - height * 0.5;
+    }
+
+    return this._entityRoot.position.y;
+  }
+
+  private _findGroundYForBlobShadow(): number | null {
+    Chunk.worldPositionToGlobalCoordinate(this._entityRoot.position, shadowGlobalCoordinate);
+    const scanStartY = Math.floor(this._getEntityFootWorldY());
+
+    for (let i = 0; i <= BLOB_SHADOW_MAX_GROUND_SCAN; i++) {
+      shadowGlobalCoordinate.y = scanStartY - i;
+      const chunk = this._game.chunkManager.getChunkByGlobalCoordinate(shadowGlobalCoordinate);
+      if (!chunk) {
+        continue;
+      }
+
+      const blockTypeId = chunk.getBlockType(Chunk.globalCoordinateToLocalCoordinate(shadowGlobalCoordinate, shadowLocalCoordinate));
+      if (blockTypeId === 0) {
+        continue;
+      }
+
+      const blockType = this._game.blockTypeManager.getBlockType(blockTypeId);
+      if (!blockType || blockType.isLiquid) {
+        continue;
+      }
+
+      return shadowGlobalCoordinate.y + 1;
+    }
+
+    return null;
+  }
+
+  private _shouldRefreshBlobShadowGround(frameCount: number): boolean {
+    if (this._distanceToCameraSquared <= NEAR_DISTANCE_SQUARED) {
+      return true;
+    }
+
+    const interval = this._distanceToCameraSquared < 128 * 128 ? 2
+      : this._distanceToCameraSquared < 256 * 256 ? 4
+      : 8;
+    return (frameCount + this._id) % interval === 0;
+  }
+
+  private _updateBlobShadow(): void {
+    if (!this._areBlobShadowsEnabled() || !this.visible || this._attached) {
+      this._clearBlobShadow();
+      return;
+    }
+
+    this._ensureBlobShadow();
+
+    if (!this._blobShadow) {
+      return;
+    }
+
+    const frameCount = this._game.performanceMetricsManager.frameCount;
+    if (this._blobShadowGroundY === null || this._shouldRefreshBlobShadowGround(frameCount)) {
+      this._blobShadowGroundY = this._findGroundYForBlobShadow();
+    }
+
+    if (this._blobShadowGroundY === null) {
+      this._blobShadow.visible = false;
+      return;
+    }
+
+    const footY = this._getEntityFootWorldY();
+    const heightAboveGround = Math.max(0, footY - this._blobShadowGroundY);
+    if (heightAboveGround > BLOB_SHADOW_MAX_HEIGHT) {
+      this._blobShadow.visible = false;
+      return;
+    }
+
+    const opacity = BLOB_SHADOW_BASE_OPACITY * Math.max(0, 1 - (heightAboveGround / BLOB_SHADOW_MAX_HEIGHT));
+    if (opacity <= 0.01) {
+      this._blobShadow.visible = false;
+      return;
+    }
+
+    const radius = this._getBlobShadowBaseRadius();
+    const scale = Math.min(BLOB_SHADOW_MAX_SCALE, Math.max(BLOB_SHADOW_MIN_SCALE, radius * (1 + heightAboveGround * 0.05)));
+    (this._blobShadow.material as MeshBasicMaterial).opacity = opacity;
+    this._blobShadow.position.set(this._entityRoot.position.x, this._blobShadowGroundY + BLOB_SHADOW_Y_OFFSET, this._entityRoot.position.z);
+    this._blobShadow.scale.set(scale, scale, scale);
+    this._blobShadow.updateMatrix();
+    this._blobShadow.matrixWorld.copy(this._blobShadow.matrix);
+    this._blobShadow.visible = true;
   }
 
   private get isAttachmentTarget(): boolean {
@@ -2085,6 +2254,7 @@ export default class Entity {
     }
 
     this.removeFromScene();
+    this._clearBlobShadow();
 
     parentEntity.addModelReadyListener(this._parentModelReadyCallback, !!this._parentNodeName);
   }
@@ -2287,6 +2457,9 @@ export default class Entity {
   public updateWorldMatrices(needsLightLevelUpdateDetection: boolean): void {
     if (!this.visible) {
       // Do not update since it will not be visible anyway.
+      if (this._blobShadow) {
+        this._blobShadow.visible = false;
+      }
       return;
     }
 
@@ -2321,6 +2494,7 @@ export default class Entity {
       EntityStats.worldMatrixUpdateCount += updateCount;
     }
     this._needsMatrixWorldUpdate = false;
+    this._updateBlobShadow();
   }
 
   // Sixth update pass: Update light level
@@ -2848,6 +3022,7 @@ export default class Entity {
   }
 
   private _dispose(): void {
+    this._clearBlobShadow();
     this._clearGLTFResources();
 
     this._pendingCustomTextures.forEach(pendingCustomTexture => {

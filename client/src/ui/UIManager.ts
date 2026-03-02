@@ -162,9 +162,10 @@ export default class UIManager {
           html = html.replace(/\{\{CDN_ASSETS_URL\}\}/g, Assets.getCdnBaseUrl());
 
           this._uiDiv.innerHTML = html;
-          this._executeScripts(Array.from(this._uiDiv.getElementsByTagName('script')));
+          return this._executeScripts(Array.from(this._uiDiv.getElementsByTagName('script')));
+        })
+        .then(() => {
           this._uiDiv.style.display = 'block';
-          
           // Process any pending SceneUIs now that templates may be registered
           this._processPendingSceneUIs();
         });
@@ -191,8 +192,7 @@ export default class UIManager {
 
           this._uiDiv.appendChild(fragment);
           this._uiDiv.style.display = 'block';
-          this._executeScripts(scripts);
-          
+          await this._executeScripts(scripts);
           // Process any pending SceneUIs after each append now that templates may be registered
           this._processPendingSceneUIs();
         }
@@ -305,12 +305,32 @@ export default class UIManager {
     }
   }
 
-  private _executeScripts(scripts: HTMLScriptElement[]): void {
-    scripts.forEach(oldScript => {
+  private async _executeScripts(scripts: HTMLScriptElement[]): Promise<void> {
+    for (const oldScript of scripts) {
       const newScript = document.createElement('script');
-      Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-      newScript.textContent = `(function(){${oldScript.textContent}})();`;
+      const src = oldScript.getAttribute('src');
+      if (src) {
+        try {
+          const url = new URL(src, window.location.href).href;
+          const response = await fetch(url);
+          const text = await response.text();
+          const trimmed = text.trim();
+          if (!response.ok || trimmed.startsWith('<')) {
+            console.warn(`[UIManager] Skipping script (HTML or error response): ${url}`);
+            oldScript.remove();
+            continue;
+          }
+          newScript.textContent = `(function(){${text}})();`;
+        } catch (e) {
+          console.warn(`[UIManager] Failed to load script: ${src}`, e);
+          oldScript.remove();
+          continue;
+        }
+      } else {
+        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+        newScript.textContent = `(function(){${oldScript.textContent}})();`;
+      }
       oldScript.parentNode?.replaceChild(newScript, oldScript);
-    });
+    }
   }
 }

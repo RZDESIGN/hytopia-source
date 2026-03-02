@@ -429,6 +429,7 @@ export class SelectiveOutlinePass extends Pass {
       fragmentShader: MaskShader.fragmentShader,
       defines: {},
       depthTest: true,
+      transparent: false,
     });
 
     this._maskNoDepthMaterial = new ShaderMaterial({
@@ -437,6 +438,7 @@ export class SelectiveOutlinePass extends Pass {
       fragmentShader: MaskNoDepthShader.fragmentShader,
       defines: {},
       depthTest: true,
+      transparent: false,
     });
 
     this._outlineMaterial = new ShaderMaterial({
@@ -444,6 +446,7 @@ export class SelectiveOutlinePass extends Pass {
       vertexShader: OutlineShader.vertexShader,
       fragmentShader: OutlineShader.fragmentShader,
       blending: NoBlending,
+      transparent: false,
     });
 
     this._fsQuad = new FullScreenQuad(this._outlineMaterial);

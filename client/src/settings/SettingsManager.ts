@@ -17,6 +17,9 @@ export const enum DistantBlockViewMode {
 
 type QualityPerfTradeoff = {
   antialias: boolean,
+  blobShadows?: {
+    enabled: boolean;
+  },
   resolution: {
     multiplier: number,
   },
@@ -57,6 +60,9 @@ export type ClientSettings = {
 export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   ULTRA: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 2.0 },
     viewDistance: {
       enabled: true,
@@ -71,6 +77,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   },
   HIGH: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 1.5 },
     viewDistance: {
       enabled: true,
@@ -85,6 +94,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   },
   MEDIUM: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 1.0 },
     viewDistance: {
       enabled: true,
@@ -108,6 +120,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     // always true. Once the root cause of the crash is resolved, we can revisit the option
     // of setting antialias to false.
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 0.85 },
     viewDistance: {
       enabled: true,
@@ -123,6 +138,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   },
   POWER_SAVING: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 0.5 },
     viewDistance: {
       enabled: true,

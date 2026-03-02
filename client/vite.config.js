@@ -24,11 +24,19 @@ const copyBasisFilesPlugin = () => ({
   }
 });
 
+const assetProxyTarget = process.env.VITE_ASSET_PROXY_TARGET;
+
 export default {
   server: {
     watch: {
       usePolling: true
-    }
+    },
+    ...(assetProxyTarget && {
+      proxy: {
+        '/blocks': { target: assetProxyTarget, changeOrigin: true, secure: true },
+        '/assets': { target: assetProxyTarget, changeOrigin: true, secure: true },
+      },
+    }),
   },
   define: {
     'import.meta.env.VITE_VERCEL_ENV': JSON.stringify(process.env.VERCEL_ENV),
