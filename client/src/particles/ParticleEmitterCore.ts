@@ -270,7 +270,6 @@ class ParticlesMaterial extends ShaderMaterial {
         }
       `,
       side: FrontSide,
-      transparent: false,
     });
   }
 

@@ -438,7 +438,7 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
       name: pbrMaterial.name,
       opacity: pbrMaterial.opacity,
       side: pbrMaterial.side,
-      transparent: Boolean(pbrMaterial.transparent),
+      transparent: pbrMaterial.transparent,
       userData: pbrMaterial.userData,
       visible: pbrMaterial.visible,
     });

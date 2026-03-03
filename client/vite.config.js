@@ -1,7 +1,6 @@
 import { copyFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { loadEnv } from 'vite';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -25,44 +24,23 @@ const copyBasisFilesPlugin = () => ({
   }
 });
 
-export default ({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const assetProxyTarget = env.VITE_ASSET_PROXY_TARGET || process.env.VITE_ASSET_PROXY_TARGET;
-
-  let proxySecure = true;
-  if (assetProxyTarget) {
-    try {
-      const parsedTarget = new URL(assetProxyTarget);
-      proxySecure = parsedTarget.hostname !== 'localhost' && parsedTarget.hostname !== '127.0.0.1';
-    } catch {
-      proxySecure = true;
+export default {
+  server: {
+    watch: {
+      usePolling: true
     }
-  }
-
-  return {
-    server: {
-      watch: {
-        usePolling: true
-      },
-      ...(assetProxyTarget && {
-        proxy: {
-          '/blocks': { target: assetProxyTarget, changeOrigin: true, secure: proxySecure },
-          '/assets': { target: assetProxyTarget, changeOrigin: true, secure: proxySecure },
-        },
-      }),
-    },
-    define: {
-      'import.meta.env.VITE_VERCEL_ENV': JSON.stringify(process.env.VERCEL_ENV),
-      'import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA),
-    },
-    build: {
-      sourcemap: true
-    },
-    worker: {
-      format: 'es'
-    },
-    plugins: [
-      copyBasisFilesPlugin(),
-    ]
-  };
+  },
+  define: {
+    'import.meta.env.VITE_VERCEL_ENV': JSON.stringify(process.env.VERCEL_ENV),
+    'import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA),
+  },
+  build: {
+    sourcemap: true
+  },
+  worker: {
+    format: 'es'
+  },
+  plugins: [
+    copyBasisFilesPlugin(),
+  ]
 };

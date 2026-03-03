@@ -18,16 +18,6 @@ export default class Assets {
   public static readonly gltfLoader: GLTFLoader = new GLTFLoader().setKTX2Loader(Assets.ktx2Loader);
 
   public static getCdnBaseUrl(): string {
-    // When running the client on localhost, set VITE_ASSET_PROXY_TARGET to your game server URL
-    // (e.g. https://prod.cdn.hytopia.com or https://localhost:8080). Asset requests then use
-    // same-origin and are proxied by Vite, avoiding CDN 403/CORS when testing against remote servers.
-    if (
-      typeof window !== 'undefined' &&
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
-      import.meta.env.VITE_ASSET_PROXY_TARGET
-    ) {
-      return window.location.origin;
-    }
     return `https://${Game.instance.networkManager.serverHostname}`;
   }
 

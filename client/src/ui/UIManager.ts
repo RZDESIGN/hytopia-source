@@ -162,10 +162,9 @@ export default class UIManager {
           html = html.replace(/\{\{CDN_ASSETS_URL\}\}/g, Assets.getCdnBaseUrl());
 
           this._uiDiv.innerHTML = html;
-          return this._executeScripts(Array.from(this._uiDiv.getElementsByTagName('script')));
-        })
-        .then(() => {
+          this._executeScripts(Array.from(this._uiDiv.getElementsByTagName('script')));
           this._uiDiv.style.display = 'block';
+          
           // Process any pending SceneUIs now that templates may be registered
           this._processPendingSceneUIs();
         });
@@ -192,7 +191,8 @@ export default class UIManager {
 
           this._uiDiv.appendChild(fragment);
           this._uiDiv.style.display = 'block';
-          await this._executeScripts(scripts);
+          this._executeScripts(scripts);
+          
           // Process any pending SceneUIs after each append now that templates may be registered
           this._processPendingSceneUIs();
         }
@@ -305,28 +305,12 @@ export default class UIManager {
     }
   }
 
-  private async _executeScripts(scripts: HTMLScriptElement[]): Promise<void> {
-    for (const oldScript of scripts) {
+  private _executeScripts(scripts: HTMLScriptElement[]): void {
+    scripts.forEach(oldScript => {
       const newScript = document.createElement('script');
       Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-
-      const src = oldScript.getAttribute('src');
-      if (!src) {
-        newScript.textContent = oldScript.textContent;
-        oldScript.parentNode?.replaceChild(newScript, oldScript);
-        continue;
-      }
-
-      const completion = new Promise<void>(resolve => {
-        newScript.onload = () => resolve();
-        newScript.onerror = () => {
-          console.warn(`[UIManager] Failed to load script: ${src}`);
-          resolve();
-        };
-      });
-
+      newScript.textContent = `(function(){${oldScript.textContent}})();`;
       oldScript.parentNode?.replaceChild(newScript, oldScript);
-      await completion;
-    }
+    });
   }
 }

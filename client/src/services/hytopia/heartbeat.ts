@@ -1,3 +1,5 @@
+import { HYTOPIAClient } from '@hytopia.com/lib';
+
 // @mchmatt WIP: should probably be integrated in the game itself instead (and reworked to use WS instead of polling)
 /**
  * Matchmaking relies on these heartbeats to be able to drop players out of
@@ -8,32 +10,6 @@
 const HEARTBEAT_RETRY_DELAY_MS = 3000;
 const HEARTBEAT_INTERVAL_MS = 60000;
 
-type HeartbeatResponse = {
-  error?: {
-    code: string;
-  };
-};
-
-async function sendLobbyHeartbeat(gatewayEndpoint: string, authToken: string, lobbyId: string): Promise<HeartbeatResponse> {
-  try {
-    const response = await fetch(`${gatewayEndpoint}/play/matchmaking/lobbies/heartbeat`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ authToken, lobbyId }),
-    });
-
-    if (!response.ok) {
-      return { error: { code: `http_${response.status}` } };
-    }
-
-    return await response.json();
-  } catch {
-    return { error: { code: 'networkError' } };
-  }
-}
-
 function start() {
   console.log('Starting HYTOPIA heartbeat');
 
@@ -41,7 +17,7 @@ function start() {
   const authToken = params.get('sessionToken');
   const lobbyId = params.get('lobbyId');
   const providedGatewayEndpoint = params.get('gatewayEndpoint');
-  const gatewayEndpoint = providedGatewayEndpoint ? decodeURIComponent(providedGatewayEndpoint) : 'https://prod.mvp.hytopia.com';
+  const gateway = new HYTOPIAClient(providedGatewayEndpoint ? decodeURIComponent(providedGatewayEndpoint) : 'https://prod.mvp.hytopia.com');
 
   if (!authToken) {
     console.warn(`Couldn't find HYTOPIA auth token in query params - you are likely connected to a dev server, in which case you can ignore this.`);
@@ -55,7 +31,7 @@ function start() {
 
   const heartbeatPoll = async () => {
     while (true) {
-      const response = await sendLobbyHeartbeat(gatewayEndpoint, authToken, lobbyId);
+      const response = await gateway.play.matchmaking.lobbies.heartbeat({ authToken, lobbyId });
 
       if (!response.error) {
         await new Promise(resolve => setTimeout(resolve, HEARTBEAT_INTERVAL_MS));
