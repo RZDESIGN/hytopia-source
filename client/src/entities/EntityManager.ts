@@ -70,6 +70,8 @@ const LOCAL_PREDICTION_ROTATION_SNAP_ANGLE = 1.2;
 const LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE = 4;
 const LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE = 12;
 const LOCAL_PREDICTION_COMMAND_BUFFER_SIZE = 96;
+const LOCAL_PREDICTION_PRE_ACK_RECONCILE_GRACE_S = 0.2;
+const LOCAL_PREDICTION_ACK_SUPPORT_DETECTION_TIMEOUT_S = 2.0;
 const INPUT_MANAGER_MOVEMENT_PACKET_SENT_EVENT = 'INPUT_MANAGER.MOVEMENT_PACKET_SENT';
 
 type LocalPredictionCommand = {
@@ -120,6 +122,9 @@ type LocalPredictionState = {
   commandBufferHead: number;
   commandBufferCount: number;
   lastAcknowledgedInputSequenceNumber: number;
+  preAckReconcileGraceRemainingS: number;
+  ackSupportDetectionElapsedS: number;
+  shouldBufferCommandsBeforeAck: boolean;
 };
 
 export default class EntityManager {
@@ -165,6 +170,9 @@ export default class EntityManager {
     commandBufferHead: 0,
     commandBufferCount: 0,
     lastAcknowledgedInputSequenceNumber: -1,
+    preAckReconcileGraceRemainingS: 0,
+    ackSupportDetectionElapsedS: 0,
+    shouldBufferCommandsBeforeAck: true,
   };
   private _shouldSuppressEnvironmentAnimations: boolean;
 
@@ -634,6 +642,9 @@ export default class EntityManager {
     this._localPredictionState.commandBufferHead = 0;
     this._localPredictionState.commandBufferCount = 0;
     this._localPredictionState.lastAcknowledgedInputSequenceNumber = -1;
+    this._localPredictionState.preAckReconcileGraceRemainingS = 0;
+    this._localPredictionState.ackSupportDetectionElapsedS = 0;
+    this._localPredictionState.shouldBufferCommandsBeforeAck = true;
   }
 
   private _setLocalAuthoritativePosition(position: { x: number; y: number; z: number }, serverTick: number): void {
@@ -705,6 +716,9 @@ export default class EntityManager {
 
   private _setLocalAcknowledgedInputSequenceNumber(acknowledgedInputSequenceNumber: number): void {
     this._localPredictionState.supportsInputAcknowledgements = true;
+    this._localPredictionState.shouldBufferCommandsBeforeAck = true;
+    this._localPredictionState.ackSupportDetectionElapsedS = 0;
+    this._localPredictionState.preAckReconcileGraceRemainingS = 0;
 
     if (acknowledgedInputSequenceNumber <= this._localPredictionState.lastAcknowledgedInputSequenceNumber) {
       return;
@@ -779,11 +793,14 @@ export default class EntityManager {
       return;
     }
 
-    if (!this._localPredictionState.supportsInputAcknowledgements) {
+    if (!this._entities.has(this._localPredictionState.entityId)) {
       return;
     }
 
-    if (!this._entities.has(this._localPredictionState.entityId)) {
+    if (
+      !this._localPredictionState.supportsInputAcknowledgements &&
+      !this._localPredictionState.shouldBufferCommandsBeforeAck
+    ) {
       return;
     }
 
@@ -813,6 +830,18 @@ export default class EntityManager {
     command.sh = payload.sh;
 
     this._localPredictionState.commandBufferCount++;
+
+    if (!this._localPredictionState.supportsInputAcknowledgements) {
+      this._localPredictionState.preAckReconcileGraceRemainingS = LOCAL_PREDICTION_PRE_ACK_RECONCILE_GRACE_S;
+      this._localPredictionState.ackSupportDetectionElapsedS += payload.deltaTimeS;
+
+      if (this._localPredictionState.ackSupportDetectionElapsedS >= LOCAL_PREDICTION_ACK_SUPPORT_DETECTION_TIMEOUT_S) {
+        this._localPredictionState.shouldBufferCommandsBeforeAck = false;
+        this._localPredictionState.commandBufferHead = 0;
+        this._localPredictionState.commandBufferCount = 0;
+        this._localPredictionState.preAckReconcileGraceRemainingS = 0;
+      }
+    }
   }
 
   private _applyLocalPrediction(entity: Entity, deltaTimeS: number): void {
@@ -855,7 +884,30 @@ export default class EntityManager {
       substeps++;
     }
 
-    this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
+    if (
+      !this._localPredictionState.supportsInputAcknowledgements &&
+      this._localPredictionState.preAckReconcileGraceRemainingS > 0
+    ) {
+      this._localPredictionState.preAckReconcileGraceRemainingS = Math.max(
+        0,
+        this._localPredictionState.preAckReconcileGraceRemainingS - clampedDeltaS,
+      );
+    }
+
+    // When ack replay is active, avoid pulling toward delayed authoritative state
+    // while there are pending commands. Before first ack, apply a short grace window
+    // to reduce start-of-movement tug while still preserving a smooth fallback.
+    const shouldContinuouslyReconcile =
+      this._localPredictionState.supportsInputAcknowledgements
+        ? this._localPredictionState.commandBufferCount === 0
+        : (
+          this._localPredictionState.commandBufferCount === 0 ||
+          this._localPredictionState.preAckReconcileGraceRemainingS <= 0
+        );
+
+    if (shouldContinuouslyReconcile) {
+      this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
+    }
 
     entity.applyClientPredictedTransform(
       this._localPredictionState.predictedPosition,
