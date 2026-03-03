@@ -113,6 +113,7 @@ type LocalPredictionState = {
   lastAcknowledgedMovementRunning?: boolean;
   lastAcknowledgedMovementDirectionX?: number;
   lastAcknowledgedMovementDirectionZ?: number;
+  pendingSpeedCalibrationAcknowledgedInputSequenceNumber?: number;
   hasPredictedTransform: boolean;
   hasAuthoritativePosition: boolean;
   hasAuthoritativeRotation: boolean;
@@ -151,6 +152,7 @@ export default class EntityManager {
     lastAcknowledgedMovementRunning: undefined,
     lastAcknowledgedMovementDirectionX: undefined,
     lastAcknowledgedMovementDirectionZ: undefined,
+    pendingSpeedCalibrationAcknowledgedInputSequenceNumber: undefined,
     hasPredictedTransform: false,
     hasAuthoritativePosition: false,
     hasAuthoritativeRotation: false,
@@ -634,6 +636,7 @@ export default class EntityManager {
     this._localPredictionState.lastAcknowledgedMovementRunning = undefined;
     this._localPredictionState.lastAcknowledgedMovementDirectionX = undefined;
     this._localPredictionState.lastAcknowledgedMovementDirectionZ = undefined;
+    this._localPredictionState.pendingSpeedCalibrationAcknowledgedInputSequenceNumber = undefined;
     this._localPredictionState.hasPredictedTransform = false;
     this._localPredictionState.hasAuthoritativePosition = false;
     this._localPredictionState.hasAuthoritativeRotation = false;
@@ -672,10 +675,21 @@ export default class EntityManager {
         const dz = position.z - previousAuthoritativePositionZ;
         const sampledHorizontalSpeed = Math.sqrt((dx * dx) + (dz * dz)) / sampledDeltaTimeS;
         const sampledVerticalVelocity = dy / sampledDeltaTimeS;
+        // Only let walk/run speed adapt from the first position delta after a newly
+        // acknowledged movement command. This avoids learning platform/impulse motion.
+        const calibrationAcknowledgedInputSequenceNumber =
+          this._localPredictionState.pendingSpeedCalibrationAcknowledgedInputSequenceNumber;
+        this._localPredictionState.pendingSpeedCalibrationAcknowledgedInputSequenceNumber = undefined;
 
         this._updateLocalPredictionVerticalVelocityEstimate(sampledVerticalVelocity);
 
-        this._updateLocalPredictionSpeedEstimate(sampledHorizontalSpeed, dx, dy, dz);
+        this._updateLocalPredictionSpeedEstimate(
+          sampledHorizontalSpeed,
+          dx,
+          dy,
+          dz,
+          calibrationAcknowledgedInputSequenceNumber,
+        );
       }
     }
 
@@ -736,6 +750,13 @@ export default class EntityManager {
       );
     this._localPredictionState.lastAcknowledgedMovementRunning = lastAcknowledgedCommand?.sh;
     this._setLastAcknowledgedMovementDirection(lastAcknowledgedCommand);
+    const hasAcknowledgedMovementDirection =
+      this._localPredictionState.lastAcknowledgedMovementDirectionX !== undefined &&
+      this._localPredictionState.lastAcknowledgedMovementDirectionZ !== undefined;
+    this._localPredictionState.pendingSpeedCalibrationAcknowledgedInputSequenceNumber =
+      this._localPredictionState.lastAcknowledgedHadMovementInput && hasAcknowledgedMovementDirection
+        ? acknowledgedInputSequenceNumber
+        : undefined;
     this._rebuildPredictedStateFromAuthoritativeAndReplay();
   }
 
@@ -1026,7 +1047,12 @@ export default class EntityManager {
     dx: number,
     dy: number,
     dz: number,
+    calibrationAcknowledgedInputSequenceNumber?: number,
   ): void {
+    if (calibrationAcknowledgedInputSequenceNumber === undefined) {
+      return;
+    }
+
     if (
       !this._localPredictionState.supportsInputAcknowledgements ||
       !this._localPredictionState.lastAcknowledgedHadMovementInput
