@@ -270,6 +270,9 @@ export default class Entity {
   private _clientColorCorrection: Color | null = null;
   private _blobShadow: Mesh | null = null;
   private _blobShadowGroundY: number | null = null;
+  private _blobShadowProbeX: number | null = null;
+  private _blobShadowProbeY: number | null = null;
+  private _blobShadowProbeZ: number | null = null;
   private _localBoundingBox: Box3 | null = null;
   private _worldBoundingBox: Box3 | null = null;
   protected _globalCoordinate: Vector3LikeMutable;
@@ -538,15 +541,36 @@ export default class Entity {
     this._game.renderer.addToScene(shadow);
   }
 
-  private _clearBlobShadow(): void {
+  private _hideBlobShadow(resetProbeState: boolean): void {
+    if (this._blobShadow) {
+      this._blobShadow.visible = false;
+    }
+    if (resetProbeState) {
+      this._blobShadowProbeX = null;
+      this._blobShadowProbeY = null;
+      this._blobShadowProbeZ = null;
+      this._blobShadowGroundY = null;
+    }
+  }
+
+  private _disposeBlobShadow(): void {
     if (!this._blobShadow) {
+      this._hideBlobShadow(true);
       return;
     }
 
     this._blobShadow.removeFromParent();
-    this._blobShadow.material.dispose();
+    const material = this._blobShadow.material;
+    if (Array.isArray(material)) {
+      material.forEach(m => m.dispose());
+    } else {
+      material.dispose();
+    }
     this._blobShadow = null;
     this._blobShadowGroundY = null;
+    this._blobShadowProbeX = null;
+    this._blobShadowProbeY = null;
+    this._blobShadowProbeZ = null;
   }
 
   private _getBlobShadowBaseRadius(): number {
@@ -608,18 +632,19 @@ export default class Entity {
 
   private _shouldRefreshBlobShadowGround(frameCount: number): boolean {
     if (this._distanceToCameraSquared <= NEAR_DISTANCE_SQUARED) {
-      return true;
+      return (frameCount + this._id) % 2 === 0;
     }
 
-    const interval = this._distanceToCameraSquared < 128 * 128 ? 2
+    const interval = this._distanceToCameraSquared <= 128 * 128 ? 3
       : this._distanceToCameraSquared < 256 * 256 ? 4
       : 8;
     return (frameCount + this._id) % interval === 0;
   }
 
   private _updateBlobShadow(): void {
-    if (!this._areBlobShadowsEnabled() || !this.visible || this._attached) {
-      this._clearBlobShadow();
+    const blobShadowsEnabled = this._areBlobShadowsEnabled();
+    if (!blobShadowsEnabled || !this.visible || this._attached) {
+      this._hideBlobShadow(!blobShadowsEnabled);
       return;
     }
 
@@ -629,8 +654,19 @@ export default class Entity {
       return;
     }
 
+    const footY = this._getEntityFootWorldY();
+    const probeX = Math.floor(this._entityRoot.position.x);
+    const probeY = Math.floor(footY);
+    const probeZ = Math.floor(this._entityRoot.position.z);
+    const movedToNewProbeCell = this._blobShadowProbeX !== probeX
+      || this._blobShadowProbeY !== probeY
+      || this._blobShadowProbeZ !== probeZ;
+
     const frameCount = this._game.performanceMetricsManager.frameCount;
-    if (this._blobShadowGroundY === null || this._shouldRefreshBlobShadowGround(frameCount)) {
+    if (this._blobShadowGroundY === null || movedToNewProbeCell || this._shouldRefreshBlobShadowGround(frameCount)) {
+      this._blobShadowProbeX = probeX;
+      this._blobShadowProbeY = probeY;
+      this._blobShadowProbeZ = probeZ;
       this._blobShadowGroundY = this._findGroundYForBlobShadow();
     }
 
@@ -639,7 +675,6 @@ export default class Entity {
       return;
     }
 
-    const footY = this._getEntityFootWorldY();
     const heightAboveGround = Math.max(0, footY - this._blobShadowGroundY);
     if (heightAboveGround > BLOB_SHADOW_MAX_HEIGHT) {
       this._blobShadow.visible = false;
@@ -2254,7 +2289,7 @@ export default class Entity {
     }
 
     this.removeFromScene();
-    this._clearBlobShadow();
+    this._hideBlobShadow(true);
 
     parentEntity.addModelReadyListener(this._parentModelReadyCallback, !!this._parentNodeName);
   }
@@ -3022,7 +3057,7 @@ export default class Entity {
   }
 
   private _dispose(): void {
-    this._clearBlobShadow();
+    this._disposeBlobShadow();
     this._clearGLTFResources();
 
     this._pendingCustomTextures.forEach(pendingCustomTexture => {

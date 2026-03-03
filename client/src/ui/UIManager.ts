@@ -308,29 +308,25 @@ export default class UIManager {
   private async _executeScripts(scripts: HTMLScriptElement[]): Promise<void> {
     for (const oldScript of scripts) {
       const newScript = document.createElement('script');
+      Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+
       const src = oldScript.getAttribute('src');
-      if (src) {
-        try {
-          const url = new URL(src, window.location.href).href;
-          const response = await fetch(url);
-          const text = await response.text();
-          const trimmed = text.trim();
-          if (!response.ok || trimmed.startsWith('<')) {
-            console.warn(`[UIManager] Skipping script (HTML or error response): ${url}`);
-            oldScript.remove();
-            continue;
-          }
-          newScript.textContent = `(function(){${text}})();`;
-        } catch (e) {
-          console.warn(`[UIManager] Failed to load script: ${src}`, e);
-          oldScript.remove();
-          continue;
-        }
-      } else {
-        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-        newScript.textContent = `(function(){${oldScript.textContent}})();`;
+      if (!src) {
+        newScript.textContent = oldScript.textContent;
+        oldScript.parentNode?.replaceChild(newScript, oldScript);
+        continue;
       }
+
+      const completion = new Promise<void>(resolve => {
+        newScript.onload = () => resolve();
+        newScript.onerror = () => {
+          console.warn(`[UIManager] Failed to load script: ${src}`);
+          resolve();
+        };
+      });
+
       oldScript.parentNode?.replaceChild(newScript, oldScript);
+      await completion;
     }
   }
 }

@@ -121,7 +121,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     // of setting antialias to false.
     antialias: true,
     blobShadows: {
-      enabled: true,
+      enabled: false,
     },
     resolution: { multiplier: 0.85 },
     viewDistance: {
@@ -139,7 +139,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   POWER_SAVING: {
     antialias: true,
     blobShadows: {
-      enabled: true,
+      enabled: false,
     },
     resolution: { multiplier: 0.5 },
     viewDistance: {
