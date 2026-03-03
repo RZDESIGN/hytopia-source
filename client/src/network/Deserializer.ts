@@ -89,6 +89,7 @@ export type DeserializedChunk = {
 export type DeserializedChunks = DeserializedChunk[];
 
 export type DeserializedEntity = {
+  acknowledgedInputSequenceNumber?: number;
   id: number;
   blockTextureUri?: string;
   blockHalfExtents?: THREE.Vector3Like;
@@ -381,7 +382,10 @@ export default class Deserializer {
   }
 
   public static deserializeEntity(entity: protocol.EntitySchema): DeserializedEntity {
+    const entityWithInputAck = entity as protocol.EntitySchema & { aq?: number };
+
     return {
+      acknowledgedInputSequenceNumber: entityWithInputAck.aq,
       id: entity.i,
       blockTextureUri: entity.bt,
       blockHalfExtents: entity.bh ? this.deserializeVector(entity.bh) : undefined,

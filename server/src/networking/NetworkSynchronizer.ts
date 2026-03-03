@@ -39,6 +39,11 @@ import type Vector3Like from '@/shared/types/math/Vector3Like';
 
 const DEFAULT_NETWORK_SYNC_RATE = 30;
 const TICKS_PER_NETWORK_SYNC = Math.round(DEFAULT_TICK_RATE / DEFAULT_NETWORK_SYNC_RATE); // eg 60hz / 30hz = 2 tick syncs
+const PROTOCOL_ENTITY_SCHEMA = (protocol as unknown as { entitySchema?: { properties?: Record<string, unknown> } }).entitySchema;
+const PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK = Object.prototype.hasOwnProperty.call(
+  PROTOCOL_ENTITY_SCHEMA?.properties ?? {},
+  'aq',
+);
 
 type SyncQueue<TId, TSchema extends object | null> = {
   broadcast: IterationMap<TId, TSchema>;
@@ -150,6 +155,7 @@ export default class NetworkSynchronizer {
      */
 
     const currentTick = this._world.loop.currentTick;
+    this._queuePlayerInputAcknowledgements();
 
     // 1. entities
     /**
@@ -1556,6 +1562,30 @@ export default class NetworkSynchronizer {
   
     if (entity && modelUri) {
       this._createOrGetQueuedEntitySync(entity, playerCamera.player).m = modelUri;
+    }
+  }
+
+  private _queuePlayerInputAcknowledgements(): void {
+    if (!PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK) {
+      return;
+    }
+
+    for (const playerEntity of this._world.entityManager.getAllPlayerEntities()) {
+      if (!playerEntity.isSpawned || playerEntity.id === undefined) {
+        continue;
+      }
+
+      if (playerEntity.player.world !== this._world) {
+        continue;
+      }
+
+      const acknowledgedInputSequence = playerEntity.player.lastAppliedInputSequenceNumber;
+      if (acknowledgedInputSequence === undefined) {
+        continue;
+      }
+
+      const entitySync = this._createOrGetQueuedEntitySync(playerEntity, playerEntity.player);
+      (entitySync as protocol.EntitySchema & { aq?: number }).aq = acknowledgedInputSequence;
     }
   }
 }

@@ -30,6 +30,12 @@ const packr = new Packr({ useFloat32: FLOAT32_OPTIONS.ALWAYS });
 
 const HEARTBEAT_INTERVAL_MS = 5000;
 let heartbeatReported = false;
+const SEQUENCED_MOVEMENT_INPUT_KEYS = new Set([
+  'w', 'a', 's', 'd',
+  'sp', 'sh', 'c',
+  'jd',
+]);
+const UNSEQUENCED_UNRELIABLE_INPUT_KEYS = new Set([ 'cp', 'cy' ]);
 
 type ServerFeatures = {
   supportsSceneInteract?: boolean;
@@ -185,25 +191,30 @@ export default class NetworkManager {
     return patch >= patchMin;
   }
 
-  public sendInputPacket(changedInputState: Record<string, any>): void {
-    let reliable = false;
+  public sendInputPacket(changedInputState: Record<string, any>, reliableOverride?: boolean): number | undefined {
+    let hasSequencedMovementInput = false;
+    let hasReliableNonMovementInput = false;
 
-    // If the input includes anything other than camera movements or joystick direction, send reliably
-    // Exception: jd=null (joystick stop movement) must be reliable to not risk it being dropped
     for (const key in changedInputState) {
-      if (key !== 'cp' && key !== 'cy' && (key !== 'jd' || changedInputState[key] === null)) {
-        reliable = true;
-        break;
+      if (SEQUENCED_MOVEMENT_INPUT_KEYS.has(key)) {
+        hasSequencedMovementInput = true;
+      } else if (!UNSEQUENCED_UNRELIABLE_INPUT_KEYS.has(key)) {
+        hasReliableNonMovementInput = true;
       }
     }
 
-    if (changedInputState.jd !== undefined) { // Only joystick packets need sequence numbers for ordering
-      changedInputState.sq = this._lastInputSequenceNumber;
+    let sequenceNumber: number | undefined;
+    if (hasSequencedMovementInput) {
+      sequenceNumber = this._lastInputSequenceNumber++;
+      changedInputState.sq = sequenceNumber;
     }
 
+    // Movement snapshots are sent unreliably for low latency.
+    // Action/state packets stay reliable unless mixed with movement data.
+    const reliable = reliableOverride ?? hasReliableNonMovementInput;
     this.sendPacket(protocol.createPacket(protocol.inputPacketDefinition, changedInputState), reliable);
 
-    this._lastInputSequenceNumber++;
+    return sequenceNumber;
   }
 
   public sendChatMessagePacket(message: string): void {

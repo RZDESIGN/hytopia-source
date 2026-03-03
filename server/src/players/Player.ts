@@ -164,7 +164,10 @@ export default class Player extends EventRouter implements protocol.Serializable
   private _interactEnabled: boolean = true;
 
   /** @internal */
-  private _lastUnreliableInputSequenceNumber: number = 0;
+  private _lastUnreliableInputSequenceNumber: number = -1;
+
+  /** @internal */
+  private _lastAppliedInputSequenceNumber: number = -1;
 
   /** @internal */
   private _maxInteractDistance: number = 20;
@@ -223,6 +226,11 @@ export default class Player extends EventRouter implements protocol.Serializable
    * **Category:** Players
    */
   public get maxInteractDistance(): number { return this._maxInteractDistance; }
+
+  /** @internal */
+  public get lastAppliedInputSequenceNumber(): number | undefined {
+    return this._lastAppliedInputSequenceNumber >= 0 ? this._lastAppliedInputSequenceNumber : undefined;
+  }
 
   /**
    * The current `World` the player is in, or undefined if not yet joined.
@@ -378,7 +386,8 @@ export default class Player extends EventRouter implements protocol.Serializable
       return;
     }
 
-    this._lastUnreliableInputSequenceNumber = 0;
+    this._lastUnreliableInputSequenceNumber = -1;
+    this._lastAppliedInputSequenceNumber = -1;
 
     if (!this._worldSwitched) {
       this.emitWithWorld(this._world, PlayerEvent.RECONNECTED_WORLD, {
@@ -463,6 +472,13 @@ export default class Player extends EventRouter implements protocol.Serializable
   /** @internal */
   public serialize(): protocol.PlayerSchema {
     return Serializer.serializePlayer(this);
+  }
+
+  /** @internal */
+  public markInputAppliedForSimulation(): void {
+    if (this._lastUnreliableInputSequenceNumber >= 0) {
+      this._lastAppliedInputSequenceNumber = this._lastUnreliableInputSequenceNumber;
+    }
   }
 
   /** @internal */
