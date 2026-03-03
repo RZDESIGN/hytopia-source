@@ -47,14 +47,23 @@ const LOCAL_PREDICTION_MIN_SPEED = 0.2;
 const LOCAL_PREDICTION_MAX_SPEED = 20;
 const LOCAL_PREDICTION_SPEED_REJECT_THRESHOLD = 30;
 const LOCAL_PREDICTION_SPEED_ADAPT_RATE = 0.2;
+const LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT = 0.6;
+const LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD = 1.5;
 const LOCAL_PREDICTION_MAX_FRAME_DELTA_S = 1 / 10;
 const LOCAL_PREDICTION_SUBSTEP_DELTA_S = 1 / 60;
 const LOCAL_PREDICTION_MAX_SUBSTEPS = 6;
-const LOCAL_PREDICTION_MOVING_POSITION_ERROR_DEAD_ZONE_SQ = 0.6 * 0.6;
-const LOCAL_PREDICTION_IDLE_POSITION_ERROR_DEAD_ZONE_SQ = 0.08 * 0.08;
-const LOCAL_PREDICTION_POSITION_SNAP_DISTANCE_SQ = 2.5 * 2.5;
-const LOCAL_PREDICTION_MOVING_POSITION_CORRECTION_RATE = 3;
-const LOCAL_PREDICTION_IDLE_POSITION_CORRECTION_RATE = 12;
+const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.18 * 0.18;
+const LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.08 * 0.08;
+const LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ = 2.5 * 2.5;
+const LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE = 10;
+const LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE = 16;
+const LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE = 0.03;
+const LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE = 0.01;
+const LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE = 2.5;
+const LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE = 18;
+const LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE = 26;
+const LOCAL_PREDICTION_VERTICAL_VELOCITY_ADAPT_RATE = 0.35;
+const LOCAL_PREDICTION_VERTICAL_VELOCITY_REJECT_THRESHOLD = 80;
 const LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE = 0.5;
 const LOCAL_PREDICTION_IDLE_ROTATION_ERROR_DEAD_ZONE = 0.05;
 const LOCAL_PREDICTION_ROTATION_SNAP_ANGLE = 1.2;
@@ -93,12 +102,15 @@ type LocalPredictionState = {
   predictedRotation: Quaternion;
   authoritativePosition: Vector3;
   authoritativeRotation: Quaternion;
+  estimatedVerticalVelocity: number;
   estimatedWalkSpeed: number;
   estimatedRunSpeed: number;
   worldTimestepS: number;
   supportsInputAcknowledgements: boolean;
   lastAcknowledgedHadMovementInput?: boolean;
   lastAcknowledgedMovementRunning?: boolean;
+  lastAcknowledgedMovementDirectionX?: number;
+  lastAcknowledgedMovementDirectionZ?: number;
   hasPredictedTransform: boolean;
   hasAuthoritativePosition: boolean;
   hasAuthoritativeRotation: boolean;
@@ -125,12 +137,15 @@ export default class EntityManager {
     predictedRotation: new Quaternion(),
     authoritativePosition: new Vector3(),
     authoritativeRotation: new Quaternion(),
+    estimatedVerticalVelocity: 0,
     estimatedWalkSpeed: LOCAL_PREDICTION_DEFAULT_WALK_SPEED,
     estimatedRunSpeed: LOCAL_PREDICTION_DEFAULT_RUN_SPEED,
     worldTimestepS: 1 / 60,
     supportsInputAcknowledgements: false,
     lastAcknowledgedHadMovementInput: undefined,
     lastAcknowledgedMovementRunning: undefined,
+    lastAcknowledgedMovementDirectionX: undefined,
+    lastAcknowledgedMovementDirectionZ: undefined,
     hasPredictedTransform: false,
     hasAuthoritativePosition: false,
     hasAuthoritativeRotation: false,
@@ -603,11 +618,14 @@ export default class EntityManager {
 
   private _resetLocalPredictionState(nextEntityId?: number): void {
     this._localPredictionState.entityId = nextEntityId;
+    this._localPredictionState.estimatedVerticalVelocity = 0;
     this._localPredictionState.estimatedWalkSpeed = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
     this._localPredictionState.estimatedRunSpeed = LOCAL_PREDICTION_DEFAULT_RUN_SPEED;
     this._localPredictionState.supportsInputAcknowledgements = false;
     this._localPredictionState.lastAcknowledgedHadMovementInput = undefined;
     this._localPredictionState.lastAcknowledgedMovementRunning = undefined;
+    this._localPredictionState.lastAcknowledgedMovementDirectionX = undefined;
+    this._localPredictionState.lastAcknowledgedMovementDirectionZ = undefined;
     this._localPredictionState.hasPredictedTransform = false;
     this._localPredictionState.hasAuthoritativePosition = false;
     this._localPredictionState.hasAuthoritativeRotation = false;
@@ -625,6 +643,7 @@ export default class EntityManager {
 
     const previousPositionServerTick = this._localPredictionState.lastAuthoritativePositionServerTick;
     const previousAuthoritativePositionX = this._localPredictionState.authoritativePosition.x;
+    const previousAuthoritativePositionY = this._localPredictionState.authoritativePosition.y;
     const previousAuthoritativePositionZ = this._localPredictionState.authoritativePosition.z;
     const hadPreviousAuthoritativePosition = this._localPredictionState.hasAuthoritativePosition;
 
@@ -638,10 +657,14 @@ export default class EntityManager {
 
       if (sampledDeltaTimeS > 0) {
         const dx = position.x - previousAuthoritativePositionX;
+        const dy = position.y - previousAuthoritativePositionY;
         const dz = position.z - previousAuthoritativePositionZ;
         const sampledHorizontalSpeed = Math.sqrt((dx * dx) + (dz * dz)) / sampledDeltaTimeS;
+        const sampledVerticalVelocity = dy / sampledDeltaTimeS;
 
-        this._updateLocalPredictionSpeedEstimate(sampledHorizontalSpeed);
+        this._updateLocalPredictionVerticalVelocityEstimate(sampledVerticalVelocity);
+
+        this._updateLocalPredictionSpeedEstimate(sampledHorizontalSpeed, dx, dy, dz);
       }
     }
 
@@ -698,6 +721,7 @@ export default class EntityManager {
         typeof lastAcknowledgedCommand.joystickDirection === 'number'
       );
     this._localPredictionState.lastAcknowledgedMovementRunning = lastAcknowledgedCommand?.sh;
+    this._setLastAcknowledgedMovementDirection(lastAcknowledgedCommand);
     this._rebuildPredictedStateFromAuthoritativeAndReplay();
   }
 
@@ -814,6 +838,8 @@ export default class EntityManager {
 
     while (remainingDeltaS > 0 && substeps < LOCAL_PREDICTION_MAX_SUBSTEPS) {
       const stepDeltaS = Math.min(LOCAL_PREDICTION_SUBSTEP_DELTA_S, remainingDeltaS);
+
+      this._localPredictionState.predictedPosition.y += this._localPredictionState.estimatedVerticalVelocity * stepDeltaS;
       isActivelyMoving = this._applyPredictedMovementFromInputs(
         stepDeltaS,
         this._game.camera.gameCameraYaw,
@@ -887,7 +913,68 @@ export default class EntityManager {
     return true;
   }
 
-  private _updateLocalPredictionSpeedEstimate(sampledHorizontalSpeed: number): void {
+  private _setLastAcknowledgedMovementDirection(command?: LocalPredictionCommand): void {
+    this._localPredictionState.lastAcknowledgedMovementDirectionX = undefined;
+    this._localPredictionState.lastAcknowledgedMovementDirectionZ = undefined;
+
+    if (!command) {
+      return;
+    }
+
+    const movementDirection = fromVec2.set(0, 0);
+
+    if (typeof command.joystickDirection === 'number') {
+      const movementAngle = command.yaw + command.joystickDirection;
+      movementDirection.x = -Math.sin(movementAngle);
+      movementDirection.y = -Math.cos(movementAngle);
+    } else {
+      const sinYaw = Math.sin(command.yaw);
+      const cosYaw = Math.cos(command.yaw);
+
+      if (command.w) { movementDirection.x -= sinYaw; movementDirection.y -= cosYaw; }
+      if (command.s) { movementDirection.x += sinYaw; movementDirection.y += cosYaw; }
+      if (command.a) { movementDirection.x -= cosYaw; movementDirection.y += sinYaw; }
+      if (command.d) { movementDirection.x += cosYaw; movementDirection.y -= sinYaw; }
+
+      const movementLengthSq = movementDirection.lengthSq();
+      if (movementLengthSq > 1) {
+        movementDirection.multiplyScalar(1 / Math.sqrt(movementLengthSq));
+      }
+    }
+
+    const movementLengthSq = movementDirection.lengthSq();
+    if (movementLengthSq <= 0) {
+      return;
+    }
+
+    if (movementLengthSq !== 1) {
+      movementDirection.multiplyScalar(1 / Math.sqrt(movementLengthSq));
+    }
+
+    this._localPredictionState.lastAcknowledgedMovementDirectionX = movementDirection.x;
+    this._localPredictionState.lastAcknowledgedMovementDirectionZ = movementDirection.y;
+  }
+
+  private _updateLocalPredictionVerticalVelocityEstimate(sampledVerticalVelocity: number): void {
+    if (!Number.isFinite(sampledVerticalVelocity)) {
+      return;
+    }
+
+    if (Math.abs(sampledVerticalVelocity) > LOCAL_PREDICTION_VERTICAL_VELOCITY_REJECT_THRESHOLD) {
+      this._localPredictionState.estimatedVerticalVelocity = 0;
+      return;
+    }
+
+    this._localPredictionState.estimatedVerticalVelocity +=
+      (sampledVerticalVelocity - this._localPredictionState.estimatedVerticalVelocity) * LOCAL_PREDICTION_VERTICAL_VELOCITY_ADAPT_RATE;
+  }
+
+  private _updateLocalPredictionSpeedEstimate(
+    sampledHorizontalSpeed: number,
+    dx: number,
+    dy: number,
+    dz: number,
+  ): void {
     if (
       !this._localPredictionState.supportsInputAcknowledgements ||
       !this._localPredictionState.lastAcknowledgedHadMovementInput
@@ -903,9 +990,34 @@ export default class EntityManager {
       return;
     }
 
+    if (Math.abs(dy) > LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD) {
+      return;
+    }
+
+    const movementDirectionX = this._localPredictionState.lastAcknowledgedMovementDirectionX;
+    const movementDirectionZ = this._localPredictionState.lastAcknowledgedMovementDirectionZ;
+    if (movementDirectionX === undefined || movementDirectionZ === undefined) {
+      return;
+    }
+
+    const sampleHorizontalDistanceSq = (dx * dx) + (dz * dz);
+    if (sampleHorizontalDistanceSq <= 0) {
+      return;
+    }
+
+    const sampleHorizontalDistance = Math.sqrt(sampleHorizontalDistanceSq);
+    const sampledDirectionX = dx / sampleHorizontalDistance;
+    const sampledDirectionZ = dz / sampleHorizontalDistance;
+    const movementAlignmentDot =
+      (sampledDirectionX * movementDirectionX) +
+      (sampledDirectionZ * movementDirectionZ);
+
+    if (movementAlignmentDot < LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT) {
+      return;
+    }
+
     const clampedSampledSpeed = Math.min(sampledHorizontalSpeed, LOCAL_PREDICTION_MAX_SPEED);
-    const acknowledgedMovementRunning = this._localPredictionState.lastAcknowledgedMovementRunning;
-    const shouldUpdateRunSpeed = acknowledgedMovementRunning ?? !!this._game.inputManager.inputState.sh;
+    const shouldUpdateRunSpeed = !!this._localPredictionState.lastAcknowledgedMovementRunning;
 
     if (shouldUpdateRunSpeed) {
       this._localPredictionState.estimatedRunSpeed +=
@@ -931,20 +1043,45 @@ export default class EntityManager {
 
   private _reconcileLocalPrediction(isActivelyMoving: boolean, deltaTimeS: number): void {
     if (this._localPredictionState.hasAuthoritativePosition) {
-      const positionErrorSq = this._localPredictionState.predictedPosition.distanceToSquared(this._localPredictionState.authoritativePosition);
-      if (positionErrorSq > LOCAL_PREDICTION_POSITION_SNAP_DISTANCE_SQ) {
-        this._localPredictionState.predictedPosition.copy(this._localPredictionState.authoritativePosition);
-      } else {
-        const deadZoneSq = isActivelyMoving
-          ? LOCAL_PREDICTION_MOVING_POSITION_ERROR_DEAD_ZONE_SQ
-          : LOCAL_PREDICTION_IDLE_POSITION_ERROR_DEAD_ZONE_SQ;
+      const predictedPosition = this._localPredictionState.predictedPosition;
+      const authoritativePosition = this._localPredictionState.authoritativePosition;
+      const dx = authoritativePosition.x - predictedPosition.x;
+      const dz = authoritativePosition.z - predictedPosition.z;
+      const horizontalErrorSq = (dx * dx) + (dz * dz);
 
-        if (positionErrorSq > deadZoneSq) {
+      if (horizontalErrorSq > LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ) {
+        predictedPosition.x = authoritativePosition.x;
+        predictedPosition.z = authoritativePosition.z;
+      } else {
+        const horizontalDeadZoneSq = isActivelyMoving
+          ? LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ
+          : LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ;
+
+        if (horizontalErrorSq > horizontalDeadZoneSq) {
           const correctionT = Math.min(
             1,
-            deltaTimeS * (isActivelyMoving ? LOCAL_PREDICTION_MOVING_POSITION_CORRECTION_RATE : LOCAL_PREDICTION_IDLE_POSITION_CORRECTION_RATE),
+            deltaTimeS * (isActivelyMoving ? LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE : LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE),
           );
-          this._localPredictionState.predictedPosition.lerp(this._localPredictionState.authoritativePosition, correctionT);
+          predictedPosition.x += dx * correctionT;
+          predictedPosition.z += dz * correctionT;
+        }
+      }
+
+      const verticalError = authoritativePosition.y - predictedPosition.y;
+      const absVerticalError = Math.abs(verticalError);
+      if (absVerticalError > LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE) {
+        predictedPosition.y = authoritativePosition.y;
+      } else {
+        const verticalDeadZone = isActivelyMoving
+          ? LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE
+          : LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE;
+
+        if (absVerticalError > verticalDeadZone) {
+          const correctionT = Math.min(
+            1,
+            deltaTimeS * (isActivelyMoving ? LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE : LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE),
+          );
+          predictedPosition.y += verticalError * correctionT;
         }
       }
     }

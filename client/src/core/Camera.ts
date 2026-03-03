@@ -11,12 +11,17 @@ const MIN_ZOOM = 3.0;
 const MAX_ZOOM = 10.0;
 const INITIAL_ZOOM = 6.0;
 const CAMERA_LERP_TIME = 0.2;
+const CAMERA_COLLISION_RAYCAST_INTERVAL_S = 1 / 30;
+const CAMERA_COLLISION_RAYCAST_ORIGIN_DELTA_SQ_THRESHOLD = 0.1 * 0.1;
+const CAMERA_COLLISION_RAYCAST_DIRECTION_DOT_THRESHOLD = 0.9995;
+const CAMERA_COLLISION_RAYCAST_DISTANCE_DELTA_THRESHOLD = 0.1;
 
 // Working variables
 const vec2 = new Vector2();
 const vec3 = new Vector3();
 const vec3b = new Vector3();
 const vec3c = new Vector3();
+const vec3d = new Vector3();
 const modelViewEuler = new Euler(0, 0, 0, 'YXZ');
 const yawOnlyEuler = new Euler(0, 0, 0, 'YXZ');
 const entityYawEuler = new Euler(0, 0, 0, 'YXZ');
@@ -77,6 +82,12 @@ export default class Camera {
   private _gameCameraYaw: number = 0;
   private _gameCameraViewDir: Vector3 = new Vector3();
   private _gameCameraCollisionDistance: number = Infinity; // Current collision-adjusted distance
+  private _gameCameraCollisionTargetDistance: number = Infinity;
+  private _gameCameraCollisionRaycastHasSample: boolean = false;
+  private _gameCameraCollisionRaycastIntervalRemainingS: number = 0;
+  private _gameCameraCollisionRaycastDesiredDistance: number = 0;
+  private _gameCameraCollisionRaycastOrigin: Vector3 = new Vector3();
+  private _gameCameraCollisionRaycastDirection: Vector3 = new Vector3();
 
   private _spectatorCamera: PerspectiveCamera;
   private _spectatorCameraPitch: number = 0;
@@ -500,6 +511,67 @@ export default class Camera {
     }
   }
 
+  private _shouldSampleGameCameraCollision(
+    lookAtTarget: Vector3,
+    direction: Vector3,
+    desiredDistance: number,
+    frameDeltaS: number,
+  ): boolean {
+    this._gameCameraCollisionRaycastIntervalRemainingS = Math.max(
+      0,
+      this._gameCameraCollisionRaycastIntervalRemainingS - frameDeltaS,
+    );
+
+    if (!this._gameCameraCollisionRaycastHasSample) {
+      return true;
+    }
+
+    if (this._gameCameraCollisionRaycastIntervalRemainingS <= 0) {
+      return true;
+    }
+
+    if (
+      lookAtTarget.distanceToSquared(this._gameCameraCollisionRaycastOrigin)
+      > CAMERA_COLLISION_RAYCAST_ORIGIN_DELTA_SQ_THRESHOLD
+    ) {
+      return true;
+    }
+
+    if (
+      direction.dot(this._gameCameraCollisionRaycastDirection)
+      < CAMERA_COLLISION_RAYCAST_DIRECTION_DOT_THRESHOLD
+    ) {
+      return true;
+    }
+
+    return Math.abs(desiredDistance - this._gameCameraCollisionRaycastDesiredDistance)
+      > CAMERA_COLLISION_RAYCAST_DISTANCE_DELTA_THRESHOLD;
+  }
+
+  private _sampleGameCameraCollisionDistance(
+    lookAtTarget: Vector3,
+    direction: Vector3,
+    desiredDistance: number,
+  ): void {
+    this._raycaster.set(lookAtTarget, direction);
+    this._raycaster.far = desiredDistance;
+
+    let targetDistance = desiredDistance;
+    const intersects = this._raycaster.intersectObjects(this._game.chunkMeshManager.solidMeshesInScene, false);
+    if (intersects.length > 0) {
+      // Account for near plane so the camera frustum doesn't graze the block face.
+      const nearPadding = this._gameCamera.near + 0.1;
+      targetDistance = Math.max(0.5, intersects[0].distance - nearPadding);
+    }
+
+    this._gameCameraCollisionTargetDistance = targetDistance;
+    this._gameCameraCollisionRaycastOrigin.copy(lookAtTarget);
+    this._gameCameraCollisionRaycastDirection.copy(direction);
+    this._gameCameraCollisionRaycastDesiredDistance = desiredDistance;
+    this._gameCameraCollisionRaycastIntervalRemainingS = CAMERA_COLLISION_RAYCAST_INTERVAL_S;
+    this._gameCameraCollisionRaycastHasSample = true;
+  }
+
   private _updateGameCamera(frameDeltaS: number): void {
     if (!this._gameCameraAttachedEntity && !this._gameCameraAttachedPosition) {
       return console.warn(`Camera._updateGameCamera(): No camera attachment or position set for game camera.`);
@@ -512,7 +584,7 @@ export default class Camera {
 
     // Calculate look direction and orientation if we have a look target
     if (lookAtPosition) {
-      lookAtDirection = new Vector3().subVectors(attachedPosition, lookAtPosition).normalize();
+      lookAtDirection = vec3d.subVectors(attachedPosition, lookAtPosition).normalize();
 
       this._updateGameCameraOrientation(
         Math.asin(lookAtDirection.y),
@@ -583,7 +655,7 @@ export default class Camera {
     if (this._gameCameraMode === CameraMode.THIRD_PERSON) {
       const radius = this._gameCameraRadialZoom - 1;
       const heightOffset = 1.25;
-      const lookAtTarget = (lookAtPosition || attachedPosition).clone();
+      const lookAtTarget = vec3c.copy(lookAtPosition || attachedPosition);
       
       // Default +y 0.5 offset for better default player perspective for now.
       // Devs can adjust this with their own provided offset for gameCameraOffset in the sdk.
@@ -621,23 +693,18 @@ export default class Camera {
       const desiredDistance = this._gameCamera.position.distanceTo(lookAtTarget);
 
       if (this._gameCameraCollidesWithBlocks) {
-        this._raycaster.set(lookAtTarget, direction);
-        this._raycaster.far = desiredDistance;
-        
-        const collisionMeshes = this._game.chunkMeshManager.solidMeshesInScene;
-        // Determine target distance based on collision
-        let targetDistance = desiredDistance;
-        const intersects = this._raycaster.intersectObjects(collisionMeshes, false);
-        if (intersects.length > 0) {
-          // Account for near plane so the camera frustum doesn't graze the block face.
-          const nearPadding = this._gameCamera.near + 0.1;
-          targetDistance = Math.max(0.5, intersects[0].distance - nearPadding);
+        if (this._shouldSampleGameCameraCollision(lookAtTarget, direction, desiredDistance, frameDeltaS)) {
+          this._sampleGameCameraCollisionDistance(lookAtTarget, direction, desiredDistance);
         }
-        
+
+        if (!Number.isFinite(this._gameCameraCollisionDistance)) {
+          this._gameCameraCollisionDistance = this._gameCameraCollisionTargetDistance;
+        }
+
         // Smooth camera movement both in/out to reduce jarring jumps.
         const inSpeed = 20.0;  // Faster to avoid noticeable clipping.
         const outSpeed = 10.0; // Slower for smooth recovery.
-        const delta = targetDistance - this._gameCameraCollisionDistance;
+        const delta = this._gameCameraCollisionTargetDistance - this._gameCameraCollisionDistance;
         if (delta !== 0) {
           const maxStep = frameDeltaS * (delta < 0 ? inSpeed : outSpeed);
           const step = Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
@@ -654,6 +721,9 @@ export default class Camera {
       } else {
         // Reset collision distance when collision is disabled.
         this._gameCameraCollisionDistance = desiredDistance;
+        this._gameCameraCollisionTargetDistance = desiredDistance;
+        this._gameCameraCollisionRaycastHasSample = false;
+        this._gameCameraCollisionRaycastIntervalRemainingS = 0;
       }
 
       // Look at target - this maintains proper orientation
