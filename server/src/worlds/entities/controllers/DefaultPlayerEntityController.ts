@@ -7,6 +7,7 @@ import { EntityModelAnimationBlendMode, EntityModelAnimationLoopMode } from '@/w
 import ErrorHandler from '@/errors/ErrorHandler';
 import PlayerEntity from '@/worlds/entities/PlayerEntity';
 import BlockType from '@/worlds/blocks/BlockType';
+import { resolveDeterministicMovementDirection } from '@/worlds/entities/controllers/shared/DeterministicMovementCore';
 import type { PlayerInput } from '@/players/Player';
 import type { PlayerCameraOrientation } from '@/players/PlayerCamera';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
@@ -661,29 +662,17 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
       const velocity = !this.isSwimming 
         ? isFastMovement ? this.runVelocity : this.walkVelocity
         : isFastMovement ? this.swimFastVelocity : this.swimSlowVelocity;
-
-      if (hasJoystickInput) {
-        // Joystick movement: exact direction relative to camera (jd: 0=forward)
-        const movementAngle = yaw + jd;
-        this._reusableTargetVelocities.x = -velocity * Math.sin(movementAngle);
-        this._reusableTargetVelocities.z = -velocity * Math.cos(movementAngle);
-      } else {
-        // WASD movement: discrete directions relative to camera
-        const sinYaw = Math.sin(yaw);
-        const cosYaw = Math.cos(yaw);
-
-        if (w) { this._reusableTargetVelocities.x -= velocity * sinYaw; this._reusableTargetVelocities.z -= velocity * cosYaw; }
-        if (s) { this._reusableTargetVelocities.x += velocity * sinYaw; this._reusableTargetVelocities.z += velocity * cosYaw; }
-        if (a) { this._reusableTargetVelocities.x -= velocity * cosYaw; this._reusableTargetVelocities.z += velocity * sinYaw; }
-        if (d) { this._reusableTargetVelocities.x += velocity * cosYaw; this._reusableTargetVelocities.z -= velocity * sinYaw; }
-
-        // Normalize diagonal movement to prevent speed boost
-        const horizontalSpeed = Math.sqrt(this._reusableTargetVelocities.x * this._reusableTargetVelocities.x + this._reusableTargetVelocities.z * this._reusableTargetVelocities.z);
-        if (horizontalSpeed > velocity) {
-          const factor = velocity / horizontalSpeed;
-          this._reusableTargetVelocities.x *= factor;
-          this._reusableTargetVelocities.z *= factor;
-        }
+      const movementDirection = resolveDeterministicMovementDirection({
+        yaw,
+        joystickDirection: hasJoystickInput ? jd : null,
+        w: !!w,
+        a: !!a,
+        s: !!s,
+        d: !!d,
+      });
+      if (movementDirection.lengthSq > 0) {
+        this._reusableTargetVelocities.x = movementDirection.x * velocity;
+        this._reusableTargetVelocities.z = movementDirection.z * velocity;
       }
     }
 

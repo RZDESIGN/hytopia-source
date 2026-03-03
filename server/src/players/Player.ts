@@ -33,6 +33,33 @@ export const SUPPORTED_INPUTS = [
   'jd',                                             // Joystick direction (radians)
 ] as const satisfies readonly (keyof InputSchema)[];
 
+const SEQUENCED_MOVEMENT_INPUTS = [
+  'w',
+  'a',
+  's',
+  'd',
+  'sp',
+  'sh',
+  'c',
+  'jd',
+] as const satisfies readonly (keyof InputSchema)[];
+const SEQUENCED_MOVEMENT_INPUT_SET = new Set<string>(SEQUENCED_MOVEMENT_INPUTS);
+const MAX_QUEUED_SEQUENCED_MOVEMENT_COMMANDS = 64;
+
+type SequencedMovementInputCommand = {
+  sequenceNumber: number;
+  w: boolean;
+  a: boolean;
+  s: boolean;
+  d: boolean;
+  sp: boolean;
+  sh: boolean;
+  c: boolean;
+  jd: number | null;
+  cp?: number;
+  cy?: number;
+};
+
 /**
  * The input state of a `Player`.
  *
@@ -168,6 +195,9 @@ export default class Player extends EventRouter implements protocol.Serializable
 
   /** @internal */
   private _lastAppliedInputSequenceNumber: number = -1;
+
+  /** @internal */
+  private _queuedSequencedMovementInputs: SequencedMovementInputCommand[] = [];
 
   /** @internal */
   private _maxInteractDistance: number = 20;
@@ -388,6 +418,7 @@ export default class Player extends EventRouter implements protocol.Serializable
 
     this._lastUnreliableInputSequenceNumber = -1;
     this._lastAppliedInputSequenceNumber = -1;
+    this._queuedSequencedMovementInputs = [];
 
     if (!this._worldSwitched) {
       this.emitWithWorld(this._world, PlayerEvent.RECONNECTED_WORLD, {
@@ -414,6 +445,7 @@ export default class Player extends EventRouter implements protocol.Serializable
    */
   public resetInputs() {
     this._input = {};
+    this._queuedSequencedMovementInputs = [];
   }
 
   /**
@@ -476,9 +508,55 @@ export default class Player extends EventRouter implements protocol.Serializable
 
   /** @internal */
   public markInputAppliedForSimulation(): void {
-    if (this._lastUnreliableInputSequenceNumber >= 0) {
+    if (
+      this._queuedSequencedMovementInputs.length === 0 &&
+      this._lastUnreliableInputSequenceNumber >= 0
+    ) {
       this._lastAppliedInputSequenceNumber = this._lastUnreliableInputSequenceNumber;
     }
+  }
+
+  /** @internal */
+  public applyQueuedInputForSimulation(): void {
+    if (this._queuedSequencedMovementInputs.length === 0) {
+      this.markInputAppliedForSimulation();
+      return;
+    }
+
+    let sawJumpPressed = false;
+    for (let i = 0; i < this._queuedSequencedMovementInputs.length; i++) {
+      if (this._queuedSequencedMovementInputs[i].sp) {
+        sawJumpPressed = true;
+      }
+    }
+
+    const command = this._queuedSequencedMovementInputs[this._queuedSequencedMovementInputs.length - 1];
+    this._queuedSequencedMovementInputs.length = 0;
+
+    this._input.w = command.w;
+    this._input.a = command.a;
+    this._input.s = command.s;
+    this._input.d = command.d;
+    this._input.sp = command.sp || sawJumpPressed;
+    this._input.sh = command.sh;
+    this._input.c = command.c;
+    if (command.jd === null) {
+      delete this._input.jd;
+    } else {
+      this._input.jd = command.jd;
+    }
+
+    if (command.cp !== undefined) {
+      this._input.cp = command.cp;
+      this.camera.setOrientationPitch(command.cp);
+    }
+
+    if (command.cy !== undefined) {
+      this._input.cy = command.cy;
+      this.camera.setOrientationYaw(command.cy);
+    }
+
+    this._lastAppliedInputSequenceNumber = command.sequenceNumber;
   }
 
   /** @internal */
@@ -536,16 +614,73 @@ export default class Player extends EventRouter implements protocol.Serializable
     // that the sequence number is greater than the last received.
     // If not, ignore the packet.
     if (input.sq !== undefined) {
-      if (input.sq < this._lastUnreliableInputSequenceNumber) return;
+      if (input.sq <= this._lastUnreliableInputSequenceNumber) return;
       this._lastUnreliableInputSequenceNumber = input.sq;
     }
 
-    Object.assign(this._input, input);
+    const hasSequencedMovementInput = input.sq !== undefined && this._hasSequencedMovementInput(input);
+    if (hasSequencedMovementInput) {
+      this._enqueueSequencedMovementInputCommand(input);
+    }
 
-    if (input.cp !== undefined) this.camera.setOrientationPitch(input.cp);
-    if (input.cy !== undefined) this.camera.setOrientationYaw(input.cy);
+    for (const key in input) {
+      if (key === 'sq') {
+        continue;
+      }
+
+      // Sequenced movement state is applied on simulation ticks from the command queue.
+      if (hasSequencedMovementInput && SEQUENCED_MOVEMENT_INPUT_SET.has(key)) {
+        continue;
+      }
+
+      // Camera orientation in sequenced movement packets is applied atomically with movement.
+      if (hasSequencedMovementInput && (key === 'cp' || key === 'cy')) {
+        continue;
+      }
+
+      (this._input as Record<string, unknown>)[key] = input[key as keyof InputSchema] as unknown;
+    }
+
+    if (!hasSequencedMovementInput && input.cp !== undefined) this.camera.setOrientationPitch(input.cp);
+    if (!hasSequencedMovementInput && input.cy !== undefined) this.camera.setOrientationYaw(input.cy);
     if (this.world && input.ird && input.iro) this.interact();
   };
+
+  /** @internal */
+  private _hasSequencedMovementInput(input: InputSchema): boolean {
+    for (const key of SEQUENCED_MOVEMENT_INPUTS) {
+      if (key in input) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** @internal */
+  private _enqueueSequencedMovementInputCommand(input: InputSchema): void {
+    const inputWithNullableJoystick = input as InputSchema & { jd?: number | null };
+
+    const command: SequencedMovementInputCommand = {
+      sequenceNumber: input.sq!,
+      w: input.w ?? !!this._input.w,
+      a: input.a ?? !!this._input.a,
+      s: input.s ?? !!this._input.s,
+      d: input.d ?? !!this._input.d,
+      sp: input.sp ?? !!this._input.sp,
+      sh: input.sh ?? !!this._input.sh,
+      c: input.c ?? !!this._input.c,
+      jd: inputWithNullableJoystick.jd !== undefined ? inputWithNullableJoystick.jd : (this._input.jd ?? null),
+      cp: input.cp,
+      cy: input.cy,
+    };
+
+    if (this._queuedSequencedMovementInputs.length >= MAX_QUEUED_SEQUENCED_MOVEMENT_COMMANDS) {
+      this._queuedSequencedMovementInputs.shift();
+    }
+
+    this._queuedSequencedMovementInputs.push(command);
+  }
 
   /** @internal */
   private interact = () => {

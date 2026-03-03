@@ -149,13 +149,13 @@ export default class PlayerEntity extends Entity {
       return ErrorHandler.error(`PlayerEntity.tick(): PlayerEntity "${this.name}" must have a controller.`);
     }
 
+    this.player.applyQueuedInputForSimulation();
+
     if (this._tickWithPlayerInputEnabled) {
       const { input, camera } = this.player;
 
       this.controller.tickWithPlayerInput(this, input, camera.orientation, tickDeltaMs);
     }
-
-    this.player.markInputAppliedForSimulation();
 
     super.tick(tickDeltaMs);
   }

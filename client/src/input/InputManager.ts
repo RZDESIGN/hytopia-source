@@ -10,6 +10,7 @@ const INTERACT_TAP_MAX_DURATION_MS = 200;
 // Max distance squared in pixels for a drag (vs tap) - 30px radius
 const INTERACT_DRAG_CANCEL_MAX_DISTANCE_SQ = 900;
 const MOVEMENT_STATE_DIRTY_RESEND_TICKS = 3;
+const MOVEMENT_PACKET_MAX_DELTA_S = 1 / 10;
 
 type InputState = {
   w?: boolean;  // w
@@ -329,7 +330,10 @@ export default class InputManager {
     
     setInterval(() => {
       const nowS = performance.now() / 1000;
-      const queueDeltaS = Math.min(Math.max(nowS - previousQueueTickTimeS, 1 / 240), 0.25);
+      const queueDeltaS = Math.min(
+        Math.max(nowS - previousQueueTickTimeS, 1 / 240),
+        MOVEMENT_PACKET_MAX_DELTA_S,
+      );
       previousQueueTickTimeS = nowS;
 
       if (!this._networkedInputEnabled) {

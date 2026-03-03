@@ -583,7 +583,7 @@ export default class NetworkManager {
 
   private async _reconnect(): Promise<void> {
     // Check if server is still up - if not, it's an unexpected disconnect (crash)
-    const serverHealthy = await Servers.isCurrentServerHealthy().catch(() => false);
+    await Servers.isCurrentServerHealthy().catch(() => false);
 
     const url = new URL(window.location.href);
 

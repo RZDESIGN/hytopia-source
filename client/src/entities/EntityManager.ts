@@ -14,6 +14,10 @@ import {
   type WorkerEventPayload,
   WorkerEventType,
 } from '../workers/ChunkWorkerConstants';
+import {
+  resolveDeterministicMovementDirection,
+  resolveDeterministicMovementYaw,
+} from '../shared/movement/DeterministicMovementCore';
 
 // Working variables
 const fromVec2 = new Vector2();
@@ -52,6 +56,8 @@ const LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD = 1.5;
 const LOCAL_PREDICTION_MAX_FRAME_DELTA_S = 1 / 10;
 const LOCAL_PREDICTION_SUBSTEP_DELTA_S = 1 / 60;
 const LOCAL_PREDICTION_MAX_SUBSTEPS = 6;
+const LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S = 1 / 8;
+const LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND = 12;
 const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.18 * 0.18;
 const LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.08 * 0.08;
 const LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ = 2.5 * 2.5;
@@ -796,8 +802,23 @@ export default class EntityManager {
         (this._localPredictionState.commandBufferHead + i) % LOCAL_PREDICTION_COMMAND_BUFFER_SIZE
       ];
 
+      this._replayPredictedCommand(command);
+    }
+  }
+
+  private _replayPredictedCommand(command: LocalPredictionCommand): void {
+    let remainingDeltaS = Math.min(
+      Math.max(command.deltaTimeS, 0),
+      LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S,
+    );
+    let substeps = 0;
+
+    while (remainingDeltaS > 0 && substeps < LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND) {
+      const stepDeltaS = Math.min(LOCAL_PREDICTION_SUBSTEP_DELTA_S, remainingDeltaS);
+
+      this._localPredictionState.predictedPosition.y += this._localPredictionState.estimatedVerticalVelocity * stepDeltaS;
       this._applyPredictedMovementFromInputs(
-        command.deltaTimeS,
+        stepDeltaS,
         command.yaw,
         command.joystickDirection,
         command.w,
@@ -806,6 +827,9 @@ export default class EntityManager {
         command.d,
         command.sh,
       );
+
+      remainingDeltaS -= stepDeltaS;
+      substeps++;
     }
   }
 
@@ -946,29 +970,15 @@ export default class EntityManager {
     d: boolean,
     sh: boolean,
   ): boolean {
-    const movementDirection = fromVec2.set(0, 0);
-    const hasJoystickInput = typeof joystickDirection === 'number';
-
-    if (hasJoystickInput) {
-      const movementAngle = yaw + joystickDirection;
-      movementDirection.x = -Math.sin(movementAngle);
-      movementDirection.y = -Math.cos(movementAngle);
-    } else {
-      const sinYaw = Math.sin(yaw);
-      const cosYaw = Math.cos(yaw);
-
-      if (w) { movementDirection.x -= sinYaw; movementDirection.y -= cosYaw; }
-      if (s) { movementDirection.x += sinYaw; movementDirection.y += cosYaw; }
-      if (a) { movementDirection.x -= cosYaw; movementDirection.y += sinYaw; }
-      if (d) { movementDirection.x += cosYaw; movementDirection.y -= sinYaw; }
-
-      const movementLengthSq = movementDirection.lengthSq();
-      if (movementLengthSq > 1) {
-        movementDirection.multiplyScalar(1 / Math.sqrt(movementLengthSq));
-      }
-    }
-
-    const isActivelyMoving = movementDirection.lengthSq() > 0;
+    const movementDirection = resolveDeterministicMovementDirection({
+      yaw,
+      joystickDirection,
+      w,
+      a,
+      s,
+      d,
+    });
+    const isActivelyMoving = movementDirection.lengthSq > 0;
     if (!isActivelyMoving) {
       return false;
     }
@@ -977,9 +987,9 @@ export default class EntityManager {
     const runSpeed = Math.max(walkSpeed, this._localPredictionState.estimatedRunSpeed);
     const movementSpeed = sh ? runSpeed : walkSpeed;
     this._localPredictionState.predictedPosition.x += movementDirection.x * movementSpeed * deltaTimeS;
-    this._localPredictionState.predictedPosition.z += movementDirection.y * movementSpeed * deltaTimeS;
+    this._localPredictionState.predictedPosition.z += movementDirection.z * movementSpeed * deltaTimeS;
 
-    const movementYaw = Math.atan2(-movementDirection.x, -movementDirection.y);
+    const movementYaw = resolveDeterministicMovementYaw(movementDirection.x, movementDirection.z);
     const halfMovementYaw = movementYaw * 0.5;
     this._localPredictionState.predictedRotation.set(0, Math.sin(halfMovementYaw), 0, Math.cos(halfMovementYaw));
 
@@ -994,38 +1004,20 @@ export default class EntityManager {
       return;
     }
 
-    const movementDirection = fromVec2.set(0, 0);
-
-    if (typeof command.joystickDirection === 'number') {
-      const movementAngle = command.yaw + command.joystickDirection;
-      movementDirection.x = -Math.sin(movementAngle);
-      movementDirection.y = -Math.cos(movementAngle);
-    } else {
-      const sinYaw = Math.sin(command.yaw);
-      const cosYaw = Math.cos(command.yaw);
-
-      if (command.w) { movementDirection.x -= sinYaw; movementDirection.y -= cosYaw; }
-      if (command.s) { movementDirection.x += sinYaw; movementDirection.y += cosYaw; }
-      if (command.a) { movementDirection.x -= cosYaw; movementDirection.y += sinYaw; }
-      if (command.d) { movementDirection.x += cosYaw; movementDirection.y -= sinYaw; }
-
-      const movementLengthSq = movementDirection.lengthSq();
-      if (movementLengthSq > 1) {
-        movementDirection.multiplyScalar(1 / Math.sqrt(movementLengthSq));
-      }
-    }
-
-    const movementLengthSq = movementDirection.lengthSq();
-    if (movementLengthSq <= 0) {
+    const movementDirection = resolveDeterministicMovementDirection({
+      yaw: command.yaw,
+      joystickDirection: command.joystickDirection,
+      w: command.w,
+      a: command.a,
+      s: command.s,
+      d: command.d,
+    });
+    if (movementDirection.lengthSq <= 0) {
       return;
     }
 
-    if (movementLengthSq !== 1) {
-      movementDirection.multiplyScalar(1 / Math.sqrt(movementLengthSq));
-    }
-
     this._localPredictionState.lastAcknowledgedMovementDirectionX = movementDirection.x;
-    this._localPredictionState.lastAcknowledgedMovementDirectionZ = movementDirection.y;
+    this._localPredictionState.lastAcknowledgedMovementDirectionZ = movementDirection.z;
   }
 
   private _updateLocalPredictionVerticalVelocityEstimate(sampledVerticalVelocity: number): void {

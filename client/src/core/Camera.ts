@@ -2,6 +2,7 @@ import { Euler, Object3D, PerspectiveCamera, Quaternion, Raycaster, Vector2, Vec
 import Entity from "../entities/Entity";
 import EventRouter from '../events/EventRouter';
 import Game from "../Game";
+import MobileManager from '../mobile/MobileManager';
 import { NetworkManagerEventType } from '../network/NetworkManager';
 import type { Ray } from 'three';
 import type { NetworkManagerEventPayload } from '../network/NetworkManager';
@@ -11,7 +12,8 @@ const MIN_ZOOM = 3.0;
 const MAX_ZOOM = 10.0;
 const INITIAL_ZOOM = 6.0;
 const CAMERA_LERP_TIME = 0.2;
-const CAMERA_COLLISION_RAYCAST_INTERVAL_S = 1 / 30;
+const CAMERA_COLLISION_RAYCAST_INTERVAL_DESKTOP_S = 1 / 30;
+const CAMERA_COLLISION_RAYCAST_INTERVAL_MOBILE_S = 1 / 15;
 const CAMERA_COLLISION_RAYCAST_ORIGIN_DELTA_SQ_THRESHOLD = 0.1 * 0.1;
 const CAMERA_COLLISION_RAYCAST_DIRECTION_DOT_THRESHOLD = 0.9995;
 const CAMERA_COLLISION_RAYCAST_DISTANCE_DELTA_THRESHOLD = 0.1;
@@ -85,9 +87,14 @@ export default class Camera {
   private _gameCameraCollisionTargetDistance: number = Infinity;
   private _gameCameraCollisionRaycastHasSample: boolean = false;
   private _gameCameraCollisionRaycastIntervalRemainingS: number = 0;
+  private _gameCameraCollisionRaycastIntervalS: number =
+    MobileManager.isMobile
+      ? CAMERA_COLLISION_RAYCAST_INTERVAL_MOBILE_S
+      : CAMERA_COLLISION_RAYCAST_INTERVAL_DESKTOP_S;
   private _gameCameraCollisionRaycastDesiredDistance: number = 0;
   private _gameCameraCollisionRaycastOrigin: Vector3 = new Vector3();
   private _gameCameraCollisionRaycastDirection: Vector3 = new Vector3();
+  private _gameCameraShoulderPositionOffset: Vector3 = new Vector3();
 
   private _spectatorCamera: PerspectiveCamera;
   private _spectatorCameraPitch: number = 0;
@@ -568,7 +575,7 @@ export default class Camera {
     this._gameCameraCollisionRaycastOrigin.copy(lookAtTarget);
     this._gameCameraCollisionRaycastDirection.copy(direction);
     this._gameCameraCollisionRaycastDesiredDistance = desiredDistance;
-    this._gameCameraCollisionRaycastIntervalRemainingS = CAMERA_COLLISION_RAYCAST_INTERVAL_S;
+    this._gameCameraCollisionRaycastIntervalRemainingS = this._gameCameraCollisionRaycastIntervalS;
     this._gameCameraCollisionRaycastHasSample = true;
   }
 
@@ -676,9 +683,9 @@ export default class Camera {
 
       // Apply visual rotation to camera position around the look target (skip if no rotation, if not identity quat)
       if (this._gameCameraShoulderRotationOffset.w !== 1) {
-        const positionOffset = this._gameCamera.position.clone().sub(lookAtTarget);
-        positionOffset.applyQuaternion(this._gameCameraShoulderRotationOffset);
-        this._gameCamera.position.copy(lookAtTarget).add(positionOffset);
+        this._gameCameraShoulderPositionOffset.copy(this._gameCamera.position).sub(lookAtTarget);
+        this._gameCameraShoulderPositionOffset.applyQuaternion(this._gameCameraShoulderRotationOffset);
+        this._gameCamera.position.copy(lookAtTarget).add(this._gameCameraShoulderPositionOffset);
       }
 
       // Third-person offset shifts perspective while preserving orbit around the target.
