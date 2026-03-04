@@ -255,6 +255,25 @@ body.mobile img {
   pointer-events: auto;
 }
 
+.hytopia-modal-overlay::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 25%;
+  background-image: linear-gradient(90deg, rgba(255, 148, 45, 1) 0%, rgba(233, 247, 90, 1) 19%, rgba(178, 224, 55, 1) 39%, rgba(107, 204, 230, 1) 53%, rgba(210, 210, 210, 1) 65%, rgba(231, 178, 128, 1) 84%, rgba(223, 127, 242, 1) 100%);
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.4) 0%, transparent 100%);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.4) 0%, transparent 100%);
+  pointer-events: none;
+  animation: hytopia-glow-pulse 4s ease-in-out infinite alternate;
+}
+
+@keyframes hytopia-glow-pulse {
+  0% { opacity: 0.6; }
+  100% { opacity: 1; }
+}
+
 .hytopia-modal {
   background: #1a1a1a;
   border: 1px solid #333;
@@ -262,6 +281,20 @@ body.mobile img {
   padding: 24px;
   max-width: 420px;
   width: 90%;
+}
+
+.hytopia-modal-local-discovery {
+  max-width: 680px;
+  padding: 32px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.hytopia-modal-local-discovery .hytopia-modal-message {
+  margin-bottom: 0;
+  color: #888;
+  font-size: 14px;
 }
 
 .hytopia-modal-message {
@@ -293,6 +326,322 @@ body.mobile img {
   justify-content: flex-end;
 }
 
+.hytopia-modal-buttons-left {
+  justify-content: flex-start;
+}
+
+.hytopia-modal-mobile-qr {
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #111;
+  margin-bottom: 20px;
+  padding: 12px;
+}
+
+.hytopia-modal-mobile-qr.is-ready {
+  border-color: #2563eb;
+}
+
+.hytopia-modal-mobile-qr-status {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #bdbdbd;
+}
+
+.hytopia-modal-mobile-qr-canvas {
+  display: block;
+  width: 170px;
+  height: 170px;
+  margin: 10px auto 8px;
+  border-radius: 4px;
+}
+
+.hytopia-modal-mobile-qr-link {
+  display: block;
+  color: #93c5fd;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  word-break: break-all;
+}
+
+.hytopia-local-search-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.hytopia-local-search-status {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  color: #fff;
+  font-weight: 500;
+  text-align: center;
+  margin-top: 16px;
+}
+
+.hytopia-local-gradient-spinner {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0%,
+    rgba(255, 148, 45, 1) 20%,
+    rgba(233, 247, 90, 1) 35%,
+    rgba(178, 224, 55, 1) 50%,
+    rgba(107, 204, 230, 1) 65%,
+    rgba(210, 210, 210, 1) 80%,
+    rgba(231, 178, 128, 1) 90%,
+    rgba(223, 127, 242, 1) 100%
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), black calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), black calc(100% - 3px));
+  animation: hytopia-spin 1s linear infinite;
+}
+
+@keyframes hytopia-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.hytopia-local-found-header {
+  font-family: 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.hytopia-local-found-layout {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.hytopia-local-found-header-left {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.hytopia-local-found-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1.1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background-image: linear-gradient(135deg, rgba(255, 148, 45, 1) .88%, rgba(233, 247, 90, 1) 19.25%, rgba(178, 224, 55, 1) 39.16%, rgba(107, 204, 230, 1) 53.54%, rgba(210, 210, 210, 1) 65.27%, rgba(231, 178, 128, 1) 84.07%, rgba(223, 127, 242, 1));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hytopia-local-lets-play {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.hytopia-local-cards-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  flex-grow: 1;
+}
+
+.hytopia-local-card-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hytopia-local-card-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #aaa;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hytopia-local-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  box-sizing: border-box;
+}
+
+.hytopia-local-play-button {
+  width: 110px;
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #000;
+  cursor: pointer;
+  transition: transform 0.2s, opacity 0.2s;
+  position: relative;
+  z-index: 1;
+}
+
+.hytopia-local-play-button::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  border-radius: 6px;
+  z-index: -1;
+}
+
+.hytopia-local-play-button::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  right: -8px;
+  bottom: -8px;
+  background-image: linear-gradient(135deg, rgba(255, 148, 45, 1), rgba(233, 247, 90, 1), rgba(178, 224, 55, 1), rgba(107, 204, 230, 1), rgba(210, 210, 210, 1), rgba(231, 178, 128, 1), rgba(223, 127, 242, 1));
+  z-index: -2;
+  border-radius: 14px;
+  filter: blur(16px) !important;
+  opacity: 0.6;
+  animation: hytopia-button-glow 3s ease-in-out infinite alternate;
+}
+
+@keyframes hytopia-button-glow {
+  0% { opacity: 0.3; filter: blur(10px) !important; }
+  100% { opacity: 0.6; filter: blur(16px) !important; }
+}
+
+.hytopia-local-play-button:hover {
+  transform: scale(1.02);
+}
+
+.hytopia-local-qr-canvas {
+  display: block;
+  width: 110px !important;
+  height: 110px !important;
+  image-rendering: pixelated;
+}
+
+.hytopia-local-corner-logo {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  width: 48px;
+  height: 48px;
+  opacity: 0.9;
+  z-index: 100001;
+}
+
+.hytopia-local-corner-button {
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 100001;
+}
+
+.hytopia-local-corner-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.hytopia-local-other-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
+
+.hytopia-local-other-button {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #aaa;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.hytopia-local-other-button:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.hytopia-local-manual-input {
+  margin-bottom: 0 !important;
+}
+
+.hytopia-local-manual-row {
+  display: flex;
+  gap: 12px;
+}
+
+.hytopia-modal-mobile-qr-manual-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.hytopia-modal-mobile-qr-manual-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  background: #0d0d0d;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #fff;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.hytopia-modal-mobile-qr-manual-button {
+  padding: 8px 10px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  background: #2563eb;
+  color: #fff;
+  cursor: pointer;
+}
+
 .hytopia-modal-button {
   font-family: 'Inter', sans-serif;
   font-size: 14px;
@@ -311,4 +660,14 @@ body.mobile img {
 .hytopia-modal-button-cancel {
   background: #333;
   color: #ccc;
+}
+
+@keyframes hytopia-fade-in-up {
+  0% { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes hytopia-fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
 }

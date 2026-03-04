@@ -3,7 +3,6 @@ import { modalAlert, modalPrompt } from '../ui/Modal';
 // Minimum supported server version
 const MINIMUM_SUPPORTED_SERVER_VERSION = '0.10.0';
 const DEV_LOCAL_HOSTNAME = 'local.hytopiahosting.com:8080';
-const DEV_LEGACY_HOSTNAME = 'localhost:8080';
 const SERVER_HEALTH_CHECK_TIMEOUT_MS = 8000;
 
 // Compatible client URLs, ordered newest to oldest.
@@ -40,16 +39,25 @@ export default class Servers {
 
       // Prompt for server hostname if not already present in join query parameter
       if (!hostname) {
-        hostname = await modalPrompt('Connect to a HYTOPIA server (leave blank for local dev).\nRecommended: use a Chromium browser (Chrome, Brave, Edge).') || DEV_LOCAL_HOSTNAME;
+        hostname = await modalPrompt(
+          'Connect to a HYTOPIA server (leave blank for local dev).\nRecommended: use a Chromium browser (Chrome, Brave, Edge).',
+          '',
+          {
+            showLocalMobileQr: true,
+            localServerHostnames: [ DEV_LOCAL_HOSTNAME ],
+            localServerPort: 8080,
+            localHealthCheckTimeoutMs: SERVER_HEALTH_CHECK_TIMEOUT_MS,
+          }
+        ) || DEV_LOCAL_HOSTNAME;
         hostname = hostname.replace(/^(wss?|https?):\/\//, '');
       }
 
       // Validate server connection
-      const isLocal = [ DEV_LOCAL_HOSTNAME, DEV_LEGACY_HOSTNAME ].includes(hostname);
+      const isLocal = hostname === DEV_LOCAL_HOSTNAME;
 
       try {
         const candidates = hostname === DEV_LOCAL_HOSTNAME
-          ? [ DEV_LOCAL_HOSTNAME, DEV_LEGACY_HOSTNAME ]
+          ? [ DEV_LOCAL_HOSTNAME ]
           : [ hostname ];
 
         let response: Response | undefined;
@@ -78,20 +86,13 @@ export default class Servers {
         await this._validateServerVersionCompat(version, hostname);
       } catch {
         console.error('Could not connect to server', hostname);
-
-        if (isLocal) {
-          await modalAlert(
-            'Could not connect to your local HYTOPIA server.\n' +
-            '----------------\n' +
-            '1) Start it: hytopia start\n' +
-            '2) Use a Chromium browser (Chrome, Brave, Edge)\n' +
-            '3) Allow Local network access for https://hytopia.com:\n' +
-            '   chrome://settings/content/siteDetails?site=https://hytopia.com\n' +
-            'Then try again.'
-          );
-        }
-
         hostname = '';
+        
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('join')) {
+          url.searchParams.delete('join');
+          window.history.replaceState({}, '', url.toString());
+        }
       }
       
       await new Promise((resolve) => setTimeout(resolve, 100));
