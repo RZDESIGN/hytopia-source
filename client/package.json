@@ -16,7 +16,7 @@
     "@microsoft/api-documenter": "^7.25.21",
     "@microsoft/api-extractor": "^7.47.11",
     "@types/mixpanel-browser": "^2.54.0",
-    "@types/three": "^0.167.2",
+    "@types/three": "^0.183.1",
     "typescript": "^5.5.3",
     "vite": "^5.4.1"
   },
@@ -30,6 +30,6 @@
     "msgpackr": "^1.11.4",
     "nipplejs": "^0.10.2",
     "obscenity": "^0.4.3",
-    "three": "^0.167.1"
+    "three": "^0.183.2"
   }
 }

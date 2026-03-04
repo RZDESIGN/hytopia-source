@@ -492,7 +492,7 @@ type SourceContents = {
   pixels: Uint8ClampedArray;
 };
 
-interface SourceEx extends Source {
+interface SourceEx extends Source<unknown> {
   [SOURCE_USER_DATA]: {
     [SOURCE_CONTENTS]: SourceContents;
   };
@@ -503,11 +503,11 @@ interface SourceEx extends Source {
 // for high-performance rendering. This allows multiple textures used across different cloned
 // meshes/materials to be rendered at once using a single InstancedMesh.
 class InstancedTexture extends DataArrayTexture {
-  private _indexMap: Map<Source, number> = new Map();
+  private _indexMap: Map<Source<unknown>, number> = new Map();
   private _usedIndexSet: Set<number> = new Set();
 
   constructor(texture: Texture, depth: number) {
-    const { width, height } = texture.source.data;
+    const { width, height } = getTextureSize(texture);
     super(new Uint8ClampedArray(width * height * depth * BYTES_PER_PIXEL), width, height, depth);
     this.mapping = texture.mapping;
     this.wrapS = texture.wrapS;
@@ -558,6 +558,9 @@ class InstancedTexture extends DataArrayTexture {
 
         const { width: sourceWidth, height: sourceHeight, pixels } = (source as SourceEx)[SOURCE_USER_DATA][SOURCE_CONTENTS];
         const { width, height, data } = this.image;
+        if (data === null) {
+          throw new Error(`InstancedTexture: Expected image data buffer for texture source ${source.uuid}.`);
+        }
         const offset = width * height * BYTES_PER_PIXEL * currentIndex;
 
         if (width !== sourceWidth || height !== sourceHeight) {
@@ -574,7 +577,7 @@ class InstancedTexture extends DataArrayTexture {
     });
   }
 
-  public getIndex(source: Source): number {
+  public getIndex(source: Source<unknown>): number {
     if (!this._indexMap.has(source)) {
       throw new Error(`InstancedTexture.getIndex(): Unknown Source ${source.uuid}`);
     }
@@ -1700,12 +1703,30 @@ export default class GLTFManager {
 }
 
 const getTextureSize = (texture: Texture): { width: number, height: number } => {
-  // TODO: Any other else type?
-  const data = texture.source.data as ImageBitmap | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas;
+  const data = texture.source.data;
+  if (
+    data === null ||
+    typeof data !== 'object' ||
+    !('width' in data) ||
+    !('height' in data) ||
+    typeof data.width !== 'number' ||
+    typeof data.height !== 'number'
+  ) {
+    throw new Error(`GLTFManager: Texture ${texture.uuid} has no readable width/height.`);
+  }
   return {
     width: data.width,
     height: data.height,
   };
+};
+
+const getCanvasImageSource = (texture: Texture): CanvasImageSource => {
+  const data = texture.source.data;
+  if (data === null) {
+    throw new Error(`GLTFManager: Texture ${texture.uuid} has no source data.`);
+  }
+  // CanvasImageSource is a DOM union type; runtime checks are sufficient before drawImage().
+  return data as CanvasImageSource;
 };
 
 const readPixelsFromRegularTexture = (texture: Texture): { width: number, height: number, pixels: Uint8ClampedArray } => {
@@ -1713,7 +1734,7 @@ const readPixelsFromRegularTexture = (texture: Texture): { width: number, height
   const pixels = new Uint8ClampedArray(width * height * BYTES_PER_PIXEL);
   tmpCanvas.width = width;
   tmpCanvas.height = height;
-  tmp2DContext.drawImage(texture.source.data, 0, 0);
+  tmp2DContext.drawImage(getCanvasImageSource(texture), 0, 0);
   const imageData = tmp2DContext.getImageData(0, 0, width, height);
   for (let i = 0; i < pixels.length; i++) {
     pixels[i] = imageData.data[i];

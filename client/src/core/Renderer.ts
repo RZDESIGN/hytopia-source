@@ -170,7 +170,7 @@ export default class Renderer {
       new Vector2(1, 1),
     );
     // Note: Size for Passes are set appropriately when EffectComposer size is set
-    this._smaaPass = new SMAAPass(1, 1);
+    this._smaaPass = new SMAAPass();
     // Question: Should parameters be configurable?
     this._bloomPass = new WhiteCoreBloomPass(
       vec2,

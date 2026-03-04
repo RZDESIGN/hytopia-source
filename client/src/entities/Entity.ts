@@ -73,9 +73,9 @@ interface AnimationActionEx extends AnimationAction {
   _propertyBindings: PropertyMixer[];
 }
 
-interface AnimationMixerEx extends AnimationMixer {
+type AnimationMixerEx = AnimationMixer & {
   _actions: AnimationActionEx[];
-}
+};
 
 type OriginalMaterialData = {
   alphaTest: number;
@@ -512,9 +512,13 @@ export default class Entity {
       if (action.paused || !action.enabled) {
         return;
       }
-      action._propertyBindings.forEach(propertyMixer => {
-        const targetObject = propertyMixer.binding.targetObject;
-        const property = propertyMixer.binding.resolvedProperty;
+      (action as AnimationActionEx)._propertyBindings.forEach((propertyMixer: PropertyMixer) => {
+        const binding = propertyMixer.binding as unknown as {
+          targetObject?: Object3D;
+          resolvedProperty?: unknown;
+        };
+        const targetObject = binding.targetObject;
+        const property = binding.resolvedProperty;
 
         // Only core glTF animations are considered here, where rotation is handled using quaternions,
         // not Euler rotation.
@@ -2666,7 +2670,7 @@ export default class Entity {
     });
 
     // Update the mixer on each frame
-    const mixer = new AnimationMixer(model) as AnimationMixerEx;
+    const mixer = new AnimationMixer(model) as unknown as AnimationMixerEx;
 
     // Necessary to detect the completion of a one-shot animation.
     mixer.addEventListener('finished', () => {
