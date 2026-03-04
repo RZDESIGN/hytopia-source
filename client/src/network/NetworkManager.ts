@@ -212,7 +212,9 @@ export default class NetworkManager {
   }
 
   public sendPacket(packet: protocol.AnyPacket, reliable: boolean = true): void {
-    const serializedPacket = packr.pack(packet);
+    // Convert to a plain Uint8Array to avoid Buffer<ArrayBufferLike> type drift
+    // with newer TypeScript/lib-dom stream writer typings.
+    const serializedPacket = Uint8Array.from(packr.pack(packet));
 
     if (this._wt) {
       this._lastSendProtocol = 'wt';
@@ -224,7 +226,7 @@ export default class NetworkManager {
           this._wtReliablePacketQueue.shift();
         }
 
-        this._wtReliablePacketQueue.push(protocol.framePacketBuffer(serializedPacket));
+        this._wtReliablePacketQueue.push(Uint8Array.from(protocol.framePacketBuffer(serializedPacket)));
 
         if (this._wtReliablePacketQueueProcessing) return;
 
@@ -571,8 +573,8 @@ export default class NetworkManager {
   }
 
   private async _reconnect(): Promise<void> {
-    // Check if server is still up - if not, it's an unexpected disconnect (crash)
-    const serverHealthy = await Servers.isCurrentServerHealthy().catch(() => false);
+    // Probe server health for diagnostics; reconnect flow currently does not branch on this.
+    await Servers.isCurrentServerHealthy().catch(() => false);
 
     const url = new URL(window.location.href);
 
