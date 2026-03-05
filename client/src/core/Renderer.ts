@@ -217,6 +217,7 @@ export default class Renderer {
     this._effectComposer.setPixelRatio(1);
     this._renderer.getDrawingBufferSize(vec2);
     this._effectComposer.setSize(vec2.width, vec2.height);
+    this._bloomPass.setSize(vec2.width >> 2, vec2.height >> 2);
   }
 
   public addToScene(object: Object3D): void {
