@@ -178,13 +178,13 @@ const LOW_FPS_THRESHOLD_RATIO = 0.50;
 // If the FPS stays above or below the threshold for the specified duration, we attempt to adjust
 // quality. Since increasing quality might degrade performance and force us to revert it
 // later, we apply upgrades more cautiously than downgrades.
-const QUALITY_UP_TIME_THRESHOLD = 5;
+const QUALITY_UP_TIME_THRESHOLD = 3;
 const QUALITY_DOWN_TIME_THRESHOLD = 3;
 
 // Client and game initialization involve many heavy processes, often causing FPS to drop.
 // Using FPS values during this time may lead to unnecessarily lowering quality. To avoid this,
 // quality changes are disabled for a set time after receiving the World Packet.
-const QUALITY_ADJUSTMENT_WARMUP_TIME = 10;
+const QUALITY_ADJUSTMENT_WARMUP_TIME = 5;
 
 // Good FPS may trigger a quality increase, which could then lower FPS and cause a downgrade,
 // potentially leading to repeated up/down quality switches. This can cause visible flickering

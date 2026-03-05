@@ -145,7 +145,7 @@ export default class Renderer {
 
     this._ambientLight = { color: new Color(), intensity: 1 };
     // Anti-aliasing is handled in post-processing
-    this._renderer = new WebGLRenderer({ antialias: false });
+    this._renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this._sceneUiRenderer = new CSS2DRenderer({ element: document.getElementById('scene-ui-container')! });
     this._scene = new Scene();
     this._viewModelScene = new Scene();
