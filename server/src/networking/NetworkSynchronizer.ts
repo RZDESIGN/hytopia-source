@@ -663,12 +663,27 @@ export default class NetworkSynchronizer {
 
   private _onEntityUpdatePosition = (payload: EventPayloads[EntityEvent.UPDATE_POSITION]) => {
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
-    entitySync.p = [ payload.position.x, payload.position.y, payload.position.z ];
+    const p = entitySync.p;
+    if (p) {
+      p[0] = payload.position.x;
+      p[1] = payload.position.y;
+      p[2] = payload.position.z;
+    } else {
+      entitySync.p = [ payload.position.x, payload.position.y, payload.position.z ];
+    }
   };
 
   private _onEntityUpdateRotation = (payload: EventPayloads[EntityEvent.UPDATE_ROTATION]) => {
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
-    entitySync.r = [ payload.rotation.x, payload.rotation.y, payload.rotation.z, payload.rotation.w ];
+    const r = entitySync.r;
+    if (r) {
+      r[0] = payload.rotation.x;
+      r[1] = payload.rotation.y;
+      r[2] = payload.rotation.z;
+      r[3] = payload.rotation.w;
+    } else {
+      entitySync.r = [ payload.rotation.x, payload.rotation.y, payload.rotation.z, payload.rotation.w ];
+    }
   };
 
   private _onEntityModelAnimationPause = (payload: EventPayloads[EntityModelAnimationEvent.PAUSE]) => {
