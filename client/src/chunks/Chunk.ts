@@ -12,6 +12,12 @@ export interface LightSource {
 // Working variables
 const vec3like: Vector3LikeMutable = { x: 0, y: 0, z: 0 };
 
+// Caches for parsed string-ID → numeric-origin lookups.
+// These are called in hot per-frame loops (view distance, sorting, culling).
+// Each uncached call does split(',') + .map(Number) — 5 allocations per call.
+const chunkOriginCache = new Map<ChunkId, Vector3Like>();
+const batchOriginCache = new Map<BatchId, Vector3Like>();
+
 export default class Chunk {
   public readonly originCoordinate: Vector3Like;
   private _chunkId: ChunkId;
@@ -44,8 +50,13 @@ export default class Chunk {
   }
 
   public static chunkIdToOriginCoordinate(chunkId: ChunkId): Vector3Like {
-    const [x, y, z] = chunkId.split(',').map(str => Number(str)) as [number, number, number];
-    return { x, y, z };
+    let cached = chunkOriginCache.get(chunkId);
+    if (!cached) {
+      const [x, y, z] = chunkId.split(',').map(str => Number(str)) as [number, number, number];
+      cached = { x, y, z };
+      chunkOriginCache.set(chunkId, cached);
+    }
+    return cached;
   }
 
   public static originCoordinateToChunkId(originCoordinate: Vector3Like): ChunkId {
@@ -89,8 +100,13 @@ export default class Chunk {
   }
 
   public static batchIdToBatchOrigin(batchId: BatchId): Vector3Like {
-    const [x, y, z] = batchId.split(',').map(str => Number(str)) as [number, number, number];
-    return { x, y, z };
+    let cached = batchOriginCache.get(batchId);
+    if (!cached) {
+      const [x, y, z] = batchId.split(',').map(str => Number(str)) as [number, number, number];
+      cached = { x, y, z };
+      batchOriginCache.set(batchId, cached);
+    }
+    return cached;
   }
 
   // Get all chunk IDs that belong to a batch (some may not exist in world)
