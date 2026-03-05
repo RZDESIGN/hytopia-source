@@ -56,7 +56,7 @@ export default class ChunkMeshManager {
 
       // Index may switch between Uint16 and Uint32 depending on vertex count
       const indexAttr = geometry.getIndex();
-      if (indexAttr && indexAttr.array.constructor === indices.constructor) {
+      if (indexAttr && indexAttr.array.constructor === indices.constructor && indexAttr.array.byteLength === indices.byteLength) {
         indexAttr.array = indices;
         indexAttr.needsUpdate = true;
       } else {
@@ -107,7 +107,7 @@ export default class ChunkMeshManager {
 
   private _swapAttribute(geometry: BufferGeometry, name: string, data: Float32Array, itemSize: number): void {
     const attr = geometry.getAttribute(name) as BufferAttribute | undefined;
-    if (attr) {
+    if (attr && attr.array.byteLength === data.byteLength) {
       attr.array = data;
       attr.needsUpdate = true;
     } else {
