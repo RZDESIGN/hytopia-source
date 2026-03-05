@@ -155,6 +155,8 @@ export default class PlayerEntity extends Entity {
       this.controller.tickWithPlayerInput(this, input, camera.orientation, tickDeltaMs);
     }
 
+    this.player.markInputAppliedForSimulation();
+
     super.tick(tickDeltaMs);
   }
 }

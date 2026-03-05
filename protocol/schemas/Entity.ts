@@ -13,6 +13,7 @@ import type { RgbColorSchema } from './RgbColor';
 import type { VectorSchema } from './Vector';
 
 export type EntitySchema = {
+  aq?: number;                    // last applied input sequence number (owner-only)
   i: number;                      // entity id
   bh?: VectorSchema;              // block half extents
   bt?: string;                    // block texture uri
@@ -41,6 +42,7 @@ export type EntitySchema = {
 export const entitySchema: JSONSchemaType<EntitySchema> = {
   type: 'object',
   properties: {
+    aq: { type: 'number', nullable: true },
     i: { type: 'number' },
     bh: { ...vectorSchema, nullable: true },
     bt: { type: 'string', nullable: true },

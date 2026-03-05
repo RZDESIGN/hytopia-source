@@ -9,6 +9,7 @@ const INTERACT_TAP_MAX_DURATION_MS = 200;
 
 // Max distance squared in pixels for a drag (vs tap) - 30px radius
 const INTERACT_DRAG_CANCEL_MAX_DISTANCE_SQ = 900;
+const MOVEMENT_STATE_DIRTY_RESEND_TICKS = 3;
 
 type InputState = {
   w?: boolean;  // w
@@ -144,6 +145,26 @@ const SUPPORTED_INPUT_MAP: { [key: string]: keyof InputState } = {
 };
 
 const SUPPORTED_INPUTS = Object.values(SUPPORTED_INPUT_MAP);
+const NETWORKED_MOVEMENT_INPUT_KEYS: (keyof InputState)[] = [ 'w', 'a', 's', 'd', 'sp', 'sh', 'c' ];
+const NETWORKED_MOVEMENT_INPUT_KEY_SET = new Set<keyof InputState>(NETWORKED_MOVEMENT_INPUT_KEYS);
+
+export enum InputManagerEventType {
+  MovementPacketSent = 'INPUT_MANAGER.MOVEMENT_PACKET_SENT',
+}
+
+export namespace InputManagerEventPayload {
+  export interface IMovementPacketSent {
+    sequenceNumber: number;
+    deltaTimeS: number;
+    yaw: number;
+    joystickDirection: number | null;
+    w: boolean;
+    a: boolean;
+    s: boolean;
+    d: boolean;
+    sh: boolean;
+  }
+}
 
 export default class InputManager {
   private _game: Game;
@@ -151,6 +172,9 @@ export default class InputManager {
   private _isPointerLockFrozen = false;
   private _inputEnabled: boolean = true;
   private _inputState: InputState = {};
+  private _joystickDirection: number | null = null;
+  private _wasMovementInputPressed: boolean = false;
+  private _movementStateDirtyResendTicks: number = 0;
   private _networkedInputEnabled: boolean = true;
   private _continuousInputState: ContinuousInputState = {};
   private _onPressCallback: Map<string, () => void> = new Map();
@@ -171,6 +195,7 @@ export default class InputManager {
   public get inputEnabled(): boolean { return this._inputEnabled; }
   public get inputState(): Readonly<InputState> { return this._inputState; }
   public get isPointerLocked(): boolean { return this._isPointerLocked; }
+  public get joystickDirection(): number | null { return this._joystickDirection; }
 
   public enableInput(enabled: boolean): void {
     if (!enabled) {
@@ -186,6 +211,12 @@ export default class InputManager {
 
   public enableNetworkedInput(enabled: boolean): void {
     this._networkedInputEnabled = enabled;
+
+    if (!enabled) {
+      this._movementStateDirtyResendTicks = 0;
+      this._wasMovementInputPressed = false;
+      this._continuousInputState = {};
+    }
   }
 
   public freezePointerLock(freeze: boolean): void {
@@ -219,6 +250,11 @@ export default class InputManager {
   }
 
   public setJoystickDirection(radians: number | null): void {
+    if (this._joystickDirection !== radians) {
+      this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
+    }
+
+    this._joystickDirection = radians;
     this._continuousInputState.jd = radians;
   }
 
@@ -289,16 +325,92 @@ export default class InputManager {
     // twitch-inputs on desktop if not 60 might feel bad though.
     // we can change this to 30 when we have client prediction.
     const inputUpdateHz = MobileManager.isMobile ? 30 : 60;
+    let previousQueueTickTimeS = performance.now() / 1000;
     
     setInterval(() => {
-      if (
-        this._continuousInputState.cp === undefined &&
-        this._continuousInputState.cy === undefined &&
-        this._continuousInputState.jd === undefined
-      ) return;
+      const nowS = performance.now() / 1000;
+      const queueDeltaS = Math.min(Math.max(nowS - previousQueueTickTimeS, 1 / 240), 0.25);
+      previousQueueTickTimeS = nowS;
 
-      this._game.networkManager.sendInputPacket(this._continuousInputState);
+      if (!this._networkedInputEnabled) {
+        this._continuousInputState = {};
+        this._movementStateDirtyResendTicks = 0;
+        this._wasMovementInputPressed = false;
+        return;
+      }
+
+      const hasCameraOrientationChanges =
+        this._continuousInputState.cp !== undefined ||
+        this._continuousInputState.cy !== undefined;
+
+      const hasMovementInputPressed =
+        !!this._inputState.w ||
+        !!this._inputState.a ||
+        !!this._inputState.s ||
+        !!this._inputState.d ||
+        !!this._inputState.sp ||
+        !!this._inputState.sh ||
+        !!this._inputState.c ||
+        this._joystickDirection !== null;
+
+      const shouldResendMovementState = this._movementStateDirtyResendTicks > 0;
+      const shouldSendMovementState = hasMovementInputPressed || shouldResendMovementState;
+      const becameIdle = this._wasMovementInputPressed && !hasMovementInputPressed;
+
+      if (!hasCameraOrientationChanges && !shouldSendMovementState) {
+        this._wasMovementInputPressed = hasMovementInputPressed;
+        return;
+      }
+
+      const inputPacket: Record<string, any> = {};
+
+      if (shouldSendMovementState) {
+        inputPacket.w = !!this._inputState.w;
+        inputPacket.a = !!this._inputState.a;
+        inputPacket.s = !!this._inputState.s;
+        inputPacket.d = !!this._inputState.d;
+        inputPacket.sp = !!this._inputState.sp;
+        inputPacket.sh = !!this._inputState.sh;
+        inputPacket.c = !!this._inputState.c;
+
+        if (this._joystickDirection !== null || shouldResendMovementState) {
+          inputPacket.jd = this._joystickDirection;
+        }
+      }
+
+      if (this._continuousInputState.cp !== undefined) {
+        inputPacket.cp = this._continuousInputState.cp;
+      }
+
+      if (this._continuousInputState.cy !== undefined) {
+        inputPacket.cy = this._continuousInputState.cy;
+      }
+
+      const sequenceNumber = this._game.networkManager.sendInputPacket(
+        inputPacket,
+        becameIdle && shouldSendMovementState,
+      );
+
+      if (shouldSendMovementState && sequenceNumber !== undefined) {
+        EventRouter.instance.emit(InputManagerEventType.MovementPacketSent, {
+          sequenceNumber,
+          deltaTimeS: queueDeltaS,
+          yaw: this._game.camera.gameCameraYaw,
+          joystickDirection: this._joystickDirection,
+          w: !!this._inputState.w,
+          a: !!this._inputState.a,
+          s: !!this._inputState.s,
+          d: !!this._inputState.d,
+          sh: !!this._inputState.sh,
+        });
+      }
+
       this._continuousInputState = {};
+      this._wasMovementInputPressed = hasMovementInputPressed;
+
+      if (this._movementStateDirtyResendTicks > 0) {
+        this._movementStateDirtyResendTicks--;
+      }
     }, 1000 / inputUpdateHz);
   }
 
@@ -335,7 +447,11 @@ export default class InputManager {
       this._inputState[mappedInput] = isPressed;
       
       if (this._networkedInputEnabled) {
-        this._game.networkManager.sendInputPacket({ [mappedInput]: isPressed });
+        if (NETWORKED_MOVEMENT_INPUT_KEY_SET.has(mappedInput)) {
+          this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
+        } else {
+          this._game.networkManager.sendInputPacket({ [mappedInput]: isPressed });
+        }
       }
     }
   }

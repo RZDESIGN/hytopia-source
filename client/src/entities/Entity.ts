@@ -1386,6 +1386,24 @@ export default class Entity {
 
     this._interpolatingRotation = !this._currentRotation.equals(this._targetRotation);
   }
+
+  // Applies a client-side predicted transform without touching authoritative server tick tracking.
+  public applyClientPredictedTransform(position: Vector3Like, rotation?: QuaternionLike): void {
+    this._currentPosition.copy(position);
+    this._targetPosition.copy(position);
+    this._entityRoot.position.copy(this._currentPosition);
+    this._interpolatingPosition = false;
+
+    if (rotation) {
+      this._currentRotation.copy(rotation);
+      this._targetRotation.copy(rotation);
+      this._entityRoot.quaternion.copy(this._currentRotation);
+      this._interpolatingRotation = false;
+    }
+
+    this._needsMatrixUpdate.add(this._entityRoot);
+    this._needsWorldBoundingBoxUpdate = true;
+  }
   
   public setRotationInterpolationMs(interpolationMs: number | null): void {
     this._rotationInterpolationTimeS = this._resolveInterpolationTimeS(interpolationMs);
