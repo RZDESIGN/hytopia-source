@@ -61,6 +61,7 @@ export interface DebugPanelConfig {
     instancedMeshCount: number;
     drawCallsSaved: number;
     attributeElementsUpdated: number;
+    attributeUploadsSkipped: number;
   };
   sceneUI: {
     count: number;
@@ -139,6 +140,7 @@ export default class DebugPanel {
       instancedMeshCount: 0,
       drawCallsSaved: 0,
       attributeElementsUpdated: 0,
+      attributeUploadsSkipped: 0,
     },
     sceneUI: {
       count: 0,
@@ -249,6 +251,7 @@ export default class DebugPanel {
     gltfFolder.add(this._config.gltf, 'instancedMeshCount').name('Instanced Meshes');
     gltfFolder.add(this._config.gltf, 'drawCallsSaved').name('Draw Calls Saved');
     gltfFolder.add(this._config.gltf, 'attributeElementsUpdated').name('Attr El Update');
+    gltfFolder.add(this._config.gltf, 'attributeUploadsSkipped').name('Attr Uploads Skip');
 
     // Scene UI Stats panel
     const sceneUIFolder = this._gui.addFolder('Scene UI');
@@ -380,6 +383,7 @@ export default class DebugPanel {
     this._config.gltf.instancedMeshCount = GLTFStats.instancedMeshCount;
     this._config.gltf.drawCallsSaved = GLTFStats.drawCallsSaved;
     this._config.gltf.attributeElementsUpdated = GLTFStats.attributeElementsUpdated;
+    this._config.gltf.attributeUploadsSkipped = GLTFStats.attributeUploadsSkipped;
   }
 
   private _updateSceneUIStats(): void {

@@ -89,8 +89,6 @@ const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
 const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
 
 // Working variables
-const attributes: InstancedBufferAttribute[] = [];
-const clonedMeshArray: Mesh[] = [];
 const opaqueClonedMeshes: Mesh[] = [];
 const transparentClonedMeshes: Mesh[] = [];
 const usedColorTextureSet: Set<Texture> = new Set();
@@ -598,6 +596,22 @@ type SourceMeshAttributeCounters = {
   nonDefaultEmissive: number;
 };
 
+type CachedInstanceState = {
+  lastIndex: number;
+  lastInstancedMesh: InstancedMeshEx | null;
+  matrixSnapshot: Float32Array;
+  skyLight: number;
+  colorR: number;
+  colorG: number;
+  colorB: number;
+  opacity: number;
+  lightLevel: number;
+  emissiveR: number;
+  emissiveG: number;
+  emissiveB: number;
+  emissiveIntensity: number;
+};
+
 // Necessary to keep track of various information for resource management.
 // TODO: The current resource management might be more complex than necessary.
 // Simplify if possible.
@@ -635,6 +649,7 @@ export default class GLTFManager {
   private _gltfToEntry: Map<Promise<GLTF> | GLTF, GLTFEntry> = new Map();
   private _sourceMeshToEntry: Map<Mesh, GLTFEntry> = new Map();
   private _clonedMeshToSourceMesh: Map<Mesh, Mesh> = new Map();
+  private _instanceStateCache: WeakMap<Mesh, CachedInstanceState> = new WeakMap();
 
   constructor(game: Game) {
     this._game = game;
@@ -1235,14 +1250,11 @@ export default class GLTFManager {
       console.warn(`GLTFManager._processClonedMeshes(): Client implementation error. counters not found for sourceMesh.`);
     }
 
-    // Determine which attributes need to be updated based on counters
-    // If counters not found, use true (no optimization but renders correctly)
     const needsColorAttribute = counters ? counters.nonDefaultColor > 0 : true;
     const needsOpacityAttribute = counters ? counters.nonDefaultOpacity > 0 : true;
     const needsLightLevelAttribute = this._game.entityManager.hasLightLevelVolumeUpdatedOnce;
     const needsEmissiveAttribute = counters ? counters.nonDefaultEmissive > 0 : true;
 
-    // Select appropriate InstancedMesh based on cloned mesh count
     let instancedMeshIndex = 0;
     while (clonedMeshes.length > instancedMeshPairs[instancedMeshIndex].opaque.instanceMatrix.count) {
       instancedMeshIndex++;
@@ -1250,78 +1262,123 @@ export default class GLTFManager {
     const targetPair = instancedMeshPairs[instancedMeshIndex];
     const instancedMesh = isTransparent ? targetPair.transparent : targetPair.opaque;
 
+    // Pre-fetch attribute references for the single-pass loop
+    const skyLightAttr = instancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE)!;
+    const opacityAttr = needsOpacityAttribute ? instancedMesh.geometry.getAttribute(INSTANCE_OPACITY_ATTRIBUTE)! : null;
+    const lightLevelAttr = needsLightLevelAttribute ? instancedMesh.geometry.getAttribute(INSTANCE_LIGHT_LEVEL_ATTRIBUTE)! : null;
+    const emissiveAttr = needsEmissiveAttribute ? instancedMesh.geometry.getAttribute(INSTANCE_EMISSIVE_ATTRIBUTE)! : null;
+
+    let anyMatrixDirty = false;
+    let anySkyLightDirty = false;
+    let anyColorDirty = false;
+    let anyOpacityDirty = false;
+    let anyLightLevelDirty = false;
+    let anyEmissiveDirty = false;
+
     let index = 0;
 
     for (const clonedMesh of clonedMeshes) {
-      // Accessing all cloned meshes every animation frame, copying necessary data, and transferring
-      // it to the WebGL buffer may be costly for both the CPU and GPU. However, since the rendering
-      // cost reduction currently provides a much greater performance benefit, this is not a concern
-      // for now. If this cost becomes an issue, the following optimizations could be considered:
-      // * Somehow introduce a mechanism to allow the instance attribute array is treated as a property
-      //   of cloned meshes.
-      // * Transfer instance attribute values to the WebGL buffer only when changes occur.
-
       const material = clonedMesh.material as EmissiveMeshBasicMaterial;
 
       if (material.map) {
         usedColorTextureSet.add(material.map);
       }
 
-      // Assumes that the InstancedMesh is directly under the Scene and
-      // its World Matrix is an Identity Matrix.
-      instancedMesh.setMatrixAt(index, clonedMesh.matrixWorld);
-      instancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE)!.setX(
-        index,
-        Entity.getEffectiveSkyLight(this._game, clonedMesh),
-      );
+      let cached = this._instanceStateCache.get(clonedMesh);
+      const isNew = !cached;
 
-      clonedMeshArray[index] = clonedMesh;
+      if (!cached) {
+        cached = {
+          lastIndex: -1,
+          lastInstancedMesh: null,
+          matrixSnapshot: new Float32Array(16),
+          skyLight: NaN,
+          colorR: NaN, colorG: NaN, colorB: NaN,
+          opacity: NaN,
+          lightLevel: NaN,
+          emissiveR: NaN, emissiveG: NaN, emissiveB: NaN, emissiveIntensity: NaN,
+        };
+        this._instanceStateCache.set(clonedMesh, cached);
+      }
+
+      // Force full write when this mesh is new, moved to a different instance
+      // slot, or targets a different InstancedMesh (e.g. after a resize).
+      const forceUpdate = isNew || cached.lastIndex !== index || cached.lastInstancedMesh !== instancedMesh;
+
+      // --- Matrix (always needed) ---
+      const elements = clonedMesh.matrixWorld.elements;
+      let matrixChanged = forceUpdate;
+      if (!matrixChanged) {
+        const snap = cached.matrixSnapshot;
+        for (let j = 0; j < 16; j++) {
+          if (elements[j] !== snap[j]) { matrixChanged = true; break; }
+        }
+      }
+      if (matrixChanged) {
+        instancedMesh.setMatrixAt(index, clonedMesh.matrixWorld);
+        cached.matrixSnapshot.set(elements);
+        anyMatrixDirty = true;
+      }
+
+      // --- Sky light (always needed) ---
+      const skyLight = Entity.getEffectiveSkyLight(this._game, clonedMesh);
+      if (forceUpdate || skyLight !== cached.skyLight) {
+        skyLightAttr.setX(index, skyLight);
+        cached.skyLight = skyLight;
+        anySkyLightDirty = true;
+      }
+
+      // --- Color ---
+      if (needsColorAttribute) {
+        const { r, g, b } = material.color;
+        if (forceUpdate || r !== cached.colorR || g !== cached.colorG || b !== cached.colorB) {
+          instancedMesh.setColorAt(index, material.color);
+          cached.colorR = r;
+          cached.colorG = g;
+          cached.colorB = b;
+          anyColorDirty = true;
+        }
+      }
+
+      // --- Opacity ---
+      if (needsOpacityAttribute) {
+        if (forceUpdate || material.opacity !== cached.opacity) {
+          opacityAttr!.setX(index, material.opacity);
+          cached.opacity = material.opacity;
+          anyOpacityDirty = true;
+        }
+      }
+
+      // --- Light level ---
+      if (needsLightLevelAttribute) {
+        const lightLevel = Entity.getEffectiveLightLevel(this._game, clonedMesh);
+        if (forceUpdate || lightLevel !== cached.lightLevel) {
+          lightLevelAttr!.setX(index, lightLevel);
+          cached.lightLevel = lightLevel;
+          anyLightLevelDirty = true;
+        }
+      }
+
+      // --- Emissive ---
+      if (needsEmissiveAttribute) {
+        const { r: er, g: eg, b: eb } = material.customEmissive;
+        const ei = material.customEmissiveIntensity;
+        if (forceUpdate || er !== cached.emissiveR || eg !== cached.emissiveG || eb !== cached.emissiveB || ei !== cached.emissiveIntensity) {
+          emissiveAttr!.setXYZW(index, er, eg, eb, ei);
+          cached.emissiveR = er;
+          cached.emissiveG = eg;
+          cached.emissiveB = eb;
+          cached.emissiveIntensity = ei;
+          anyEmissiveDirty = true;
+        }
+      }
+
+      cached.lastIndex = index;
+      cached.lastInstancedMesh = instancedMesh;
       index++;
     }
 
-    if (needsColorAttribute) {
-      for (let i = 0; i < index; i++) {
-        const clonedMesh = clonedMeshArray[i];
-        const material = clonedMesh.material as EmissiveMeshBasicMaterial;
-        instancedMesh.setColorAt(i, material.color);
-      }
-    }
-
-    if (needsOpacityAttribute) {
-      const opacityAttribute = instancedMesh.geometry.getAttribute(INSTANCE_OPACITY_ATTRIBUTE)!;
-      for (let i = 0; i < index; i++) {
-        const clonedMesh = clonedMeshArray[i];
-        const material = clonedMesh.material as EmissiveMeshBasicMaterial;
-        opacityAttribute.setX(i, material.opacity);
-      }
-    }
-
-    if (needsLightLevelAttribute) {
-      const lightLevelAttribute = instancedMesh.geometry.getAttribute(INSTANCE_LIGHT_LEVEL_ATTRIBUTE)!;
-      for (let i = 0; i < index; i++) {
-        const clonedMesh = clonedMeshArray[i];
-        lightLevelAttribute.setX(i, Entity.getEffectiveLightLevel(this._game, clonedMesh));
-      }
-    }
-
-    if (needsEmissiveAttribute) {
-      const emissiveAttribute = instancedMesh.geometry.getAttribute(INSTANCE_EMISSIVE_ATTRIBUTE)!;
-      for (let i = 0; i < index; i++) {
-        const clonedMesh = clonedMeshArray[i];
-        const material = clonedMesh.material as EmissiveMeshBasicMaterial;
-        // vec4: rgb = emissive color, a = emissive intensity
-        emissiveAttribute.setXYZW(
-          i,
-          material.customEmissive.r,
-          material.customEmissive.g,
-          material.customEmissive.b,
-          material.customEmissiveIntensity,
-        );
-      }
-    }
-
     instancedMesh.count = index;
-    clonedMeshArray.length = 0;
 
     if (index > 0) {
       this._game.renderer.addToScene(instancedMesh);
@@ -1345,40 +1402,71 @@ export default class GLTFManager {
         useInstancedTexture = true;
       }
 
-      attributes.push(instancedMesh.instanceMatrix);
+      // Only mark attributes as needing GPU upload when their data actually changed.
+      // This avoids costly bufferSubData calls for instance data that is identical
+      // to the previous frame (e.g. stationary entities, unchanged lighting).
 
-      if (needsColorAttribute) {
-        attributes.push(instancedMesh.instanceColor!);
+      if (anyMatrixDirty) {
+        instancedMesh.instanceMatrix.clearUpdateRanges();
+        instancedMesh.instanceMatrix.addUpdateRange(0, index * 16);
+        instancedMesh.instanceMatrix.needsUpdate = true;
+        GLTFStats.attributeElementsUpdated += index * 16;
       }
 
-      if (needsOpacityAttribute) {
-        attributes.push(instancedMesh.geometry.getAttribute(INSTANCE_OPACITY_ATTRIBUTE)! as InstancedBufferAttribute);
+      if (anyColorDirty && needsColorAttribute) {
+        instancedMesh.instanceColor!.clearUpdateRanges();
+        instancedMesh.instanceColor!.addUpdateRange(0, index * 3);
+        (instancedMesh.instanceColor! as InstancedBufferAttribute).needsUpdate = true;
+        GLTFStats.attributeElementsUpdated += index * 3;
       }
 
-      if (needsLightLevelAttribute) {
-        attributes.push(instancedMesh.geometry.getAttribute(INSTANCE_LIGHT_LEVEL_ATTRIBUTE)! as InstancedBufferAttribute);
+      if (anyOpacityDirty && needsOpacityAttribute) {
+        const attr = opacityAttr! as InstancedBufferAttribute;
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, index * attr.itemSize);
+        attr.needsUpdate = true;
+        GLTFStats.attributeElementsUpdated += index * attr.itemSize;
       }
 
-      attributes.push(instancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE)! as InstancedBufferAttribute);
+      if (anySkyLightDirty) {
+        const attr = skyLightAttr as InstancedBufferAttribute;
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, index * attr.itemSize);
+        attr.needsUpdate = true;
+        GLTFStats.attributeElementsUpdated += index * attr.itemSize;
+      }
 
-      if (needsEmissiveAttribute) {
-        attributes.push(instancedMesh.geometry.getAttribute(INSTANCE_EMISSIVE_ATTRIBUTE)! as InstancedBufferAttribute);
+      if (anyLightLevelDirty && needsLightLevelAttribute) {
+        const attr = lightLevelAttr! as InstancedBufferAttribute;
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, index * attr.itemSize);
+        attr.needsUpdate = true;
+        GLTFStats.attributeElementsUpdated += index * attr.itemSize;
+      }
+
+      if (anyEmissiveDirty && needsEmissiveAttribute) {
+        const attr = emissiveAttr! as InstancedBufferAttribute;
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, index * attr.itemSize);
+        attr.needsUpdate = true;
+        GLTFStats.attributeElementsUpdated += index * attr.itemSize;
       }
 
       if (useInstancedTexture) {
-        attributes.push(instancedMesh.geometry.getAttribute(INSTANCE_MAP_INDEX_ATTRIBUTE)! as InstancedBufferAttribute);
+        const attr = instancedMesh.geometry.getAttribute(INSTANCE_MAP_INDEX_ATTRIBUTE)! as InstancedBufferAttribute;
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, index * attr.itemSize);
+        attr.needsUpdate = true;
+        GLTFStats.attributeElementsUpdated += index * attr.itemSize;
       }
 
-      for (const attribute of attributes) {
-        attribute.clearUpdateRanges();
-        attribute.addUpdateRange(0, index * attribute.itemSize);
-        attribute.needsUpdate = true;
-        GLTFStats.attributeElementsUpdated += index * attribute.itemSize;
-      }
-      attributes.length = 0;
+      if (!anyMatrixDirty) GLTFStats.attributeUploadsSkipped++;
+      if (!anySkyLightDirty) GLTFStats.attributeUploadsSkipped++;
+      if (needsColorAttribute && !anyColorDirty) GLTFStats.attributeUploadsSkipped++;
+      if (needsOpacityAttribute && !anyOpacityDirty) GLTFStats.attributeUploadsSkipped++;
+      if (needsLightLevelAttribute && !anyLightLevelDirty) GLTFStats.attributeUploadsSkipped++;
+      if (needsEmissiveAttribute && !anyEmissiveDirty) GLTFStats.attributeUploadsSkipped++;
 
-      // Since the Frustum is slightly enlarged, this measurement is not
-      // entirely accurate, but it should be taken only as a rough reference.
       GLTFStats.drawCallsSaved += index - 1;
     }
     usedColorTextureSet.clear();
