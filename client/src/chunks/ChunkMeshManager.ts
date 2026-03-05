@@ -33,6 +33,18 @@ export default class ChunkMeshManager {
     this._game = game;
   }
 
+  public get batchIds(): IterableIterator<BatchId> {
+    return this._batchIds.values();
+  }
+
+  public get batchCount(): number {
+    return this._batchIds.size;
+  }
+
+  public hasBatch(batchId: BatchId): boolean {
+    return this._batchIds.has(batchId);
+  }
+
   private _createOrUpdateMesh(id: BatchId, data: BlocksBufferGeometryData, cache: Map<BatchId, Mesh>, material: Material): Mesh {
     const { positions, normals, uvs, indices, colors, lightLevels, foamLevels, foamLevelsDiag } = data;
 
@@ -229,6 +241,22 @@ export default class ChunkMeshManager {
     }
   }
 
+  public setBatchInScene(batchId: BatchId, inScene: boolean): void {
+    const liquidMesh = this._batchLiquidMeshes.get(batchId);
+    const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
+    const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
+
+    if (liquidMesh) {
+      this._setMeshInScene(liquidMesh, inScene);
+    }
+    if (opaqueSolidMesh) {
+      this._setMeshInScene(opaqueSolidMesh, inScene);
+    }
+    if (transparentSolidMesh) {
+      this._setMeshInScene(transparentSolidMesh, inScene);
+    }
+  }
+
   public get solidMeshesInScene(): Mesh<BufferGeometry, MeshBasicMaterial>[] {
     if (this._solidMeshesInSceneDirty) {
       this._solidMeshesInScene.length = 0;
@@ -257,24 +285,7 @@ export default class ChunkMeshManager {
 
   public addAllBatchMeshesToScene(): void {
     for (const batchId of this._batchIds) {
-      const liquidMesh = this._batchLiquidMeshes.get(batchId);
-      const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
-      const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
-
-      if (!liquidMesh && !opaqueSolidMesh && !transparentSolidMesh) {
-        continue;
-      }
-
-      if (liquidMesh) {
-        this._setMeshInScene(liquidMesh, true);
-      }
-      if (opaqueSolidMesh) {
-        this._setMeshInScene(opaqueSolidMesh, true);
-      }
-      if (transparentSolidMesh) {
-        this._setMeshInScene(transparentSolidMesh, true);
-      }
-
+      this.setBatchInScene(batchId, true);
       ChunkStats.visibleCount++;
     }
   }
