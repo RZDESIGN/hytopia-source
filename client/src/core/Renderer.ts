@@ -296,18 +296,21 @@ export default class Renderer {
     this._renderer.info.reset();
     const pp = this._game.settingsManager.qualityPerfTradeoff.postProcessing;
     if (pp?.outline || pp?.bloom || pp?.smaa) {
+      const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
       this._renderPass.camera = this._game.camera.activeCamera;
       this._viewModelRenderPass.camera = this._game.camera.activeCamera;
       this._viewModelRenderPass.enabled = this._firstPersonViewModelEntity !== undefined;
       this._outlinePass.enabled = !!pp.outline;
       this._bloomPass.enabled = !!pp.bloom;
       this._smaaPass.enabled = !!pp.smaa;
-      if (pp.outline) {
+      if (hasOutlineTargets) {
         this._outlinePass.camera = this._game.camera.activeCamera;
         this._outlinePass.setOutlineTargets(this._game.entityManager.getOutlineTargets());
+      } else {
+        this._outlinePass.clearOutlineTargets();
       }
       this._effectComposer.render();
-      if (pp.outline) {
+      if (hasOutlineTargets) {
         this._game.entityManager.clearOutlineTargets();
         this._outlinePass.clearOutlineTargets();
       }

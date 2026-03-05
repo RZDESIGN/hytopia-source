@@ -21,11 +21,11 @@ import {
   Quaternion,
   type QuaternionLike,
   Texture,
-  Vector2,
   Vector3,
   type Vector3Like,
   WebGLProgramParametersWithUniforms,
 } from 'three';
+import type { Vector2 } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
 import { type EntityId } from './EntityConstants';
 import EntityStats from './EntityStats';
@@ -53,7 +53,6 @@ const MAX_UPDATE_SKIP_FRAMES = 4;
 const NEAR_DISTANCE_SQUARED = 16 * 16; // 1 Chunk = 16 Blocks
 
 // Working variables
-const vec2 = new Vector2();
 const corners: Vector3[] = new Array(8).fill(undefined).map(() => new Vector3());
 const color = new Color();
 const quaternion = new Quaternion();
@@ -2162,7 +2161,9 @@ export default class Entity {
       // sync their visibility with the chunk. Otherwise, there could be cases where a chunk is invisible
       // but the entity remains visible, which could make the entity appear to be floating in mid-air.
       const coord = this.position;
-      this._distanceToCameraSquared = fromVec2.distanceToSquared(vec2.set(coord.x, coord.z));
+      const dx = fromVec2.x - coord.x;
+      const dz = fromVec2.y - coord.z;
+      this._distanceToCameraSquared = dx * dx + dz * dz;
       this.visible = this._distanceToCameraSquared <= viewDistanceSquared;
       if (this.visible) {
         EntityStats.inViewDistanceCount++;

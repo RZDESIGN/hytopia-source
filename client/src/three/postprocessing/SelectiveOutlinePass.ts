@@ -381,11 +381,18 @@ interface TargetEntry {
   targetIndex: number;
 }
 
+type MaskMaterialVariants = {
+  none: ShaderMaterial;
+  map: ShaderMaterial;
+  alphaMap: ShaderMaterial;
+  mapAndAlphaMap: ShaderMaterial;
+};
+
 export class SelectiveOutlinePass extends Pass {
   private _camera: PerspectiveCamera;
   private _fsQuad: FullScreenQuad;
-  private _maskMaterial: ShaderMaterial;
-  private _maskNoDepthMaterial: ShaderMaterial;
+  private _occludedMaskMaterials: MaskMaterialVariants;
+  private _nonOccludedMaskMaterials: MaskMaterialVariants;
   private _occludedMaskRenderTarget: WebGLRenderTarget;
   private _nonOccludedMaskRenderTarget: WebGLRenderTarget;
   private _outlineMaterial: ShaderMaterial;
@@ -423,21 +430,8 @@ export class SelectiveOutlinePass extends Pass {
       },
     );
 
-    this._maskMaterial = new ShaderMaterial({
-      uniforms: UniformsUtils.clone(MaskShader.uniforms),
-      vertexShader: MaskShader.vertexShader,
-      fragmentShader: MaskShader.fragmentShader,
-      defines: {},
-      depthTest: true,
-    });
-
-    this._maskNoDepthMaterial = new ShaderMaterial({
-      uniforms: UniformsUtils.clone(MaskNoDepthShader.uniforms),
-      vertexShader: MaskNoDepthShader.vertexShader,
-      fragmentShader: MaskNoDepthShader.fragmentShader,
-      defines: {},
-      depthTest: true,
-    });
+    this._occludedMaskMaterials = this._createMaskMaterialVariants(MaskShader, true);
+    this._nonOccludedMaskMaterials = this._createMaskMaterialVariants(MaskNoDepthShader, true);
 
     this._outlineMaterial = new ShaderMaterial({
       uniforms: UniformsUtils.clone(OutlineShader.uniforms),
@@ -476,9 +470,69 @@ export class SelectiveOutlinePass extends Pass {
     this.enabled = false;
   }
 
-  // NOTE: This callback updates material defines per-mesh and sets needsUpdate = true.
-  // We rely on Three.js internally caching compiled shader programs by defines combination,
-  // so only the first occurrence of each combination triggers compilation.
+  private _createMaskMaterialVariants(shader: typeof MaskShader | typeof MaskNoDepthShader, depthTest: boolean): MaskMaterialVariants {
+    const create = (useMap: boolean, useAlphaMap: boolean): ShaderMaterial => {
+      const defines: Record<string, string> = {};
+
+      if (useMap) {
+        defines[DEFINE_USE_MAP] = '';
+      }
+
+      if (useAlphaMap) {
+        defines[DEFINE_USE_ALPHA_MAP] = '';
+      }
+
+      return new ShaderMaterial({
+        uniforms: UniformsUtils.clone(shader.uniforms),
+        vertexShader: shader.vertexShader,
+        fragmentShader: shader.fragmentShader,
+        defines,
+        depthTest,
+      });
+    };
+
+    return {
+      none: create(false, false),
+      map: create(true, false),
+      alphaMap: create(false, true),
+      mapAndAlphaMap: create(true, true),
+    };
+  }
+
+  private _setMaskMaterialUniforms(maskMaterials: MaskMaterialVariants, depthTexture: DepthTexture | null): void {
+    const materials = [
+      maskMaterials.none,
+      maskMaterials.map,
+      maskMaterials.alphaMap,
+      maskMaterials.mapAndAlphaMap,
+    ];
+
+    for (const material of materials) {
+      if (UNIFORM_T_DEPTH in material.uniforms) {
+        material.uniforms[UNIFORM_T_DEPTH].value = depthTexture;
+      }
+      if (UNIFORM_CAMERA_NEAR in material.uniforms) {
+        material.uniforms[UNIFORM_CAMERA_NEAR].value = this._camera.near;
+      }
+      if (UNIFORM_CAMERA_FAR in material.uniforms) {
+        material.uniforms[UNIFORM_CAMERA_FAR].value = this._camera.far;
+      }
+    }
+  }
+
+  private _selectMaskMaterial(maskMaterials: MaskMaterialVariants, useMap: boolean, useAlphaMap: boolean): ShaderMaterial {
+    if (useMap && useAlphaMap) {
+      return maskMaterials.mapAndAlphaMap;
+    }
+    if (useMap) {
+      return maskMaterials.map;
+    }
+    if (useAlphaMap) {
+      return maskMaterials.alphaMap;
+    }
+    return maskMaterials.none;
+  }
+
   private _onBeforeRender = function(
     this: Mesh,
     _renderer: never,
@@ -487,61 +541,48 @@ export class SelectiveOutlinePass extends Pass {
     _geometry: never,
     material: ShaderMaterial,
   ): void {
-    const map = this.userData[USERDATA_OUTLINE_MAP];
-    const alphaMap = this.userData[USERDATA_OUTLINE_ALPHA_MAP];
-    const useMap = !!map;
-    const useAlphaMap = !!alphaMap;
-
-    // Update defines if needed
-    const definesChanged =
-      (useMap !== (DEFINE_USE_MAP in material.defines)) ||
-      (useAlphaMap !== (DEFINE_USE_ALPHA_MAP in material.defines));
-
-    if (definesChanged) {
-      if (useMap) {
-        material.defines[DEFINE_USE_MAP] = '';
-      } else {
-        delete material.defines[DEFINE_USE_MAP];
-      }
-      if (useAlphaMap) {
-        material.defines[DEFINE_USE_ALPHA_MAP] = '';
-      } else {
-        delete material.defines[DEFINE_USE_ALPHA_MAP];
-      }
-      material.needsUpdate = true;
-    }
-
     material.uniforms[UNIFORM_TARGET_INDEX].value = this.userData[USERDATA_OUTLINE_TARGET_INDEX] + 1;
-    material.uniforms[UNIFORM_T_MAP].value = map ?? null;
-    material.uniforms[UNIFORM_T_ALPHA_MAP].value = alphaMap ?? null;
+    material.uniforms[UNIFORM_T_MAP].value = this.userData[USERDATA_OUTLINE_MAP] ?? null;
+    material.uniforms[UNIFORM_T_ALPHA_MAP].value = this.userData[USERDATA_OUTLINE_ALPHA_MAP] ?? null;
     material.uniforms[UNIFORM_ALPHA_TEST].value = this.userData[USERDATA_OUTLINE_ALPHA_TEST] ?? 0.0;
     material.uniforms[UNIFORM_OPACITY].value = this.userData[USERDATA_OUTLINE_OPACITY] ?? 1.0;
     material.side = this.userData[USERDATA_OUTLINE_SIDE];
     material.uniformsNeedUpdate = true;
   };
 
-  private _traverseAndSetupMaterials = (obj: Object3D, maskMaterial: ShaderMaterial, targetIndex: number): void => {
+  private _traverseAndSetupMaterials = (obj: Object3D, maskMaterials: MaskMaterialVariants, targetIndex: number): void => {
     if (obj instanceof Mesh) {
       originalMaterials.set(obj, obj.material);
       originalOnBeforeRenders.set(obj, obj.onBeforeRender);
 
       // Carry over alpha test, map, alphaMap, opacity, and side from original material
       const origMat = obj.material as any;
-      if (origMat.alphaTest > 0) {
+      const alphaTest = origMat.alphaTest ?? 0.0;
+      if (alphaTest > 0) {
         // Only set textures/opacity if alphaTest is enabled (matches Three.js behavior)
         obj.userData[USERDATA_OUTLINE_MAP] = origMat.map ?? null;
         obj.userData[USERDATA_OUTLINE_ALPHA_MAP] = origMat.alphaMap ?? null;
-        obj.userData[USERDATA_OUTLINE_ALPHA_TEST] = origMat.alphaTest;
+        obj.userData[USERDATA_OUTLINE_ALPHA_TEST] = alphaTest;
         obj.userData[USERDATA_OUTLINE_OPACITY] = origMat.opacity ?? 1.0;
+      } else {
+        obj.userData[USERDATA_OUTLINE_MAP] = null;
+        obj.userData[USERDATA_OUTLINE_ALPHA_MAP] = null;
+        obj.userData[USERDATA_OUTLINE_ALPHA_TEST] = 0.0;
+        obj.userData[USERDATA_OUTLINE_OPACITY] = 1.0;
       }
       obj.userData[USERDATA_OUTLINE_SIDE] = origMat.side;
 
+      const maskMaterial = this._selectMaskMaterial(
+        maskMaterials,
+        !!obj.userData[USERDATA_OUTLINE_MAP],
+        !!obj.userData[USERDATA_OUTLINE_ALPHA_MAP],
+      );
       obj.material = maskMaterial;
       obj.onBeforeRender = this._onBeforeRender;
       obj.userData[USERDATA_OUTLINE_TARGET_INDEX] = targetIndex;
     }
     for (const child of obj.children) {
-      this._traverseAndSetupMaterials(child, maskMaterial, targetIndex);
+      this._traverseAndSetupMaterials(child, maskMaterials, targetIndex);
     }
   }
 
@@ -549,7 +590,7 @@ export class SelectiveOutlinePass extends Pass {
   private _renderMask(
     renderer: WebGLRenderer,
     targets: TargetEntry[],
-    maskMaterial: ShaderMaterial,
+    maskMaterials: MaskMaterialVariants,
     renderTarget: WebGLRenderTarget,
   ): void {
     for (const { object3d, targetIndex } of targets) {
@@ -558,7 +599,7 @@ export class SelectiveOutlinePass extends Pass {
         object3d.parent.remove(object3d);
       }
       this._outlineScene.add(object3d);
-      this._traverseAndSetupMaterials(object3d, maskMaterial, targetIndex);
+      this._traverseAndSetupMaterials(object3d, maskMaterials, targetIndex);
     }
 
     renderer.setRenderTarget(renderTarget);
@@ -661,15 +702,14 @@ export class SelectiveOutlinePass extends Pass {
 
     // Render occluded mask (depth-tested against scene)
     if (this._occludedTargets.length > 0) {
-      this._maskMaterial.uniforms[UNIFORM_T_DEPTH].value = readBuffer.depthTexture;
-      this._maskMaterial.uniforms[UNIFORM_CAMERA_NEAR].value = this._camera.near;
-      this._maskMaterial.uniforms[UNIFORM_CAMERA_FAR].value = this._camera.far;
-      this._renderMask(renderer, this._occludedTargets, this._maskMaterial, this._occludedMaskRenderTarget);
+      this._setMaskMaterialUniforms(this._occludedMaskMaterials, readBuffer.depthTexture);
+      this._renderMask(renderer, this._occludedTargets, this._occludedMaskMaterials, this._occludedMaskRenderTarget);
     }
 
     // Render non-occluded mask (depth-tested against each other only)
     if (this._nonOccludedTargets.length > 0) {
-      this._renderMask(renderer, this._nonOccludedTargets, this._maskNoDepthMaterial, this._nonOccludedMaskRenderTarget);
+      this._setMaskMaterialUniforms(this._nonOccludedMaskMaterials, null);
+      this._renderMask(renderer, this._nonOccludedTargets, this._nonOccludedMaskMaterials, this._nonOccludedMaskRenderTarget);
     }
 
     // HACK: Detach writeBuffer's depth attachment during composite to avoid a WebGL
@@ -703,8 +743,14 @@ export class SelectiveOutlinePass extends Pass {
   public dispose(): void {
     this._occludedMaskRenderTarget.dispose();
     this._nonOccludedMaskRenderTarget.dispose();
-    this._maskMaterial.dispose();
-    this._maskNoDepthMaterial.dispose();
+    this._occludedMaskMaterials.none.dispose();
+    this._occludedMaskMaterials.map.dispose();
+    this._occludedMaskMaterials.alphaMap.dispose();
+    this._occludedMaskMaterials.mapAndAlphaMap.dispose();
+    this._nonOccludedMaskMaterials.none.dispose();
+    this._nonOccludedMaskMaterials.map.dispose();
+    this._nonOccludedMaskMaterials.alphaMap.dispose();
+    this._nonOccludedMaskMaterials.mapAndAlphaMap.dispose();
     this._outlineMaterial.dispose();
     this._fsQuad.dispose();
   }
