@@ -90,14 +90,16 @@ export default class ChunkManager {
 
   private _onBlocksPacket = (payload: NetworkManagerEventPayload.IBlocksPacket) => {
     const update: Record<ChunkId, { localCoordinate: Vector3Like, blockId: BlockId, blockRotationIndex?: number }[]> = {};
+    const { deserializedBlocks } = payload;
 
-    payload.deserializedBlocks.forEach((deserializedBlock: DeserializedBlock) => {
+    for (let i = 0; i < deserializedBlocks.length; i++) {
+      const deserializedBlock: DeserializedBlock = deserializedBlocks[i];
       const { id: blockId, globalCoordinate, blockRotationIndex } = deserializedBlock;
       const chunkId = Chunk.globalCoordinateToChunkId(globalCoordinate);
       const chunk = this._registry.getChunk(chunkId);
 
       if (!chunk) {
-        return;
+        continue;
       }
 
       const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
@@ -107,7 +109,7 @@ export default class ChunkManager {
         update[chunkId] = [];
       }
       update[chunkId].push({ localCoordinate, blockId, blockRotationIndex });
-    });
+    }
 
     // Since chunks are also managed within the WebWorker, the information will be sent.
     // The worker will handle determining which batches need rebuilding based on block updates.
@@ -122,11 +124,12 @@ export default class ChunkManager {
     const { deserializedChunks } = payload;
     const affectedBatches: Set<BatchId> = new Set();
 
-    deserializedChunks.forEach(deserializedChunk => {
+    for (let i = 0; i < deserializedChunks.length; i++) {
+      const deserializedChunk = deserializedChunks[i];
       const { removed, originCoordinate, blocks, blockRotations } = deserializedChunk;
 
       if (!originCoordinate) {
-        return;
+        continue;
       }
 
       const chunkId = Chunk.originCoordinateToChunkId(originCoordinate);
@@ -161,7 +164,7 @@ export default class ChunkManager {
 
         affectedBatches.add(batchId);
       }
-    });
+    }
 
     // Build affected batches in order of proximity to the player
     const basePosition = this._game.camera.gameCameraAttachedEntity?.position || this._game.camera.activeCamera.position;
@@ -174,13 +177,14 @@ export default class ChunkManager {
     });
 
     // Send batch build messages for affected batches
-    sortedBatches.forEach(batchId => {
+    for (let i = 0; i < sortedBatches.length; i++) {
+      const batchId = sortedBatches[i];
       const chunkIds = this._registry.getBatchChunkIds(batchId);
       
       if (chunkIds.length === 0) {
         // Batch is now empty, remove its meshes
         this._game.chunkMeshManager.removeAllBatchMeshes(batchId);
-        return;
+        continue;
       }
 
       const message: ChunkWorkerChunkBatchBuildMessage = {
@@ -189,7 +193,7 @@ export default class ChunkManager {
         chunkIds,
       };
       this._game.chunkWorkerClient.postMessage(message);
-    });
+    }
   }
 
   private _onChunkBatchBuilt = (payload: WorkerEventPayload.IChunkBatchBuilt): void => {

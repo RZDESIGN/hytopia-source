@@ -295,7 +295,13 @@ export default class Deserializer {
   }
 
   public static deserializeAudios(audios: protocol.AudiosSchema): DeserializedAudios {
-    return audios.map((a: protocol.AudioSchema) => this.deserializeAudio(a));
+    const deserializedAudios = new Array<DeserializedAudio>(audios.length);
+
+    for (let i = 0; i < audios.length; i++) {
+      deserializedAudios[i] = this.deserializeAudio(audios[i]);
+    }
+
+    return deserializedAudios;
   }
 
   public static deserializeBlock(block: protocol.BlockSchema): DeserializedBlock {
@@ -307,7 +313,13 @@ export default class Deserializer {
   }
 
   public static deserializeBlocks(blocks: protocol.BlocksSchema): DeserializedBlocks {
-    return blocks.map((b: protocol.BlockSchema) => this.deserializeBlock(b));
+    const deserializedBlocks = new Array<DeserializedBlock>(blocks.length);
+
+    for (let i = 0; i < blocks.length; i++) {
+      deserializedBlocks[i] = this.deserializeBlock(blocks[i]);
+    }
+
+    return deserializedBlocks;
   }
 
   public static deserializeBlockType(blockType: protocol.BlockTypeSchema): DeserializedBlockType {
@@ -323,7 +335,13 @@ export default class Deserializer {
   }
 
   public static deserializeBlockTypes(blockTypes: protocol.BlockTypesSchema): DeserializedBlockTypes {
-    return blockTypes.map((b: protocol.BlockTypeSchema) => this.deserializeBlockType(b));
+    const deserializedBlockTypes = new Array<DeserializedBlockType>(blockTypes.length);
+
+    for (let i = 0; i < blockTypes.length; i++) {
+      deserializedBlockTypes[i] = this.deserializeBlockType(blockTypes[i]);
+    }
+
+    return deserializedBlockTypes;
   }
 
   public static deserializeCamera(camera: protocol.CameraSchema): DeserializedCamera {
@@ -357,7 +375,13 @@ export default class Deserializer {
   }
 
   public static deserializeChatMessages(chatMessages: protocol.ChatMessagesSchema): DeserializedChatMessages {
-    return chatMessages.map((c: protocol.ChatMessageSchema) => this.deserializeChatMessage(c));
+    const deserializedChatMessages = new Array<DeserializedChatMessage>(chatMessages.length);
+
+    for (let i = 0; i < chatMessages.length; i++) {
+      deserializedChatMessages[i] = this.deserializeChatMessage(chatMessages[i]);
+    }
+
+    return deserializedChatMessages;
   }
 
   public static deserializeChunk(chunk: protocol.ChunkSchema): DeserializedChunk {
@@ -370,7 +394,13 @@ export default class Deserializer {
   }
 
   public static deserializeChunks(chunks: protocol.ChunksSchema): DeserializedChunks {
-    return chunks.map((c: protocol.ChunkSchema) => this.deserializeChunk(c));
+    const deserializedChunks = new Array<DeserializedChunk>(chunks.length);
+
+    for (let i = 0; i < chunks.length; i++) {
+      deserializedChunks[i] = this.deserializeChunk(chunks[i]);
+    }
+
+    return deserializedChunks;
   }
 
   public static deserializeConnection(connection: protocol.ConnectionSchema): DeserializedConnection {
@@ -409,7 +439,13 @@ export default class Deserializer {
   }
 
   public static deserializeEntities(entities: protocol.EntitiesSchema): DeserializedEntities {
-    return entities.map((e: protocol.EntitySchema) => this.deserializeEntity(e));
+    const deserializedEntities = new Array<DeserializedEntity>(entities.length);
+
+    for (let i = 0; i < entities.length; i++) {
+      deserializedEntities[i] = this.deserializeEntity(entities[i]);
+    }
+
+    return deserializedEntities;
   }
 
   public static deserializeModelAnimation(modelAnimation: protocol.ModelAnimationSchema): DeserializedModelAnimation {
@@ -430,7 +466,13 @@ export default class Deserializer {
   }
 
   public static deserializeModelAnimations(modelAnimations: protocol.ModelAnimationSchema[]): DeserializedModelAnimations {
-    return modelAnimations.map((modelAnimation: protocol.ModelAnimationSchema) => this.deserializeModelAnimation(modelAnimation));
+    const deserializedModelAnimations = new Array<DeserializedModelAnimation>(modelAnimations.length);
+
+    for (let i = 0; i < modelAnimations.length; i++) {
+      deserializedModelAnimations[i] = this.deserializeModelAnimation(modelAnimations[i]);
+    }
+
+    return deserializedModelAnimations;
   }
 
   public static deserializeModelNodeOverride(modelNodeOverride: protocol.ModelNodeOverrideSchema): DeserializedModelNodeOverride {
@@ -450,7 +492,13 @@ export default class Deserializer {
   }
 
   public static deserializeModelNodeOverrides(modelNodeOverrides: protocol.ModelNodeOverrideSchema[]): DeserializedModelNodeOverrides {
-    return modelNodeOverrides.map((m: protocol.ModelNodeOverrideSchema) => this.deserializeModelNodeOverride(m));
+    const deserializedModelNodeOverrides = new Array<DeserializedModelNodeOverride>(modelNodeOverrides.length);
+
+    for (let i = 0; i < modelNodeOverrides.length; i++) {
+      deserializedModelNodeOverrides[i] = this.deserializeModelNodeOverride(modelNodeOverrides[i]);
+    }
+
+    return deserializedModelNodeOverrides;
   }
 
   public static deserializeOutlineOptions(outlineOptions: protocol.OutlineSchema): DeserializedOutlineOptions {
@@ -508,7 +556,13 @@ export default class Deserializer {
   }
 
   public static deserializeParticleEmitters(particleEmitters: protocol.ParticleEmittersSchema): DeserializedParticleEmitters {
-    return particleEmitters.map((p: protocol.ParticleEmitterSchema) => this.deserializeParticleEmitter(p));
+    const deserializedParticleEmitters = new Array<DeserializedParticleEmitter>(particleEmitters.length);
+
+    for (let i = 0; i < particleEmitters.length; i++) {
+      deserializedParticleEmitters[i] = this.deserializeParticleEmitter(particleEmitters[i]);
+    }
+
+    return deserializedParticleEmitters;
   }
 
   public static deserializePhysicsDebugRaycast(physicsDebugRaycast: protocol.PhysicsDebugRaycastSchema): DeserializedPhysicsDebugRaycast {
@@ -521,7 +575,13 @@ export default class Deserializer {
   }
 
   public static deserializePhysicsDebugRaycasts(physicsDebugRaycasts: protocol.PhysicsDebugRaycastsSchema): DeserializedPhysicsDebugRaycasts {
-    return physicsDebugRaycasts.map((r: protocol.PhysicsDebugRaycastSchema) => this.deserializePhysicsDebugRaycast(r));
+    const deserializedPhysicsDebugRaycasts = new Array<DeserializedPhysicsDebugRaycast>(physicsDebugRaycasts.length);
+
+    for (let i = 0; i < physicsDebugRaycasts.length; i++) {
+      deserializedPhysicsDebugRaycasts[i] = this.deserializePhysicsDebugRaycast(physicsDebugRaycasts[i]);
+    }
+
+    return deserializedPhysicsDebugRaycasts;
   }
 
   public static deserializePhysicsDebugRender(physicsDebugRender: protocol.PhysicsDebugRenderSchema): DeserializedPhysicsDebugRender {
@@ -541,7 +601,13 @@ export default class Deserializer {
   }
 
   public static deserializePlayers(players: protocol.PlayersSchema): DeserializedPlayers {
-    return players.map((p: protocol.PlayerSchema) => this.deserializePlayer(p));
+    const deserializedPlayers = new Array<DeserializedPlayer>(players.length);
+
+    for (let i = 0; i < players.length; i++) {
+      deserializedPlayers[i] = this.deserializePlayer(players[i]);
+    }
+
+    return deserializedPlayers;
   }
 
   public static deserializeSceneUI(sceneUI: protocol.SceneUISchema): DeserializedSceneUI {
@@ -558,7 +624,13 @@ export default class Deserializer {
   }
 
   public static deserializeSceneUIs(sceneUIs: protocol.SceneUIsSchema): DeserializedSceneUIs {
-    return sceneUIs.map((s: protocol.SceneUISchema) => this.deserializeSceneUI(s));
+    const deserializedSceneUIs = new Array<DeserializedSceneUI>(sceneUIs.length);
+
+    for (let i = 0; i < sceneUIs.length; i++) {
+      deserializedSceneUIs[i] = this.deserializeSceneUI(sceneUIs[i]);
+    }
+
+    return deserializedSceneUIs;
   }
 
   public static deserializeSyncResponse(syncResponse: protocol.SyncResponseSchema): DeserializedSyncResponse {
@@ -603,7 +675,13 @@ export default class Deserializer {
   }
 
   public static deserializeUIDatas(uiDatas: protocol.UIDatasSchema): DeserializedUIDatas {
-    return uiDatas.map((u: protocol.UIDataSchema) => this.deserializeUIData(u));
+    const deserializedUIDatas = new Array<DeserializedUIData>(uiDatas.length);
+
+    for (let i = 0; i < uiDatas.length; i++) {
+      deserializedUIDatas[i] = this.deserializeUIData(uiDatas[i]);
+    }
+
+    return deserializedUIDatas;
   }
 
   public static deserializeVector(vector: protocol.VectorSchema): THREE.Vector3Like {

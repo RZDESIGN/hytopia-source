@@ -405,45 +405,11 @@ export default class NetworkManager {
 
       this._lastPacketServerTick = serverTick;
 
-      if (packetId === protocol.PacketId.WORLD) {
-        if (!this._worldPacketReceived) { // only send on first world packet
-          performance.mark('NetworkManager:world-packet-received');
-          performance.measure('NetworkManager:connected-to-first-packet-time', 'NetworkManager:connected', 'NetworkManager:world-packet-received');
-          performance.measure('NetworkManager:game-ready-time', 'NetworkManager:connecting', 'NetworkManager:world-packet-received');
-          this._game.bridgeManager.sendGameReady();
-        }
-
-        this._worldPacketReceived = true;
-      }
-
+      // Keep gameplay-dominant packets near the top of the dispatch chain.
       switch (packetId) {
-        case protocol.PacketId.AUDIOS:
-          EventRouter.instance.emit(NetworkManagerEventType.AudiosPacket, {
-            deserializedAudios: Deserializer.deserializeAudios(data as protocol.AudiosSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.BLOCKS:
-          EventRouter.instance.emit(NetworkManagerEventType.BlocksPacket, {
-            deserializedBlocks: Deserializer.deserializeBlocks(data as protocol.BlocksSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.BLOCK_TYPES:
-          EventRouter.instance.emit(NetworkManagerEventType.BlockTypesPacket, {
-            deserializedBlockTypes: Deserializer.deserializeBlockTypes(data as protocol.BlockTypesSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.CAMERA:
-          EventRouter.instance.emit(NetworkManagerEventType.CameraPacket, {
-            deserializedCamera: Deserializer.deserializeCamera(data as protocol.CameraSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.CHAT_MESSAGES:
-          EventRouter.instance.emit(NetworkManagerEventType.ChatMessagesPacket, {
-            deserializedChatMessages: Deserializer.deserializeChatMessages(data as protocol.ChatMessagesSchema),
+        case protocol.PacketId.ENTITIES:
+          EventRouter.instance.emit(NetworkManagerEventType.EntitiesPacket, {
+            deserializedEntities: Deserializer.deserializeEntities(data as protocol.EntitiesSchema),
             serverTick,
           });
           break;
@@ -453,25 +419,59 @@ export default class NetworkManager {
             serverTick,
           });
           break;
-        case protocol.PacketId.CONNECTION:
-          this._onConnectionPacket(
-            Deserializer.deserializeConnection(data as protocol.ConnectionSchema),
-          );
-          break;
-        case protocol.PacketId.ENTITIES:
-          EventRouter.instance.emit(NetworkManagerEventType.EntitiesPacket, {
-            deserializedEntities: Deserializer.deserializeEntities(data as protocol.EntitiesSchema),
+        case protocol.PacketId.BLOCKS:
+          EventRouter.instance.emit(NetworkManagerEventType.BlocksPacket, {
+            deserializedBlocks: Deserializer.deserializeBlocks(data as protocol.BlocksSchema),
             serverTick,
           });
           break;
-        case protocol.PacketId.HEARTBEAT:
-          this._lastHeartbeat = performance.now();
+        case protocol.PacketId.WORLD:
+          if (!this._worldPacketReceived) { // only send on first world packet
+            performance.mark('NetworkManager:world-packet-received');
+            performance.measure('NetworkManager:connected-to-first-packet-time', 'NetworkManager:connected', 'NetworkManager:world-packet-received');
+            performance.measure('NetworkManager:game-ready-time', 'NetworkManager:connecting', 'NetworkManager:world-packet-received');
+            this._game.bridgeManager.sendGameReady();
+            this._worldPacketReceived = true;
+          }
+
+          EventRouter.instance.emit(NetworkManagerEventType.WorldPacket, {
+            deserializedWorld: Deserializer.deserializeWorld(data as protocol.WorldSchema),
+            serverTick,
+          });
           break;
-        case protocol.PacketId.LIGHTS:
-          // NOOP - PointLight/SpotLight not supported with switch to MeshBasicMaterial, Reimplement later.
+        case protocol.PacketId.PLAYERS:
+          EventRouter.instance.emit(NetworkManagerEventType.PlayersPacket, {
+            deserializedPlayers: Deserializer.deserializePlayers(data as protocol.PlayersSchema),
+            serverTick,
+          });
           break;
-        case protocol.PacketId.NOTIFICATION_PERMISSION_REQUEST:
-          EventRouter.instance.emit(NetworkManagerEventType.NotificationPermissionRequestPacket, {
+        case protocol.PacketId.CAMERA:
+          EventRouter.instance.emit(NetworkManagerEventType.CameraPacket, {
+            deserializedCamera: Deserializer.deserializeCamera(data as protocol.CameraSchema),
+            serverTick,
+          });
+          break;
+        case protocol.PacketId.UI_DATAS:
+          EventRouter.instance.emit(NetworkManagerEventType.UIDatasPacket, {
+            deserializedUIDatas: Deserializer.deserializeUIDatas(data as protocol.UIDatasSchema),
+            serverTick,
+          });
+          break;
+        case protocol.PacketId.UI:
+          EventRouter.instance.emit(NetworkManagerEventType.UIPacket, {
+            deserializedUI: Deserializer.deserializeUI(data as protocol.UISchema),
+            serverTick,
+          });
+          break;
+        case protocol.PacketId.AUDIOS:
+          EventRouter.instance.emit(NetworkManagerEventType.AudiosPacket, {
+            deserializedAudios: Deserializer.deserializeAudios(data as protocol.AudiosSchema),
+            serverTick,
+          });
+          break;
+        case protocol.PacketId.BLOCK_TYPES:
+          EventRouter.instance.emit(NetworkManagerEventType.BlockTypesPacket, {
+            deserializedBlockTypes: Deserializer.deserializeBlockTypes(data as protocol.BlockTypesSchema),
             serverTick,
           });
           break;
@@ -480,6 +480,40 @@ export default class NetworkManager {
             deserializedParticleEmitters: Deserializer.deserializeParticleEmitters(data as protocol.ParticleEmittersSchema),
             serverTick,
           });
+          break;
+        case protocol.PacketId.SCENE_UIS:
+          EventRouter.instance.emit(NetworkManagerEventType.SceneUIsPacket, {
+            deserializedSceneUIs: Deserializer.deserializeSceneUIs(data as protocol.SceneUIsSchema),
+            serverTick,
+          });
+          break;
+        case protocol.PacketId.CHAT_MESSAGES:
+          EventRouter.instance.emit(NetworkManagerEventType.ChatMessagesPacket, {
+            deserializedChatMessages: Deserializer.deserializeChatMessages(data as protocol.ChatMessagesSchema),
+            serverTick,
+          });
+          break;
+        case protocol.PacketId.HEARTBEAT:
+          this._lastHeartbeat = performance.now();
+          break;
+        case protocol.PacketId.SYNC_RESPONSE:
+          this._onSyncResponsePacket(
+            Deserializer.deserializeSyncResponse(data as protocol.SyncResponseSchema),
+            serverTick,
+          );
+          break;
+        case protocol.PacketId.CONNECTION:
+          this._onConnectionPacket(
+            Deserializer.deserializeConnection(data as protocol.ConnectionSchema),
+          );
+          break;
+        case protocol.PacketId.NOTIFICATION_PERMISSION_REQUEST:
+          EventRouter.instance.emit(NetworkManagerEventType.NotificationPermissionRequestPacket, {
+            serverTick,
+          });
+          break;
+        case protocol.PacketId.LIGHTS:
+          // NOOP - PointLight/SpotLight not supported with switch to MeshBasicMaterial, Reimplement later.
           break;
         case protocol.PacketId.PHYSICS_DEBUG_RAYCASTS:
           EventRouter.instance.emit(NetworkManagerEventType.PhysicsDebugRaycastsPacket, {
@@ -490,42 +524,6 @@ export default class NetworkManager {
         case protocol.PacketId.PHYSICS_DEBUG_RENDER:
           EventRouter.instance.emit(NetworkManagerEventType.PhysicsDebugRenderPacket, {
             deserializedPhysicsDebugRender: Deserializer.deserializePhysicsDebugRender(data as protocol.PhysicsDebugRenderSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.PLAYERS:
-          EventRouter.instance.emit(NetworkManagerEventType.PlayersPacket, {
-            deserializedPlayers: Deserializer.deserializePlayers(data as protocol.PlayersSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.SCENE_UIS:
-          EventRouter.instance.emit(NetworkManagerEventType.SceneUIsPacket, {
-            deserializedSceneUIs: Deserializer.deserializeSceneUIs(data as protocol.SceneUIsSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.SYNC_RESPONSE:
-          this._onSyncResponsePacket(
-            Deserializer.deserializeSyncResponse(data as protocol.SyncResponseSchema),
-            serverTick,
-          );
-          break;
-        case protocol.PacketId.UI:
-          EventRouter.instance.emit(NetworkManagerEventType.UIPacket, {
-            deserializedUI: Deserializer.deserializeUI(data as protocol.UISchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.UI_DATAS:
-          EventRouter.instance.emit(NetworkManagerEventType.UIDatasPacket, {
-            deserializedUIDatas: Deserializer.deserializeUIDatas(data as protocol.UIDatasSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.WORLD:
-          EventRouter.instance.emit(NetworkManagerEventType.WorldPacket, {
-            deserializedWorld: Deserializer.deserializeWorld(data as protocol.WorldSchema),
             serverTick,
           });
           break;

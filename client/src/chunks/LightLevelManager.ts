@@ -36,12 +36,15 @@ export default class LightLevelManager {
   };
 
   private _onChunksPacket = (payload: NetworkManagerEventPayload.IChunksPacket): void => {
-    payload.deserializedChunks.forEach(({ originCoordinate, removed }) => {
+    const { deserializedChunks } = payload;
+
+    for (let i = 0; i < deserializedChunks.length; i++) {
+      const { originCoordinate, removed } = deserializedChunks[i];
       if (removed) {
         const chunkId = Chunk.originCoordinateToChunkId(originCoordinate);
         this._deleteVolume(chunkId);
       }
-    });
+    }
   };
 
   public getLightLevel(chunkId: ChunkId, localCoordinate: Vector3Like): number {

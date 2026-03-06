@@ -29,9 +29,11 @@ export default class BlockTypeManager {
   }
 
   private _onBlockTypesPacket = (payload: NetworkManagerEventPayload.IBlockTypesPacket) => {
-    payload.deserializedBlockTypes.forEach((blockType: DeserializedBlockType) => {
-      this._updateBlockType(blockType);
-    });
+    const { deserializedBlockTypes } = payload;
+
+    for (let i = 0; i < deserializedBlockTypes.length; i++) {
+      this._updateBlockType(deserializedBlockTypes[i]);
+    }
   }
 
   private _updateBlockType = (deserializedBlockType: DeserializedBlockType) => {
