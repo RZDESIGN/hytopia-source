@@ -40,12 +40,15 @@ export default class SkyDistanceVolumeManager {
   };
 
   private _onChunksPacket = (payload: NetworkManagerEventPayload.IChunksPacket): void => {
-    payload.deserializedChunks.forEach(({ originCoordinate, removed }) => {
+    const { deserializedChunks } = payload;
+
+    for (let i = 0; i < deserializedChunks.length; i++) {
+      const { originCoordinate, removed } = deserializedChunks[i];
       if (removed) {
         const chunkId = Chunk.originCoordinateToChunkId(originCoordinate);
         this._deleteVolume(chunkId);
       }
-    });
+    }
   };
 
   public getSkyLightBrightnessByGlobalCoordinate(globalCoordinate: Vector3Like): number {

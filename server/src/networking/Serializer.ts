@@ -83,14 +83,33 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializeBlockType(blockType: BlockType): protocol.BlockTypeSchema {
+    let trimeshIndices: number[] | undefined;
+    let trimeshVertices: number[] | undefined;
+
+    if (blockType.isTrimesh) {
+      const colliderOptions = blockType.colliderOptions as TrimeshColliderOptions;
+      const indices = colliderOptions.indices!;
+      const vertices = colliderOptions.vertices!;
+
+      trimeshIndices = new Array<number>(indices.length);
+      for (let i = 0; i < indices.length; i++) {
+        trimeshIndices[i] = indices[i];
+      }
+
+      trimeshVertices = new Array<number>(vertices.length);
+      for (let i = 0; i < vertices.length; i++) {
+        trimeshVertices[i] = vertices[i];
+      }
+    }
+
     return {
       i: blockType.id,
       l: blockType.isLiquid,
       ll: blockType.lightLevel,
       n: blockType.name,
       t: blockType.textureUri,
-      ti: blockType.isTrimesh ? Array.from((blockType.colliderOptions as TrimeshColliderOptions).indices!) : undefined,
-      tv: blockType.isTrimesh ? Array.from((blockType.colliderOptions as TrimeshColliderOptions).vertices!) : undefined,
+      ti: trimeshIndices,
+      tv: trimeshVertices,
     };
   }
 
@@ -102,7 +121,14 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializeBlockTypeRegistry(blockTypeRegistry: BlockTypeRegistry): protocol.BlockTypesSchema {
-    return blockTypeRegistry.getAllBlockTypes().map(blockType => this.serializeBlockType(blockType));
+    const blockTypes = blockTypeRegistry.getAllBlockTypes();
+    const serializedBlockTypes = new Array<protocol.BlockTypeSchema>(blockTypes.length);
+
+    for (let i = 0; i < blockTypes.length; i++) {
+      serializedBlockTypes[i] = this.serializeBlockType(blockTypes[i]);
+    }
+
+    return serializedBlockTypes;
   }
 
   /**
@@ -113,10 +139,22 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializeChunk(chunk: Chunk): protocol.ChunkSchema {
+    const blocks = new Array<number>(chunk.blocks.length);
+    for (let i = 0; i < chunk.blocks.length; i++) {
+      blocks[i] = chunk.blocks[i];
+    }
+
+    const blockRotations = new Array<number>(chunk.blockRotations.size * 2);
+    let blockRotationIndex = 0;
+    for (const [ index, rotation ] of chunk.blockRotations) {
+      blockRotations[blockRotationIndex++] = index;
+      blockRotations[blockRotationIndex++] = rotation.enumIndex;
+    }
+
     return {
       c: this.serializeVector(chunk.originCoordinate),
-      b: Array.from(chunk.blocks),
-      r: Array.from(chunk.blockRotations).flatMap(([ i, r ]) => [ i, r.enumIndex ]),
+      b: blocks,
+      r: blockRotations,
     };
   }
 
@@ -132,6 +170,18 @@ export default class Serializer {
   public static serializeEntity(entity: Entity): protocol.EntitySchema {
     if (!entity.world || entity.id === undefined) { ErrorHandler.fatalError('Serializer.serializeEntity(): Entity is not in a world'); }
 
+    const modelAnimations = entity.modelAnimations;
+    const serializedModelAnimations = new Array<protocol.ModelAnimationSchema>(modelAnimations.length);
+    for (let i = 0; i < modelAnimations.length; i++) {
+      serializedModelAnimations[i] = this.serializeEntityModelAnimation(modelAnimations[i]);
+    }
+
+    const modelNodeOverrides = entity.modelNodeOverrides;
+    const serializedModelNodeOverrides = new Array<protocol.ModelNodeOverrideSchema>(modelNodeOverrides.length);
+    for (let i = 0; i < modelNodeOverrides.length; i++) {
+      serializedModelNodeOverrides[i] = this.serializeEntityModelNodeOverride(modelNodeOverrides[i]);
+    }
+
     return {
       i: entity.id,
       bt: entity.blockTextureUri,
@@ -140,8 +190,8 @@ export default class Serializer {
       ec: entity.emissiveColor ? this.serializeRgbColor(entity.emissiveColor) : undefined,
       ei: entity.emissiveIntensity,
       m: entity.modelUri,
-      ma: entity.modelAnimations.map(modelAnimation => this.serializeEntityModelAnimation(modelAnimation)),
-      mo: entity.modelNodeOverrides.map(modelNodeOverride => this.serializeEntityModelNodeOverride(modelNodeOverride)),
+      ma: serializedModelAnimations,
+      mo: serializedModelNodeOverrides,
       mt: entity.modelTextureUri,
       n: entity.name,
       o: entity.opacity,
@@ -321,6 +371,18 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializePlayerCamera(playerCamera: PlayerCamera): protocol.CameraSchema {
+    const viewModelHiddenNodes = new Array<string>(playerCamera.viewModelHiddenNodes.size);
+    let hiddenNodeIndex = 0;
+    for (const hiddenNode of playerCamera.viewModelHiddenNodes) {
+      viewModelHiddenNodes[hiddenNodeIndex++] = hiddenNode;
+    }
+
+    const viewModelShownNodes = new Array<string>(playerCamera.viewModelShownNodes.size);
+    let shownNodeIndex = 0;
+    for (const shownNode of playerCamera.viewModelShownNodes) {
+      viewModelShownNodes[shownNodeIndex++] = shownNode;
+    }
+
     return {
       cb: playerCamera.collidesWithBlocks,
       m: playerCamera.mode,
@@ -329,13 +391,13 @@ export default class Serializer {
       fo: playerCamera.filmOffset,
       ffo: playerCamera.forwardOffset,
       fv: playerCamera.fov,
-      h: Array.from(playerCamera.viewModelHiddenNodes),
+      h: viewModelHiddenNodes,
       mp: playerCamera.viewModelPitchesWithCamera,
       my: playerCamera.viewModelYawsWithCamera,
       o: playerCamera.offset ? this.serializeVector(playerCamera.offset) : undefined,
       p: playerCamera.attachedToPosition ? this.serializeVector(playerCamera.attachedToPosition) : undefined,
       pt: playerCamera.targetPosition ? this.serializeVector(playerCamera.targetPosition) : undefined,
-      s: Array.from(playerCamera.viewModelShownNodes),
+      s: viewModelShownNodes,
       sa: playerCamera.shoulderAngle,
       z: playerCamera.zoom,
     };

@@ -33,78 +33,106 @@ export default class ChunkMeshManager {
     this._game = game;
   }
 
+  public get batchIds(): IterableIterator<BatchId> {
+    return this._batchIds.values();
+  }
+
+  public get batchCount(): number {
+    return this._batchIds.size;
+  }
+
+  public hasBatch(batchId: BatchId): boolean {
+    return this._batchIds.has(batchId);
+  }
+
   private _createOrUpdateMesh(id: BatchId, data: BlocksBufferGeometryData, cache: Map<BatchId, Mesh>, material: Material): Mesh {
     const { positions, normals, uvs, indices, colors, lightLevels, foamLevels, foamLevelsDiag } = data;
-
-    const geometry = new BufferGeometry();
-
-    geometry.setAttribute(
-      'position',
-      new BufferAttribute(positions, CHUNK_BUFFER_GEOMETRY_NUM_POSITION_COMPONENTS),
-    );
-
-    geometry.setAttribute(
-      'normal',
-      new BufferAttribute(normals, CHUNK_BUFFER_GEOMETRY_NUM_NORMAL_COMPONENTS),
-    );
-
-    geometry.setAttribute(
-      'uv',
-      new BufferAttribute(uvs, CHUNK_BUFFER_GEOMETRY_NUM_UV_COMPONENTS),
-    );
-
-    geometry.setAttribute(
-      'color',
-      new BufferAttribute(colors, CHUNK_BUFFER_GEOMETRY_NUM_COLOR_COMPONENTS),
-    );
-
-    if (lightLevels) {
-      geometry.setAttribute(
-        'lightLevel',
-        new BufferAttribute(lightLevels, CHUNK_BUFFER_GEOMETRY_NUM_LIGHT_LEVEL_COMPONENTS),
-      );
-    }
-
-    if (foamLevels) {
-      geometry.setAttribute(
-        'foamLevel',
-        new BufferAttribute(foamLevels, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS),
-      );
-    }
-
-    if (foamLevelsDiag) {
-      geometry.setAttribute(
-        'foamLevelDiag',
-        new BufferAttribute(foamLevelsDiag, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS),
-      );
-    }
-
-    geometry.setIndex(new BufferAttribute(indices, 1));
-    geometry.computeBoundingSphere();
 
     let mesh = cache.get(id);
 
     if (mesh) {
-      mesh.geometry.dispose();
-      mesh.geometry = geometry;
+      // Reuse existing geometry — swap typed arrays and mark dirty.
+      // Three.js reuses the WebGL buffer via bufferSubData when byte-size is
+      // unchanged, and only recreates when the size differs. Either path avoids
+      // the dispose() + new BufferGeometry() + new BufferAttribute() overhead.
+      const geometry = mesh.geometry;
+
+      this._swapAttribute(geometry, 'position', positions, CHUNK_BUFFER_GEOMETRY_NUM_POSITION_COMPONENTS);
+      this._swapAttribute(geometry, 'normal', normals, CHUNK_BUFFER_GEOMETRY_NUM_NORMAL_COMPONENTS);
+      this._swapAttribute(geometry, 'uv', uvs, CHUNK_BUFFER_GEOMETRY_NUM_UV_COMPONENTS);
+      this._swapAttribute(geometry, 'color', colors, CHUNK_BUFFER_GEOMETRY_NUM_COLOR_COMPONENTS);
+
+      this._swapOptionalAttribute(geometry, 'lightLevel', lightLevels, CHUNK_BUFFER_GEOMETRY_NUM_LIGHT_LEVEL_COMPONENTS);
+      this._swapOptionalAttribute(geometry, 'foamLevel', foamLevels, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS);
+      this._swapOptionalAttribute(geometry, 'foamLevelDiag', foamLevelsDiag, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS);
+
+      // Index may switch between Uint16 and Uint32 depending on vertex count
+      const indexAttr = geometry.getIndex();
+      if (indexAttr && indexAttr.array.constructor === indices.constructor && indexAttr.array.byteLength === indices.byteLength) {
+        indexAttr.array = indices;
+        indexAttr.needsUpdate = true;
+      } else {
+        geometry.setIndex(new BufferAttribute(indices, 1));
+      }
+
+      // Invalidate cached bounds so they are recomputed from the new data
+      geometry.boundingSphere = null;
+      geometry.boundingBox = null;
+      geometry.computeBoundingSphere();
+
       mesh.material = material;
     } else {
+      const geometry = new BufferGeometry();
+
+      geometry.setAttribute('position', new BufferAttribute(positions, CHUNK_BUFFER_GEOMETRY_NUM_POSITION_COMPONENTS));
+      geometry.setAttribute('normal', new BufferAttribute(normals, CHUNK_BUFFER_GEOMETRY_NUM_NORMAL_COMPONENTS));
+      geometry.setAttribute('uv', new BufferAttribute(uvs, CHUNK_BUFFER_GEOMETRY_NUM_UV_COMPONENTS));
+      geometry.setAttribute('color', new BufferAttribute(colors, CHUNK_BUFFER_GEOMETRY_NUM_COLOR_COMPONENTS));
+
+      if (lightLevels) {
+        geometry.setAttribute('lightLevel', new BufferAttribute(lightLevels, CHUNK_BUFFER_GEOMETRY_NUM_LIGHT_LEVEL_COMPONENTS));
+      }
+      if (foamLevels) {
+        geometry.setAttribute('foamLevel', new BufferAttribute(foamLevels, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS));
+      }
+      if (foamLevelsDiag) {
+        geometry.setAttribute('foamLevelDiag', new BufferAttribute(foamLevelsDiag, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS));
+      }
+
+      geometry.setIndex(new BufferAttribute(indices, 1));
+      geometry.computeBoundingSphere();
+
       mesh = new Mesh(geometry, material);
       mesh.name = `batch_${id}`;
 
-      // The mesh has a fixed default position/rotation/scale, so we can skip matrix updates
       mesh.matrixAutoUpdate = false;
       mesh.matrixWorldAutoUpdate = false;
 
       cache.set(id, mesh);
       this._batchIds.add(id);
-
-      // Don't add to scene here - view distance will control when meshes enter the scene
     }
 
     updateAABB(mesh);
 
     return mesh;
+  }
+
+  private _swapAttribute(geometry: BufferGeometry, name: string, data: Float32Array, itemSize: number): void {
+    const attr = geometry.getAttribute(name) as BufferAttribute | undefined;
+    if (attr && attr.array.byteLength === data.byteLength) {
+      attr.array = data;
+      attr.needsUpdate = true;
+    } else {
+      geometry.setAttribute(name, new BufferAttribute(data, itemSize));
+    }
+  }
+
+  private _swapOptionalAttribute(geometry: BufferGeometry, name: string, data: Float32Array | undefined, itemSize: number): void {
+    if (data) {
+      this._swapAttribute(geometry, name, data, itemSize);
+    } else if (geometry.hasAttribute(name)) {
+      geometry.deleteAttribute(name);
+    }
   }
 
   private _removeMesh(id: BatchId, cache: Map<BatchId, Mesh>): void {
@@ -229,6 +257,22 @@ export default class ChunkMeshManager {
     }
   }
 
+  public setBatchInScene(batchId: BatchId, inScene: boolean): void {
+    const liquidMesh = this._batchLiquidMeshes.get(batchId);
+    const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
+    const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
+
+    if (liquidMesh) {
+      this._setMeshInScene(liquidMesh, inScene);
+    }
+    if (opaqueSolidMesh) {
+      this._setMeshInScene(opaqueSolidMesh, inScene);
+    }
+    if (transparentSolidMesh) {
+      this._setMeshInScene(transparentSolidMesh, inScene);
+    }
+  }
+
   public get solidMeshesInScene(): Mesh<BufferGeometry, MeshBasicMaterial>[] {
     if (this._solidMeshesInSceneDirty) {
       this._solidMeshesInScene.length = 0;
@@ -257,24 +301,7 @@ export default class ChunkMeshManager {
 
   public addAllBatchMeshesToScene(): void {
     for (const batchId of this._batchIds) {
-      const liquidMesh = this._batchLiquidMeshes.get(batchId);
-      const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
-      const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
-
-      if (!liquidMesh && !opaqueSolidMesh && !transparentSolidMesh) {
-        continue;
-      }
-
-      if (liquidMesh) {
-        this._setMeshInScene(liquidMesh, true);
-      }
-      if (opaqueSolidMesh) {
-        this._setMeshInScene(opaqueSolidMesh, true);
-      }
-      if (transparentSolidMesh) {
-        this._setMeshInScene(transparentSolidMesh, true);
-      }
-
+      this.setBatchInScene(batchId, true);
       ChunkStats.visibleCount++;
     }
   }

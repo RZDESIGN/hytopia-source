@@ -328,6 +328,8 @@ export default class Entity extends RigidBody implements protocol.Serializable {
   /** @internal */
   private _controller: BaseEntityController | undefined;
 
+  private _tickPayload: { entity: Entity, tickDeltaMs: number } = { entity: this, tickDeltaMs: 0 };
+
   /** @internal */
   private _isEnvironmental: boolean = false;
 
@@ -1453,10 +1455,8 @@ export default class Entity extends RigidBody implements protocol.Serializable {
 
   /** @internal */
   public tick(tickDeltaMs: number): void {
-    this.emit(EntityEvent.TICK, {
-      entity: this,
-      tickDeltaMs,
-    });
+    this._tickPayload.tickDeltaMs = tickDeltaMs;
+    this.emit(EntityEvent.TICK, this._tickPayload);
 
     if (this._controller) {
       this._controller.tick(this, tickDeltaMs);

@@ -1,6 +1,6 @@
 import { Ray, Raycaster, Vector2, Vector3, Vector3Like } from 'three';
 import Chunk from './Chunk';
-import { BatchId, ChunkId } from './ChunkConstants';
+import { BATCH_WORLD_SIZE, BatchId, ChunkId } from './ChunkConstants';
 import ChunkRegistry from './ChunkRegistry';
 import ChunkStats from './ChunkStats';
 import { BlockId, WATER_SURFACE_Y_OFFSET } from '../blocks/BlockConstants';
@@ -26,6 +26,7 @@ import {
 
 // Working variables
 const fromVec2 = new Vector2();
+const toVec2 = new Vector2();
 const blockHitNormalVec3 = new Vector3();
 const blockHitPointVec3 = new Vector3();
 const rayDirectionVec3 = new Vector3();
@@ -35,6 +36,9 @@ const vec1 = new Vector3();
 const vec2 = new Vector3();
 const BLOCK_PREDICTION_TIMEOUT_MS = 1500;
 const BLOCK_RAYCAST_EPSILON = 0.01;
+const HALF_BATCH_WORLD_SIZE = BATCH_WORLD_SIZE / 2;
+const VISIBILITY_CELL_SIZE = BATCH_WORLD_SIZE / 4;
+const VIEW_DISTANCE_SQUARED_EPSILON = 0.0001;
 
 type ChunkBlockUpdate = {
   globalCoordinate: Vector3Like;
@@ -65,6 +69,11 @@ export default class ChunkManager {
   private _registry: ChunkRegistry = new ChunkRegistry();
   private _firstChunkBatchBuilt: boolean = false;
   private _predictedBlocks: Map<string, PredictedBlockEntry> = new Map();
+  private _visibleBatchIds: Set<BatchId> = new Set();
+  private _lastVisibilityCellX: number | null = null;
+  private _lastVisibilityCellZ: number | null = null;
+  private _lastViewDistanceSquared: number = -1;
+  private _wasViewDistanceEnabled: boolean | null = null;
 
   public constructor(game: Game) {
     this._game = game;
@@ -101,30 +110,43 @@ export default class ChunkManager {
     ChunkStats.reset();
     this._expirePredictedBlocks(performance.now());
 
-    // Distance View feature: Reduces rendering load by making distant batches invisible.
-    // Optimization hints for future improvements: Calculating the distance between all
-    // batches and the camera every frame might be costly. Consider recalculating only
-    // when camera or batch information changes, using a partitioning approach like
-    // Octree, or spreading batch checks across multiple frames.
-    if (!this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled) {
-      // When view distance is disabled, ensure all batch meshes are in the scene
-      this._game.chunkMeshManager.addAllBatchMeshesToScene();
+    const viewDistanceEnabled = this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled;
+    if (!viewDistanceEnabled) {
+      if (this._wasViewDistanceEnabled !== false) {
+        this._game.chunkMeshManager.addAllBatchMeshesToScene();
+        this._visibleBatchIds.clear();
+      }
+      this._wasViewDistanceEnabled = false;
+      ChunkStats.visibleCount = this._game.chunkMeshManager.batchCount;
       return;
     }
 
     const viewDistance = this._game.renderer.viewDistance;
     const viewDistanceSquared = viewDistance * viewDistance;
     const cameraPos = this._game.camera.activeCamera.position;
+    const cellX = this._toVisibilityCellCoordinate(cameraPos.x);
+    const cellZ = this._toVisibilityCellCoordinate(cameraPos.z);
+    const viewDistanceChanged = Math.abs(this._lastViewDistanceSquared - viewDistanceSquared) > VIEW_DISTANCE_SQUARED_EPSILON;
+    const cellChanged = this._lastVisibilityCellX !== cellX || this._lastVisibilityCellZ !== cellZ;
+    const modeChanged = this._wasViewDistanceEnabled !== true;
 
-    // Distance is calculated ignoring the Y-axis (Up direction) to process distant batches
-    // without regard to elevation, aiming for a more natural appearance.
-    this._game.chunkMeshManager.applyBatchViewDistance(fromVec2.set(cameraPos.x, cameraPos.z), viewDistanceSquared);
+    if (modeChanged || viewDistanceChanged || cellChanged) {
+      this._refreshVisibleBatches(fromVec2.set(cameraPos.x, cameraPos.z), viewDistanceSquared, modeChanged);
+      this._lastVisibilityCellX = cellX;
+      this._lastVisibilityCellZ = cellZ;
+      this._lastViewDistanceSquared = viewDistanceSquared;
+    }
+
+    this._wasViewDistanceEnabled = true;
+    ChunkStats.visibleCount = this._visibleBatchIds.size;
   }
 
   private _onBlocksPacket = (payload: NetworkManagerEventPayload.IBlocksPacket) => {
     const updates: ChunkBlockUpdate[] = [];
+    const { deserializedBlocks } = payload;
 
-    payload.deserializedBlocks.forEach((deserializedBlock: DeserializedBlock) => {
+    for (let i = 0; i < deserializedBlocks.length; i++) {
+      const deserializedBlock: DeserializedBlock = deserializedBlocks[i];
       const { id: blockId, globalCoordinate, blockRotationIndex } = deserializedBlock;
       this._predictedBlocks.delete(this._blockCoordinateKey(globalCoordinate));
       updates.push({
@@ -132,7 +154,7 @@ export default class ChunkManager {
         blockId,
         blockRotationIndex,
       });
-    });
+    }
 
     this._applyBlockUpdates(updates);
   }
@@ -141,11 +163,12 @@ export default class ChunkManager {
     const { deserializedChunks } = payload;
     const affectedBatches: Set<BatchId> = new Set();
 
-    deserializedChunks.forEach(deserializedChunk => {
+    for (let i = 0; i < deserializedChunks.length; i++) {
+      const deserializedChunk = deserializedChunks[i];
       const { removed, originCoordinate, blocks, blockRotations } = deserializedChunk;
 
       if (!originCoordinate) {
-        return;
+        continue;
       }
 
       const chunkId = Chunk.originCoordinateToChunkId(originCoordinate);
@@ -189,7 +212,7 @@ export default class ChunkManager {
 
         affectedBatches.add(batchId);
       }
-    });
+    }
 
     // Build affected batches in order of proximity to the player
     const basePosition = this._game.camera.gameCameraAttachedEntity?.position || this._game.camera.activeCamera.position;
@@ -202,13 +225,15 @@ export default class ChunkManager {
     });
 
     // Send batch build messages for affected batches
-    sortedBatches.forEach(batchId => {
+    for (let i = 0; i < sortedBatches.length; i++) {
+      const batchId = sortedBatches[i];
       const chunkIds = this._registry.getBatchChunkIds(batchId);
       
       if (chunkIds.length === 0) {
         // Batch is now empty, remove its meshes
         this._game.chunkMeshManager.removeAllBatchMeshes(batchId);
-        return;
+        this._visibleBatchIds.delete(batchId);
+        continue;
       }
 
       const message: ChunkWorkerChunkBatchBuildMessage = {
@@ -217,7 +242,7 @@ export default class ChunkManager {
         chunkIds,
       };
       this._game.chunkWorkerClient.postMessage(message);
-    });
+    }
   }
 
   private _onChunkBatchBuilt = (payload: WorkerEventPayload.IChunkBatchBuilt): void => {
@@ -229,6 +254,7 @@ export default class ChunkManager {
     if (validChunkIds.length === 0) {
       // All chunks in batch have been removed, clean up batch meshes
       this._game.chunkMeshManager.removeAllBatchMeshes(batchId);
+      this._visibleBatchIds.delete(batchId);
       return;
     }
 
@@ -256,6 +282,8 @@ export default class ChunkManager {
     } else {
       this._game.chunkMeshManager.removeBatchTransparentSolidMesh(batchId);
     }
+
+    this._syncBatchVisibility(batchId);
 
     // Update batch metadata
     this._registry.updateBatchMetadata(batchId, {
@@ -439,7 +467,6 @@ export default class ChunkManager {
     const absWorldPositionY = Math.abs(worldPosition.y);
     return absWorldPositionY - Math.floor(absWorldPositionY) < 1.0 + WATER_SURFACE_Y_OFFSET;
   }
-
   private _applyBlockUpdates(updates: ChunkBlockUpdate[]): boolean {
     const workerUpdate: Record<ChunkId, { localCoordinate: Vector3Like, blockId: BlockId, blockRotationIndex?: number }[]> = {};
 
@@ -530,5 +557,78 @@ export default class ChunkManager {
 
   private _normalizeBlockRotationIndex(blockRotationIndex?: number): number | undefined {
     return blockRotationIndex === undefined || blockRotationIndex === 0 ? undefined : blockRotationIndex;
+  }
+
+  private _toVisibilityCellCoordinate(value: number): number {
+    return Math.floor(value / VISIBILITY_CELL_SIZE);
+  }
+
+  // Distance is calculated ignoring the Y-axis (Up direction) to process distant batches
+  // without regard to elevation, aiming for a more natural appearance.
+  private _isBatchInRange(batchId: BatchId, fromVec2: Vector2, viewDistanceSquared: number): boolean {
+    const batchOrigin = Chunk.batchIdToBatchOrigin(batchId);
+    return fromVec2.distanceToSquared(
+      toVec2.set(
+        batchOrigin.x + HALF_BATCH_WORLD_SIZE,
+        batchOrigin.z + HALF_BATCH_WORLD_SIZE,
+      ),
+    ) <= viewDistanceSquared;
+  }
+
+  private _refreshVisibleBatches(fromVec2: Vector2, viewDistanceSquared: number, forceApplyAll: boolean): void {
+    const nextVisibleBatchIds: Set<BatchId> = new Set();
+
+    for (const batchId of this._game.chunkMeshManager.batchIds) {
+      const inRange = this._isBatchInRange(batchId, fromVec2, viewDistanceSquared);
+      if (inRange) {
+        nextVisibleBatchIds.add(batchId);
+      }
+
+      if (forceApplyAll) {
+        this._game.chunkMeshManager.setBatchInScene(batchId, inRange);
+      }
+    }
+
+    if (!forceApplyAll) {
+      for (const batchId of this._visibleBatchIds) {
+        if (!nextVisibleBatchIds.has(batchId)) {
+          this._game.chunkMeshManager.setBatchInScene(batchId, false);
+        }
+      }
+
+      for (const batchId of nextVisibleBatchIds) {
+        if (!this._visibleBatchIds.has(batchId)) {
+          this._game.chunkMeshManager.setBatchInScene(batchId, true);
+        }
+      }
+    }
+
+    this._visibleBatchIds = nextVisibleBatchIds;
+  }
+
+  // Newly built batches should be immediately synchronized so they don't wait for the
+  // next visibility cell transition.
+  private _syncBatchVisibility(batchId: BatchId): void {
+    if (!this._game.chunkMeshManager.hasBatch(batchId)) {
+      this._visibleBatchIds.delete(batchId);
+      return;
+    }
+
+    if (!this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled) {
+      this._game.chunkMeshManager.setBatchInScene(batchId, true);
+      this._visibleBatchIds.delete(batchId);
+      return;
+    }
+
+    const cameraPos = this._game.camera.activeCamera.position;
+    const viewDistance = this._game.renderer.viewDistance;
+    const inRange = this._isBatchInRange(batchId, fromVec2.set(cameraPos.x, cameraPos.z), viewDistance * viewDistance);
+
+    this._game.chunkMeshManager.setBatchInScene(batchId, inRange);
+    if (inRange) {
+      this._visibleBatchIds.add(batchId);
+    } else {
+      this._visibleBatchIds.delete(batchId);
+    }
   }
 }

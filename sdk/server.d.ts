@@ -3226,6 +3226,7 @@ export declare class Entity extends RigidBody implements protocol.Serializable {
 
 
 
+    private _tickPayload;
 
 
 

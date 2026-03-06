@@ -17,6 +17,13 @@ const CAMERA_COLLISION_RAYCAST_INTERVAL_MOBILE_S = 1 / 15;
 const CAMERA_COLLISION_RAYCAST_ORIGIN_DELTA_SQ_THRESHOLD = 0.1 * 0.1;
 const CAMERA_COLLISION_RAYCAST_DIRECTION_DOT_THRESHOLD = 0.9995;
 const CAMERA_COLLISION_RAYCAST_DISTANCE_DELTA_THRESHOLD = 0.1;
+const CAMERA_ORIENTATION_EPSILON = 0.0001;
+const CAMERA_TRACKED_POSITION_LERP_TIME_S = 0.08;
+const CAMERA_TRACKED_POSITION_SNAP_DISTANCE_SQ = 4;
+const CAMERA_ATTACHED_POSITION_LERP_TIME_S = 0.06;
+const CAMERA_ATTACHED_POSITION_SNAP_DISTANCE_SQ = 9;
+const CAMERA_POSITION_DEADZONE_SQ = 0.0004; // 2cm
+const CAMERA_LOOK_AT_MIN_DISTANCE_SQ = 0.0004;
 
 // Working variables
 const vec2 = new Vector2();
@@ -30,8 +37,12 @@ const entityYawEuler = new Euler(0, 0, 0, 'YXZ');
 const modelViewQuat = new Quaternion();
 const tempQuat = new Quaternion();
 const positionQuat = new Quaternion();
+const shoulderRotationAxis = new Vector3(0, 1, 0);
+const spectatorForward = new Vector3();
+const spectatorRight = new Vector3();
 
 const normalizeAngle = (radians: number): number => Math.atan2(Math.sin(radians), Math.cos(radians));
+const smoothingAlpha = (deltaS: number, timeConstantS: number): number => 1 - Math.exp(-deltaS / Math.max(0.001, timeConstantS));
 
 export enum CameraMode {
   FIRST_PERSON = 0,
@@ -63,6 +74,7 @@ export default class Camera {
   private _gameCameraAttachedEntityModelHiddenNodes: string[] = [];
   private _gameCameraAttachedEntityModelShownNodes: string[] = [];
   private _gameCameraAttachedPosition: Vector3 | undefined;
+  private _gameCameraAttachedPositionTarget: Vector3 | undefined;
   private _gameCameraCollidesWithBlocks: boolean = true;
   private _gameCameraForwardOffset: number = 0;
   private _gameCameraModelPitchesWithCamera: boolean = false;
@@ -77,6 +89,7 @@ export default class Camera {
   private _gameCameraRadialZoom: number = INITIAL_ZOOM;
   private _gameCameraTrackedEntity: Entity | undefined;
   private _gameCameraTrackedPosition: Vector3 | undefined;
+  private _gameCameraTrackedPositionTarget: Vector3 | undefined;
   private _gameCameraViewModelBaseCameraOffsets: Map<string, Vector3> = new Map();
   private _gameCameraPitch: number = 0.2;
   private _gameCameraShoulderRotationOffset: Quaternion = new Quaternion();
@@ -172,6 +185,18 @@ export default class Camera {
     }
   
     this._updateCameraRotation(movementX, movementY, this._game.settingsManager.clientSettings.controls.touchSensitivityForRotation);
+  }
+
+  public handleGamepadCameraMovement(axisX: number, axisY: number, frameDeltaS: number): void {
+    if (this._gameCameraTrackedEntity || this._gameCameraTrackedPosition) {
+      return;
+    }
+
+    const rotationSpeed = this._game.settingsManager.clientSettings.controls.gamepadSensitivityForRotation;
+    this._applyCameraRotationDelta(
+      axisY * rotationSpeed * frameDeltaS * this._gameCameraMouseSensitivityMultiplier,
+      -axisX * rotationSpeed * frameDeltaS * this._gameCameraMouseSensitivityMultiplier,
+    );
   }
 
   public handleMobileCameraZoom(delta: number): void {
@@ -290,6 +315,7 @@ export default class Camera {
     if (deserializedCamera.attachedToEntityId !== undefined) {
       if (deserializedCamera.attachedToEntityId !== null) {
         this._gameCameraAttachedPosition = undefined;
+        this._gameCameraAttachedPositionTarget = undefined;
       }
 
       this._gameCameraAttachedEntity = deserializedCamera.attachedToEntityId !== null
@@ -306,21 +332,33 @@ export default class Camera {
     }
 
     if (deserializedCamera.attachedToPosition !== undefined) {
-      if (deserializedCamera.attachedToPosition !== null) {
+      if (deserializedCamera.attachedToPosition === null) {
+        this._gameCameraAttachedPosition = undefined;
+        this._gameCameraAttachedPositionTarget = undefined;
+      } else {
         if (this._gameCameraAttachedEntity) {
           this._gameCameraAttachedEntity.setModelHiddenNodes([]);
           this._gameCameraAttachedEntity.setModelShownNodes([]);
           this._gameCameraAttachedEntity = undefined;
         }
-      }
 
-      this._gameCameraAttachedPosition = deserializedCamera.attachedToPosition !== null
-        ? new Vector3(
-            deserializedCamera.attachedToPosition.x,
-            deserializedCamera.attachedToPosition.y,
-            deserializedCamera.attachedToPosition.z,
-          )
-        : undefined;
+        this._gameCameraAttachedPositionTarget ??= new Vector3();
+        this._gameCameraAttachedPositionTarget.set(
+          deserializedCamera.attachedToPosition.x,
+          deserializedCamera.attachedToPosition.y,
+          deserializedCamera.attachedToPosition.z,
+        );
+
+        if (!this._gameCameraAttachedPosition) {
+          this._gameCameraAttachedPosition = new Vector3().copy(this._gameCameraAttachedPositionTarget);
+        } else if (
+          this._gameCameraAttachedPosition.distanceToSquared(this._gameCameraAttachedPositionTarget)
+          > CAMERA_ATTACHED_POSITION_SNAP_DISTANCE_SQ
+        ) {
+          // Snap large jumps (teleports) immediately.
+          this._gameCameraAttachedPosition.copy(this._gameCameraAttachedPositionTarget);
+        }
+      }
 
       this.useGameCamera();
     }
@@ -383,13 +421,13 @@ export default class Camera {
     }
 
     if (deserializedCamera.shoulderAngle !== undefined) { // shoulderAngle is received in degrees
-      this._gameCameraShoulderRotationOffset.setFromAxisAngle(new Vector3(0, 1, 0), deserializedCamera.shoulderAngle * Math.PI / 180);
+      this._gameCameraShoulderRotationOffset.setFromAxisAngle(shoulderRotationAxis, deserializedCamera.shoulderAngle * Math.PI / 180);
     }
 
     if (deserializedCamera.trackedEntityId !== undefined) {
-      if (deserializedCamera.trackedEntityId !== null) {
-        this._gameCameraTrackedPosition = undefined;
-      }
+      // Target entity/position are mutually exclusive.
+      this._gameCameraTrackedPosition = undefined;
+      this._gameCameraTrackedPositionTarget = undefined;
 
       this._gameCameraTrackedEntity = deserializedCamera.trackedEntityId !== null
         ? this._game.entityManager.getEntity(deserializedCamera.trackedEntityId)
@@ -397,17 +435,30 @@ export default class Camera {
     }
 
     if (deserializedCamera.trackedPosition !== undefined) {
-      if (deserializedCamera.trackedPosition !== null) {
-        this._gameCameraTrackedEntity = undefined;
-      }
+      // Target entity/position are mutually exclusive.
+      this._gameCameraTrackedEntity = undefined;
 
-      this._gameCameraTrackedPosition = deserializedCamera.trackedPosition !== null
-        ? new Vector3(
-            deserializedCamera.trackedPosition.x,
-            deserializedCamera.trackedPosition.y,
-            deserializedCamera.trackedPosition.z,
-          )
-        : undefined;
+      if (deserializedCamera.trackedPosition === null) {
+        this._gameCameraTrackedPosition = undefined;
+        this._gameCameraTrackedPositionTarget = undefined;
+      } else {
+        this._gameCameraTrackedPositionTarget ??= new Vector3();
+        this._gameCameraTrackedPositionTarget.set(
+          deserializedCamera.trackedPosition.x,
+          deserializedCamera.trackedPosition.y,
+          deserializedCamera.trackedPosition.z,
+        );
+
+        if (!this._gameCameraTrackedPosition) {
+          this._gameCameraTrackedPosition = new Vector3().copy(this._gameCameraTrackedPositionTarget);
+        } else if (
+          this._gameCameraTrackedPosition.distanceToSquared(this._gameCameraTrackedPositionTarget)
+          > CAMERA_TRACKED_POSITION_SNAP_DISTANCE_SQ
+        ) {
+          // Snap large jumps (teleports) immediately instead of smoothing through walls/geometry.
+          this._gameCameraTrackedPosition.copy(this._gameCameraTrackedPositionTarget);
+        }
+      }
     }
 
     if (deserializedCamera.zoom !== undefined) {
@@ -441,13 +492,21 @@ export default class Camera {
   }
 
   private _updateCameraRotation(movementX: number, movementY: number, rotationSpeed: number): void {
+    this._applyCameraRotationDelta(
+      movementY * rotationSpeed * this._gameCameraMouseSensitivityMultiplier,
+      -movementX * rotationSpeed * this._gameCameraMouseSensitivityMultiplier,
+    );
+  }
+
+  private _applyCameraRotationDelta(deltaPitch: number, deltaYaw: number): void {
     const isGameCameraActive = this.isGameCameraActive;
+    const pitchDirection = this._game.settingsManager.clientSettings.controls.invertVerticalLook ? -1 : 1;
 
     let cameraPitch = isGameCameraActive ? this._gameCameraPitch : this._spectatorCameraPitch;
     let cameraYaw = isGameCameraActive ? this._gameCameraYaw : this._spectatorCameraYaw;
 
-    cameraPitch += movementY * rotationSpeed * this._gameCameraMouseSensitivityMultiplier;
-    cameraYaw -= movementX * rotationSpeed * this._gameCameraMouseSensitivityMultiplier;
+    cameraPitch += deltaPitch * pitchDirection;
+    cameraYaw += deltaYaw;
 
     // Clamp the pitch to avoid flipping & gimbal lock
     cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, cameraPitch));
@@ -584,6 +643,30 @@ export default class Camera {
       return console.warn(`Camera._updateGameCamera(): No camera attachment or position set for game camera.`);
     }
 
+    if (this._gameCameraAttachedPosition && this._gameCameraAttachedPositionTarget) {
+      const lerpT = smoothingAlpha(frameDeltaS, CAMERA_ATTACHED_POSITION_LERP_TIME_S);
+      this._gameCameraAttachedPosition.lerp(this._gameCameraAttachedPositionTarget, lerpT);
+
+      if (
+        this._gameCameraAttachedPosition.distanceToSquared(this._gameCameraAttachedPositionTarget)
+        <= CAMERA_POSITION_DEADZONE_SQ
+      ) {
+        this._gameCameraAttachedPosition.copy(this._gameCameraAttachedPositionTarget);
+      }
+    }
+
+    if (this._gameCameraTrackedPosition && this._gameCameraTrackedPositionTarget) {
+      const lerpT = smoothingAlpha(frameDeltaS, CAMERA_TRACKED_POSITION_LERP_TIME_S);
+      this._gameCameraTrackedPosition.lerp(this._gameCameraTrackedPositionTarget, lerpT);
+
+      if (
+        this._gameCameraTrackedPosition.distanceToSquared(this._gameCameraTrackedPositionTarget)
+        <= CAMERA_POSITION_DEADZONE_SQ
+      ) {
+        this._gameCameraTrackedPosition.copy(this._gameCameraTrackedPositionTarget);
+      }
+    }
+
     // Get base positions for camera calculations
     const attachedPosition = this._gameCameraAttachedEntity?.getWorldPosition(vec3) || this._gameCameraAttachedPosition!;
     const lookAtPosition = this._gameCameraLookAtPosition || this._gameCameraTrackedEntity?.position || this._gameCameraTrackedPosition;
@@ -591,13 +674,18 @@ export default class Camera {
 
     // Calculate look direction and orientation if we have a look target
     if (lookAtPosition) {
-      lookAtDirection = vec3d.subVectors(attachedPosition, lookAtPosition).normalize();
+      const lookAtDistanceSq = vec3d.subVectors(attachedPosition, lookAtPosition).lengthSq();
+      if (lookAtDistanceSq >= CAMERA_LOOK_AT_MIN_DISTANCE_SQ) {
+        lookAtDirection = vec3d.normalize();
 
-      this._updateGameCameraOrientation(
-        Math.asin(lookAtDirection.y),
-        Math.atan2(lookAtDirection.x, lookAtDirection.z) 
-      );
+        this._updateGameCameraOrientation(
+          Math.asin(lookAtDirection.y),
+          Math.atan2(lookAtDirection.x, lookAtDirection.z) 
+        );
+      }
     }
+
+    let projectionMatrixDirty = false;
 
     // Handle film offset - scale by zoom to prevent crosshair drift
     const filmOffset = this._gameCamera.filmOffset;
@@ -615,6 +703,7 @@ export default class Camera {
         const filmOffsetLerpFactor = Math.min(frameDeltaS / CAMERA_LERP_TIME, 1);
         this._gameCamera.filmOffset = filmOffset + (scaledTargetFilmOffset - filmOffset) * filmOffsetLerpFactor;
       }
+      projectionMatrixDirty = true;
     }
 
     // Handle fov
@@ -623,6 +712,7 @@ export default class Camera {
     if (fov !== targetFov) {
       const fovLerpFactor = Math.min(frameDeltaS / CAMERA_LERP_TIME, 1);
       this._gameCamera.fov = fov + (targetFov - fov) * fovLerpFactor;
+      projectionMatrixDirty = true;
     }
 
     // Handle zoom
@@ -631,6 +721,7 @@ export default class Camera {
     if (zoom !== targetZoom) {
       const zoomLerpFactor = Math.min(frameDeltaS / CAMERA_LERP_TIME, 1);
       this._gameCamera.zoom = zoom + (targetZoom - zoom) * zoomLerpFactor;
+      projectionMatrixDirty = true;
     }
 
     // Position and orient camera based on mode
@@ -654,7 +745,7 @@ export default class Camera {
       this._gameCamera.position.add(direction);
       this._gameCamera.quaternion.copy(quaternion);
 
-      if (lookAtPosition) {
+      if (lookAtPosition && lookAtDirection) {
         this._lookAt(this._gameCamera, lookAtPosition);
       }
     }
@@ -818,12 +909,25 @@ export default class Camera {
       }
     }
     
-    this._gameCamera.updateProjectionMatrix();
+    if (projectionMatrixDirty) {
+      this._gameCamera.updateProjectionMatrix();
+    }
   }
 
   private _updateGameCameraOrientation(pitch: number, yaw: number): void {
+    const normalizedYaw = normalizeAngle(yaw);
+    const yawDelta = normalizeAngle(normalizedYaw - this._gameCameraYaw);
+
+    // Avoid spamming unchanged orientation packets; this reduces network churn and camera feedback jitter.
+    if (
+      Math.abs(this._gameCameraPitch - pitch) <= CAMERA_ORIENTATION_EPSILON &&
+      Math.abs(yawDelta) <= CAMERA_ORIENTATION_EPSILON
+    ) {
+      return;
+    }
+
     this._gameCameraPitch = pitch;
-    this._gameCameraYaw = yaw;
+    this._gameCameraYaw = normalizedYaw;
 
     EventRouter.instance.emit(CameraEventType.GameCameraOrientationChange, {
       pitch: -1 * this._gameCameraPitch,
@@ -843,8 +947,8 @@ export default class Camera {
     const moveSpeed = 15 * frameDeltaS;
 
     // Get camera direction vectors
-    const forward = new Vector3(0, 0, -1).applyEuler(this._spectatorCamera.rotation);
-    const right = new Vector3(1, 0, 0).applyEuler(this._spectatorCamera.rotation);
+    const forward = spectatorForward.set(0, 0, -1).applyEuler(this._spectatorCamera.rotation);
+    const right = spectatorRight.set(1, 0, 0).applyEuler(this._spectatorCamera.rotation);
 
     // Handle movement
     if (inputState['w']) this._spectatorCamera.position.addScaledVector(forward, moveSpeed);

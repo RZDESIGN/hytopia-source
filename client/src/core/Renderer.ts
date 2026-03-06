@@ -41,6 +41,11 @@ import type { NetworkManagerEventPayload } from '../network/NetworkManager';
 import { type ClientSettingsEventPayload, ClientSettingsEventType } from '../settings/SettingsManager';
 
 const MISSING_SKYBOX_TEXTURE_PATH = '/textures/missing-skybox';
+// Cap internal render target pixel count to avoid severe fullscreen slowdowns on
+// high-DPI displays (e.g. Retina). Windowed mode remains sharper because viewport
+// area is smaller and usually falls below this budget.
+const MAX_RENDER_TARGET_PIXELS = 2560 * 1440;
+const MIN_RENDER_PIXEL_RATIO = 0.5;
 
 // Working variables
 const color = new Color();
@@ -145,7 +150,7 @@ export default class Renderer {
 
     this._ambientLight = { color: new Color(), intensity: 1 };
     // Anti-aliasing is handled in post-processing
-    this._renderer = new WebGLRenderer({ antialias: false });
+    this._renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this._sceneUiRenderer = new CSS2DRenderer({ element: document.getElementById('scene-ui-container')! });
     this._scene = new Scene();
     this._viewModelScene = new Scene();
@@ -170,7 +175,7 @@ export default class Renderer {
       new Vector2(1, 1),
     );
     // Note: Size for Passes are set appropriately when EffectComposer size is set
-    this._smaaPass = new SMAAPass(1, 1);
+    this._smaaPass = new SMAAPass();
     // Question: Should parameters be configurable?
     this._bloomPass = new WhiteCoreBloomPass(
       vec2,
@@ -203,6 +208,34 @@ export default class Renderer {
   public get viewDistance(): number { return Math.min(this._game.settingsManager.qualityPerfTradeoff.viewDistance.distance, this._fogFar); }
   public get webGLRenderer(): WebGLRenderer { return this._renderer; }
 
+  private _getViewportSize(): { width: number; height: number } {
+    return {
+      width: Math.max(1, document.documentElement.clientWidth),
+      height: Math.max(1, document.documentElement.clientHeight),
+    };
+  }
+
+  private _calculateEffectivePixelRatio(): number {
+    const resolutionMultiplier = this._game.settingsManager.qualityPerfTradeoff.resolution.multiplier;
+    const requestedPixelRatio = window.devicePixelRatio * resolutionMultiplier;
+    const { width, height } = this._getViewportSize();
+    const viewportPixelCount = width * height;
+    const maxPixelRatioForBudget = Math.sqrt(MAX_RENDER_TARGET_PIXELS / viewportPixelCount);
+
+    return Math.max(
+      MIN_RENDER_PIXEL_RATIO,
+      Math.min(requestedPixelRatio, maxPixelRatioForBudget),
+    );
+  }
+
+  private _applyRenderResolution(): void {
+    const { width, height } = this._getViewportSize();
+    this._renderer.setPixelRatio(this._calculateEffectivePixelRatio());
+    this._renderer.setSize(width, height);
+    this._sceneUiRenderer.setSize(width, height);
+    this._resizePostProcessing();
+  }
+
   private _setupPostProcessing(): void {
     this._effectComposer.addPass(this._renderPass);
     this._effectComposer.addPass(this._outlinePass);
@@ -217,6 +250,7 @@ export default class Renderer {
     this._effectComposer.setPixelRatio(1);
     this._renderer.getDrawingBufferSize(vec2);
     this._effectComposer.setSize(vec2.width, vec2.height);
+    this._bloomPass.setSize(vec2.width >> 2, vec2.height >> 2);
   }
 
   public addToScene(object: Object3D): void {
@@ -281,6 +315,7 @@ export default class Renderer {
 
     this._game.arrowManager.update(frameDeltaS);
     this._game.blockMaterialManager.update();
+    this._game.inputManager.update(frameDeltaS);
     this._game.camera.update(frameDeltaS);
     this._game.audioManager.update();
     this._updateSkybox(frameDeltaS);
@@ -296,18 +331,21 @@ export default class Renderer {
     this._renderer.info.reset();
     const pp = this._game.settingsManager.qualityPerfTradeoff.postProcessing;
     if (pp?.outline || pp?.bloom || pp?.smaa) {
+      const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
       this._renderPass.camera = this._game.camera.activeCamera;
       this._viewModelRenderPass.camera = this._game.camera.activeCamera;
       this._viewModelRenderPass.enabled = this._firstPersonViewModelEntity !== undefined;
       this._outlinePass.enabled = !!pp.outline;
       this._bloomPass.enabled = !!pp.bloom;
       this._smaaPass.enabled = !!pp.smaa;
-      if (pp.outline) {
+      if (hasOutlineTargets) {
         this._outlinePass.camera = this._game.camera.activeCamera;
         this._outlinePass.setOutlineTargets(this._game.entityManager.getOutlineTargets());
+      } else {
+        this._outlinePass.clearOutlineTargets();
       }
       this._effectComposer.render();
-      if (pp.outline) {
+      if (hasOutlineTargets) {
         this._game.entityManager.clearOutlineTargets();
         this._outlinePass.clearOutlineTargets();
       }
@@ -400,9 +438,7 @@ export default class Renderer {
     // document.documentElement.clientHeight are used instead. However, it needs to be
     // verified whether this solution works correctly on other platforms as well.
     this._game.camera.onWindowResize();
-    this._renderer.setSize(document.documentElement.clientWidth, document.documentElement.clientHeight);
-    this._sceneUiRenderer.setSize(document.documentElement.clientWidth, document.documentElement.clientHeight);
-    this._resizePostProcessing();
+    this._applyRenderResolution();
   }
 
   private _onWorldPacket = (payload: NetworkManagerEventPayload.IWorldPacket): void => {
@@ -490,13 +526,9 @@ export default class Renderer {
   }
 
   private _onClientSettingsUpdate = (_payload: ClientSettingsEventPayload.IUpdate): void => {
-    const { resolution } = this._game.settingsManager.qualityPerfTradeoff;
-
-    this._renderer.setPixelRatio(window.devicePixelRatio * resolution.multiplier);
-
+    this._applyRenderResolution();
     this._clampTargetFogNearAndFar();
     this._setupFog();
-    this._resizePostProcessing();
   };
 
   private _setupEventListeners(): void {
@@ -589,8 +621,7 @@ export default class Renderer {
   }
 
   private _setupRenderer(): void {
-    this._renderer.setSize(document.documentElement.clientWidth, document.documentElement.clientHeight);
-    this._renderer.setPixelRatio(window.devicePixelRatio * this._game.settingsManager.qualityPerfTradeoff.resolution.multiplier);
+    this._applyRenderResolution();
     this._renderer.info.autoReset = false;
     this._renderer.localClippingEnabled = false;
     // Be explicit about output space; this is cheap and avoids surprises across Three.js versions.

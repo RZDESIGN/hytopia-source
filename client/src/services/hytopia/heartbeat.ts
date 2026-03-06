@@ -17,7 +17,11 @@ function start() {
   const authToken = params.get('sessionToken');
   const lobbyId = params.get('lobbyId');
   const providedGatewayEndpoint = params.get('gatewayEndpoint');
-  const gateway = new HYTOPIAClient(providedGatewayEndpoint ? decodeURIComponent(providedGatewayEndpoint) : 'https://prod.mvp.hytopia.com');
+  const baseUrl = providedGatewayEndpoint ? decodeURIComponent(providedGatewayEndpoint) : 'https://prod.mvp.hytopia.com';
+  const gateway = new HYTOPIAClient({
+    baseUrl,
+    viewCounterBaseUrl: baseUrl,
+  });
 
   if (!authToken) {
     console.warn(`Couldn't find HYTOPIA auth token in query params - you are likely connected to a dev server, in which case you can ignore this.`);

@@ -17,6 +17,9 @@ export const enum DistantBlockViewMode {
 
 type QualityPerfTradeoff = {
   antialias: boolean,
+  blobShadows?: {
+    enabled: boolean;
+  },
   resolution: {
     multiplier: number,
   },
@@ -42,6 +45,8 @@ type QualityPerfTradeoff = {
 
 export type ClientSettings = {
   controls: {
+    gamepadSensitivityForRotation: number,
+    invertVerticalLook: boolean,
     mouseSensitivityForRotation: number,
     pinchSensitivityForZoom: number,
     touchSensitivityForRotation: number,
@@ -57,6 +62,9 @@ export type ClientSettings = {
 export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   ULTRA: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 2.0 },
     viewDistance: {
       enabled: true,
@@ -71,6 +79,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   },
   HIGH: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 1.5 },
     viewDistance: {
       enabled: true,
@@ -85,6 +96,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   },
   MEDIUM: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 1.0 },
     viewDistance: {
       enabled: true,
@@ -108,6 +122,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     // always true. Once the root cause of the crash is resolved, we can revisit the option
     // of setting antialias to false.
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 0.85 },
     viewDistance: {
       enabled: true,
@@ -123,6 +140,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   },
   POWER_SAVING: {
     antialias: true,
+    blobShadows: {
+      enabled: true,
+    },
     resolution: { multiplier: 0.5 },
     viewDistance: {
       enabled: true,
@@ -153,6 +173,8 @@ const DEFAULT_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = MobileManager.isMobi
 // TODO: Introduce a Client settings UI or something similar to allow users to intuitively update the settings.
 const DEFAULT_CLIENT_SETTINGS: ClientSettings = {
   controls: {
+    gamepadSensitivityForRotation: 4.5,
+    invertVerticalLook: false,
     mouseSensitivityForRotation: 0.0025,
     pinchSensitivityForZoom: 0.05,
     touchSensitivityForRotation: 0.008,
@@ -178,13 +200,13 @@ const LOW_FPS_THRESHOLD_RATIO = 0.50;
 // If the FPS stays above or below the threshold for the specified duration, we attempt to adjust
 // quality. Since increasing quality might degrade performance and force us to revert it
 // later, we apply upgrades more cautiously than downgrades.
-const QUALITY_UP_TIME_THRESHOLD = 5;
+const QUALITY_UP_TIME_THRESHOLD = 3;
 const QUALITY_DOWN_TIME_THRESHOLD = 3;
 
 // Client and game initialization involve many heavy processes, often causing FPS to drop.
 // Using FPS values during this time may lead to unnecessarily lowering quality. To avoid this,
 // quality changes are disabled for a set time after receiving the World Packet.
-const QUALITY_ADJUSTMENT_WARMUP_TIME = 10;
+const QUALITY_ADJUSTMENT_WARMUP_TIME = 5;
 
 // Good FPS may trigger a quality increase, which could then lower FPS and cause a downgrade,
 // potentially leading to repeated up/down quality switches. This can cause visible flickering
@@ -243,6 +265,13 @@ export default class SettingsManager {
   public setDistantBlockViewMode(mode: DistantBlockViewMode): void {
     this._clientSettings.distantBlockViewMode = mode;
     this._emitUpdateEvent();
+  }
+
+  public setInvertVerticalLook(invert: boolean): void {
+    this._clientSettings.controls = {
+      ...this._clientSettings.controls,
+      invertVerticalLook: invert,
+    };
   }
 
   private _emitUpdateEvent(): void {

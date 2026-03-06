@@ -22,6 +22,7 @@ enum BridgeMessageType {
   SEND_CHAT_MESSAGE = 'send-chat-message', // chat message is sent by user from parent input
   SET_DISTANT_BLOCK_VIEW_MODE = 'set-distant-block-view-mode', // parent wants the client to set the distant block view preference
   SET_MASTER_VOLUME = 'set-master-volume', // parent wants the client to set the master volume
+  SET_INVERT_VERTICAL_LOOK = 'set-invert-vertical-look', // parent wants the client to invert vertical camera look
   SET_MOUSE_SENSITIVITY = 'set-mouse-sensitivity', // parent wants the client to set the mouse sensitivity
   SET_QUALITY_PRESET = 'set-quality-preset', // parent wants the client to set the game quality preset
   TOGGLE_DEBUG = 'toggle-debug', // parent wants the client to toggle the debug menu
@@ -42,6 +43,7 @@ interface BridgeMessageDataMap {
   [BridgeMessageType.SEND_CHAT_MESSAGE]: { message: string; };
   [BridgeMessageType.SET_DISTANT_BLOCK_VIEW_MODE]: { mode: DistantBlockViewMode; };
   [BridgeMessageType.SET_MASTER_VOLUME]: { volume: number; };
+  [BridgeMessageType.SET_INVERT_VERTICAL_LOOK]: { invert: boolean; };
   [BridgeMessageType.SET_QUALITY_PRESET]: { preset: keyof typeof QUALITY_PRESETS; };
   [BridgeMessageType.SET_MOUSE_SENSITIVITY]: { sensitivity: number; };
   [BridgeMessageType.TOGGLE_DEBUG]: undefined;
@@ -175,6 +177,10 @@ export default class BridgeManager {
 
       case BridgeMessageType.SET_MASTER_VOLUME:
         this._game.audioManager.setMasterVolume(message.volume);
+        break;
+
+      case BridgeMessageType.SET_INVERT_VERTICAL_LOOK:
+        this._game.settingsManager.setInvertVerticalLook(message.invert);
         break;
 
       case BridgeMessageType.SET_QUALITY_PRESET:

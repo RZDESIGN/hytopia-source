@@ -415,7 +415,7 @@ class ChunkWorker {
     // Group affected chunks by batch and rebuild batches
     const affectedBatches: Map<BatchId, ChunkId[]> = new Map();
     
-    affectedChunkIds.forEach(chunkId => {
+    for (const chunkId of affectedChunkIds) {
       const batchId = Chunk.chunkIdToBatchId(chunkId);
       if (!affectedBatches.has(batchId)) {
         // Get all chunks currently in this batch (not just affected ones)
@@ -424,14 +424,14 @@ class ChunkWorker {
         );
         affectedBatches.set(batchId, allBatchChunkIds);
       }
-    });
+    }
 
     // Rebuild each affected batch
-    affectedBatches.forEach((chunkIds, batchId) => {
+    for (const [ batchId, chunkIds ] of affectedBatches) {
       if (chunkIds.length > 0) {
         this._buildChunkBatchGeometries(batchId, chunkIds);
       }
-    });
+    }
 
     // Yield control to process accumulated messages and allow blocks_update merging
     // after potentially long-running geometry build operations
@@ -497,7 +497,8 @@ class ChunkWorker {
 
   private _collectTransferableObjectsFromGeometryDataArray(array: BlocksBufferGeometryData[]): Transferable[] {
     const transferables: Transferable[] = [];
-    array.forEach(data => {
+    for (let i = 0; i < array.length; i++) {
+      const data = array[i];
       transferables.push(data.colors.buffer);
       transferables.push(data.indices.buffer);
       transferables.push(data.normals.buffer);
@@ -512,7 +513,7 @@ class ChunkWorker {
       if (data.foamLevelsDiag) {
         transferables.push(data.foamLevelsDiag.buffer);
       }
-    });
+    }
     return transferables;
   }
 
@@ -617,7 +618,8 @@ class ChunkWorker {
       const chunk = this._chunkRegistry.getChunk(chunkId)!;
 
       const blocks = update[chunkId];
-      blocks.forEach(({ localCoordinate, blockId, blockRotationIndex }) => {
+      for (let i = 0; i < blocks.length; i++) {
+        const { localCoordinate, blockId, blockRotationIndex } = blocks[i];
         const globalCoordinate = chunk.getGlobalCoordinate(localCoordinate);
 
         // When the LightLevel changes, also rebuild the Geometry Data of chunks within the affected area.
@@ -681,7 +683,7 @@ class ChunkWorker {
 
         this._chunkRegistry.updateBlock(chunkId, localCoordinate, blockId, blockRotationIndex);
         needsRemesh.add(chunkId);
-      });
+      }
     }
 
     return needsRemesh;

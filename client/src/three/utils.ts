@@ -107,7 +107,7 @@ const calculateDistanceKey = (center: Vector3, halfSize: Vector3, cameraPos: Vec
 // provide better accuracy than using the center point.
 export const getTransparentSortKey = (mesh: Mesh, cameraPos: Vector3, viewDir: Vector3, frame: number): number => {
   if (!(TRANSPARENT_SORT_DATA in mesh.userData)) {
-    throw new Error(`getTransparentSortKey(): ${TRANSPARENT_SORT_DATA} is not found in Mesh.userData ${mesh.uuid}.`);
+    updateAABB(mesh);
   }
 
   const data = mesh.userData[TRANSPARENT_SORT_DATA] as TransparentSortData;

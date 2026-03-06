@@ -1,6 +1,7 @@
 import fs from 'fs';
 import http from 'http';
 import http2 from 'http2';
+import os from 'os';
 import path from 'path';
 import { setGlobalDispatcher, Agent } from 'undici';
 import AssetsLibrary from '@/assets/AssetsLibrary';
@@ -54,6 +55,48 @@ export const PORT = process.env.PORT ?? 8080 as const;
  * @public
  */
 export const SDK_VERSION = '__DEV_SDK_VERSION__'; // Replaced during SDK publish. Do not manually change this.
+
+function isPrivateIPv4(address: string): boolean {
+  const octets = address.split('.').map(Number);
+
+  if (octets.length !== 4 || octets.some(octet => Number.isNaN(octet) || octet < 0 || octet > 255)) {
+    return false;
+  }
+
+  return (
+    octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168)
+  );
+}
+
+function getLocalNetworkAddresses(): string[] {
+  const addresses = new Set<string>();
+  const networkInterfaces = os.networkInterfaces() as Record<string, os.NetworkInterfaceInfo[] | undefined>;
+
+  for (const iface of Object.values(networkInterfaces)) {
+    const detailsList: os.NetworkInterfaceInfo[] = iface ?? [];
+
+    for (const details of detailsList) {
+      const info = details as { internal?: boolean, family?: string | number, address?: string };
+
+      if (info.internal) {
+        continue;
+      }
+
+      const family = typeof info.family === 'string' ? info.family : String(info.family);
+      if (family !== 'IPv4') {
+        continue;
+      }
+
+      if (typeof info.address === 'string' && isPrivateIPv4(info.address)) {
+        addresses.add(info.address);
+      }
+    }
+  }
+
+  return [...addresses];
+}
 
 /**
  * Event types a WebServer can emit.
@@ -211,6 +254,7 @@ export default class WebServer extends EventRouter {
         version: SDK_VERSION,
         runtime: 'node',
         playerCount: PlayerManager.instance.playerCount,
+        localNetworkAddresses: getLocalNetworkAddresses(),
       }) : undefined);
 
       return;
