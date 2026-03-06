@@ -13194,6 +13194,97 @@
             },
             {
               "kind": "Property",
+              "canonicalReference": "server!DefaultPlayerEntityController#localPredictionJustSubmergedRemainingMs:member",
+              "docComment": "/**\n * Remaining just-submerged sinking time for owner prediction, in milliseconds.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get localPredictionJustSubmergedRemainingMs(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "localPredictionJustSubmergedRemainingMs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!DefaultPlayerEntityController#localPredictionMotionBasisVelocity:member",
+              "docComment": "/**\n * Owner-only motion basis velocity used by the client prediction path.\n *\n * @remarks\n *\n * This combines platform and external impulse motion, which are not derivable from deterministic input replay alone on the client.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get localPredictionMotionBasisVelocity(): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "localPredictionMotionBasisVelocity",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!DefaultPlayerEntityController#localPredictionSwimUpwardCooldownRemainingMs:member",
+              "docComment": "/**\n * Remaining swim-upward cooldown for owner prediction, in milliseconds.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get localPredictionSwimUpwardCooldownRemainingMs(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "localPredictionSwimUpwardCooldownRemainingMs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
               "canonicalReference": "server!DefaultPlayerEntityController#platform:member",
               "docComment": "/**\n * The platform the entity is on, if any.\n *\n * **Category:** Controllers\n */\n",
               "excerptTokens": [
@@ -44810,7 +44901,7 @@
             {
               "kind": "Method",
               "canonicalReference": "server!PlayerEntity#setTickWithPlayerInputEnabled:member(1)",
-              "docComment": "/**\n * Enables or disables `tickWithPlayerInput()` during the entity's tick.\n *\n * Use for: temporarily disabling player control (cutscenes, menus, stuns).\n *\n * @param enabled - Whether `tickWithPlayerInput()` should be called.\n *\n * **Category:** Entities\n */\n",
+              "docComment": "/**\n * Enables or disables `tickWithPlayerInput()` during the entity's tick.\n *\n * Use for: temporarily disabling player control (cutscenes, menus, stuns). When disabled, queued input is discarded and active control state is cleared.\n *\n * @param enabled - Whether `tickWithPlayerInput()` should be called.\n *\n * **Category:** Entities\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",
@@ -45889,7 +45980,7 @@
                 {
                   "kind": "Reference",
                   "text": "URLSearchParams",
-                  "canonicalReference": "!URLSearchParams:interface"
+                  "canonicalReference": "!\"\\\"url\\\"\".__global.URLSearchParams:interface"
                 },
                 {
                   "kind": "Content",

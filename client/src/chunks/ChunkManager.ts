@@ -1,4 +1,4 @@
-import { Vector2, Vector3, Vector3Like } from 'three';
+import { Ray, Raycaster, Vector2, Vector3, Vector3Like } from 'three';
 import Chunk from './Chunk';
 import { BatchId, ChunkId } from './ChunkConstants';
 import ChunkRegistry from './ChunkRegistry';
@@ -26,13 +26,45 @@ import {
 
 // Working variables
 const fromVec2 = new Vector2();
+const blockHitNormalVec3 = new Vector3();
+const blockHitPointVec3 = new Vector3();
+const rayDirectionVec3 = new Vector3();
+const rayOriginVec3 = new Vector3();
+const raycaster = new Raycaster();
 const vec1 = new Vector3();
 const vec2 = new Vector3();
+const BLOCK_PREDICTION_TIMEOUT_MS = 1500;
+const BLOCK_RAYCAST_EPSILON = 0.01;
+
+type ChunkBlockUpdate = {
+  globalCoordinate: Vector3Like;
+  blockId: BlockId;
+  blockRotationIndex?: number;
+};
+
+type PredictedBlockEntry = {
+  baselineBlockId: BlockId;
+  baselineBlockRotationIndex?: number;
+  blockId: BlockId;
+  blockRotationIndex?: number;
+  expiresAtMs: number;
+  globalCoordinate: Vector3Like;
+};
+
+export type RaycastedBlock = {
+  blockId: BlockId;
+  blockRotationIndex: number;
+  globalCoordinate: Vector3Like;
+  neighborGlobalCoordinate: Vector3Like;
+  hitPoint: Vector3Like;
+  normal: Vector3Like;
+};
 
 export default class ChunkManager {
   private _game: Game;
   private _registry: ChunkRegistry = new ChunkRegistry();
   private _firstChunkBatchBuilt: boolean = false;
+  private _predictedBlocks: Map<string, PredictedBlockEntry> = new Map();
 
   public constructor(game: Game) {
     this._game = game;
@@ -67,6 +99,7 @@ export default class ChunkManager {
 
   private _onAnimate = (_payload: RendererEventPayload.IAnimate): void => {
     ChunkStats.reset();
+    this._expirePredictedBlocks(performance.now());
 
     // Distance View feature: Reduces rendering load by making distant batches invisible.
     // Optimization hints for future improvements: Calculating the distance between all
@@ -89,33 +122,19 @@ export default class ChunkManager {
   }
 
   private _onBlocksPacket = (payload: NetworkManagerEventPayload.IBlocksPacket) => {
-    const update: Record<ChunkId, { localCoordinate: Vector3Like, blockId: BlockId, blockRotationIndex?: number }[]> = {};
+    const updates: ChunkBlockUpdate[] = [];
 
     payload.deserializedBlocks.forEach((deserializedBlock: DeserializedBlock) => {
       const { id: blockId, globalCoordinate, blockRotationIndex } = deserializedBlock;
-      const chunkId = Chunk.globalCoordinateToChunkId(globalCoordinate);
-      const chunk = this._registry.getChunk(chunkId);
-
-      if (!chunk) {
-        return;
-      }
-
-      const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
-      this._registry.updateBlock(chunkId, localCoordinate, blockId, blockRotationIndex);
-
-      if (update[chunkId] === undefined) {
-        update[chunkId] = [];
-      }
-      update[chunkId].push({ localCoordinate, blockId, blockRotationIndex });
+      this._predictedBlocks.delete(this._blockCoordinateKey(globalCoordinate));
+      updates.push({
+        globalCoordinate,
+        blockId,
+        blockRotationIndex,
+      });
     });
 
-    // Since chunks are also managed within the WebWorker, the information will be sent.
-    // The worker will handle determining which batches need rebuilding based on block updates.
-    const message: ChunkWorkerBlocksUpdateMessage = {
-      type: 'blocks_update',
-      update,
-    };
-    this._game.chunkWorkerClient.postMessage(message);
+    this._applyBlockUpdates(updates);
   }
 
   private _onChunksPacket = (payload: NetworkManagerEventPayload.IChunksPacket) => {
@@ -132,6 +151,10 @@ export default class ChunkManager {
       const chunkId = Chunk.originCoordinateToChunkId(originCoordinate);
       const batchId = Chunk.chunkIdToBatchId(chunkId);
       const chunk = this._registry.getChunk(chunkId);
+
+      if (removed) {
+        this._discardPredictedBlocksForChunk(chunkId);
+      }
 
       if (removed && chunk) {
         this._registry.deleteChunk(chunkId);
@@ -158,6 +181,11 @@ export default class ChunkManager {
           blockRotations,
         };
         this._game.chunkWorkerClient.postMessage(message);
+
+        const predictedChunkUpdates = this._getPredictedBlockUpdatesForChunk(chunkId);
+        if (predictedChunkUpdates.length > 0) {
+          this._applyBlockUpdates(predictedChunkUpdates);
+        }
 
         affectedBatches.add(batchId);
       }
@@ -246,6 +274,138 @@ export default class ChunkManager {
     return this.getChunk(Chunk.globalCoordinateToChunkId(globalCoordinate));
   }
 
+  public getBlock(globalCoordinate: Vector3Like): { blockId: BlockId, blockRotationIndex: number } | undefined {
+    const chunk = this.getChunkByGlobalCoordinate(globalCoordinate);
+
+    if (!chunk) {
+      return undefined;
+    }
+
+    const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
+
+    return {
+      blockId: chunk.getBlockType(localCoordinate),
+      blockRotationIndex: chunk.getBlockRotation(localCoordinate),
+    };
+  }
+
+  public predictBlock(
+    globalCoordinate: Vector3Like,
+    blockId: BlockId,
+    blockRotationIndex?: number,
+    timeoutMs: number = BLOCK_PREDICTION_TIMEOUT_MS,
+  ): boolean {
+    const baseline = this.getBlock(globalCoordinate);
+
+    if (!baseline) {
+      return false;
+    }
+
+    const key = this._blockCoordinateKey(globalCoordinate);
+    const existing = this._predictedBlocks.get(key);
+
+    this._predictedBlocks.set(key, {
+      baselineBlockId: existing?.baselineBlockId ?? baseline.blockId,
+      baselineBlockRotationIndex: existing?.baselineBlockRotationIndex ?? this._normalizeBlockRotationIndex(baseline.blockRotationIndex),
+      blockId,
+      blockRotationIndex: this._normalizeBlockRotationIndex(blockRotationIndex),
+      expiresAtMs: performance.now() + Math.max(0, timeoutMs),
+      globalCoordinate: {
+        x: globalCoordinate.x,
+        y: globalCoordinate.y,
+        z: globalCoordinate.z,
+      },
+    });
+
+    return this._applyBlockUpdates([
+      {
+        globalCoordinate,
+        blockId,
+        blockRotationIndex,
+      },
+    ]);
+  }
+
+  public rollbackPredictedBlock(globalCoordinate: Vector3Like): boolean {
+    const key = this._blockCoordinateKey(globalCoordinate);
+    const entry = this._predictedBlocks.get(key);
+
+    if (!entry) {
+      return false;
+    }
+
+    this._predictedBlocks.delete(key);
+
+    return this._applyBlockUpdates([
+      {
+        globalCoordinate: entry.globalCoordinate,
+        blockId: entry.baselineBlockId,
+        blockRotationIndex: entry.baselineBlockRotationIndex,
+      },
+    ]);
+  }
+
+  public raycastBlock(ray: Ray, maxDistance: number): RaycastedBlock | undefined {
+    rayOriginVec3.copy(ray.origin);
+    rayDirectionVec3.copy(ray.direction).normalize();
+
+    raycaster.near = 0;
+    raycaster.far = maxDistance;
+    raycaster.set(rayOriginVec3, rayDirectionVec3);
+
+    const intersection = raycaster.intersectObjects(this._game.chunkMeshManager.solidMeshesInScene, false)[0];
+
+    if (!intersection?.face) {
+      return undefined;
+    }
+
+    blockHitNormalVec3
+      .copy(intersection.face.normal)
+      .transformDirection(intersection.object.matrixWorld)
+      .normalize();
+    blockHitPointVec3.copy(intersection.point);
+
+    const globalCoordinate = {
+      x: Math.floor(blockHitPointVec3.x - blockHitNormalVec3.x * BLOCK_RAYCAST_EPSILON),
+      y: Math.floor(blockHitPointVec3.y - blockHitNormalVec3.y * BLOCK_RAYCAST_EPSILON),
+      z: Math.floor(blockHitPointVec3.z - blockHitNormalVec3.z * BLOCK_RAYCAST_EPSILON),
+    };
+    const block = this.getBlock(globalCoordinate);
+
+    if (!block || block.blockId === 0) {
+      return undefined;
+    }
+
+    return {
+      blockId: block.blockId,
+      blockRotationIndex: block.blockRotationIndex,
+      globalCoordinate,
+      neighborGlobalCoordinate: {
+        x: Math.floor(blockHitPointVec3.x + blockHitNormalVec3.x * BLOCK_RAYCAST_EPSILON),
+        y: Math.floor(blockHitPointVec3.y + blockHitNormalVec3.y * BLOCK_RAYCAST_EPSILON),
+        z: Math.floor(blockHitPointVec3.z + blockHitNormalVec3.z * BLOCK_RAYCAST_EPSILON),
+      },
+      hitPoint: {
+        x: blockHitPointVec3.x,
+        y: blockHitPointVec3.y,
+        z: blockHitPointVec3.z,
+      },
+      normal: {
+        x: blockHitNormalVec3.x,
+        y: blockHitNormalVec3.y,
+        z: blockHitNormalVec3.z,
+      },
+    };
+  }
+
+  public raycastBlockFromCamera(
+    screenX: number = window.innerWidth / 2,
+    screenY: number = window.innerHeight / 2,
+    maxDistance: number = 8,
+  ): RaycastedBlock | undefined {
+    return this.raycastBlock(this._game.camera.rayForInteract(screenX, screenY), maxDistance);
+  }
+
   public inLiquidBlock(worldPosition: Vector3Like): boolean {
     const globalCoordinate = Chunk.worldPositionToGlobalCoordinate(worldPosition);
     const chunk = this.getChunkByGlobalCoordinate(globalCoordinate);
@@ -278,5 +438,97 @@ export default class ChunkManager {
 
     const absWorldPositionY = Math.abs(worldPosition.y);
     return absWorldPositionY - Math.floor(absWorldPositionY) < 1.0 + WATER_SURFACE_Y_OFFSET;
+  }
+
+  private _applyBlockUpdates(updates: ChunkBlockUpdate[]): boolean {
+    const workerUpdate: Record<ChunkId, { localCoordinate: Vector3Like, blockId: BlockId, blockRotationIndex?: number }[]> = {};
+
+    for (const { globalCoordinate, blockId, blockRotationIndex } of updates) {
+      const chunkId = Chunk.globalCoordinateToChunkId(globalCoordinate);
+      const chunk = this._registry.getChunk(chunkId);
+
+      if (!chunk) {
+        continue;
+      }
+
+      const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
+      this._registry.updateBlock(chunkId, localCoordinate, blockId, blockRotationIndex);
+
+      if (workerUpdate[chunkId] === undefined) {
+        workerUpdate[chunkId] = [];
+      }
+
+      workerUpdate[chunkId].push({
+        localCoordinate: {
+          x: localCoordinate.x,
+          y: localCoordinate.y,
+          z: localCoordinate.z,
+        },
+        blockId,
+        blockRotationIndex,
+      });
+    }
+
+    if (Object.keys(workerUpdate).length === 0) {
+      return false;
+    }
+
+    const message: ChunkWorkerBlocksUpdateMessage = {
+      type: 'blocks_update',
+      update: workerUpdate,
+    };
+    this._game.chunkWorkerClient.postMessage(message);
+
+    return true;
+  }
+
+  private _blockCoordinateKey(globalCoordinate: Vector3Like): string {
+    return `${globalCoordinate.x},${globalCoordinate.y},${globalCoordinate.z}`;
+  }
+
+  private _discardPredictedBlocksForChunk(chunkId: ChunkId): void {
+    for (const [key, prediction] of this._predictedBlocks) {
+      if (Chunk.globalCoordinateToChunkId(prediction.globalCoordinate) !== chunkId) {
+        continue;
+      }
+
+      this._predictedBlocks.delete(key);
+    }
+  }
+
+  private _expirePredictedBlocks(nowMs: number): void {
+    const expiredCoordinates: Vector3Like[] = [];
+
+    for (const prediction of this._predictedBlocks.values()) {
+      if (nowMs >= prediction.expiresAtMs) {
+        expiredCoordinates.push(prediction.globalCoordinate);
+      }
+    }
+
+    for (const globalCoordinate of expiredCoordinates) {
+      this.rollbackPredictedBlock(globalCoordinate);
+    }
+  }
+
+  private _getPredictedBlockUpdatesForChunk(chunkId: ChunkId): ChunkBlockUpdate[] {
+    const updates: ChunkBlockUpdate[] = [];
+
+    for (const prediction of this._predictedBlocks.values()) {
+      if (Chunk.globalCoordinateToChunkId(prediction.globalCoordinate) !== chunkId) {
+        continue;
+      }
+
+      updates.push({
+        globalCoordinate: prediction.globalCoordinate,
+        blockId: prediction.blockId,
+        blockRotationIndex: prediction.blockRotationIndex,
+      });
+    }
+
+    return updates;
+  }
+
+  private _normalizeBlockRotationIndex(blockRotationIndex?: number): number | undefined {
+    return blockRotationIndex === undefined || blockRotationIndex === 0 ? undefined : blockRotationIndex;
   }
 }

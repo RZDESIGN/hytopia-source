@@ -5,7 +5,7 @@
 ```ts
 
 import type { AnyPacket } from '@hytopia.com/server-protocol';
-import type { ErrorEvent as ErrorEvent_2 } from 'ws';
+import type { ErrorEvent } from 'ws';
 import EventEmitter from 'eventemitter3';
 import http from 'http';
 import type { InputSchema } from '@hytopia.com/server-protocol';
@@ -909,6 +909,9 @@ export class DefaultPlayerEntityController extends BaseEntityController {
     jumpLandLightOneshotAnimations: string[];
     jumpOneshotAnimations: string[];
     jumpVelocity: number;
+    get localPredictionJustSubmergedRemainingMs(): number;
+    get localPredictionMotionBasisVelocity(): Vector3Like;
+    get localPredictionSwimUpwardCooldownRemainingMs(): number;
     get platform(): Entity | undefined;
     runLoopedAnimations: string[];
     runVelocity: number;
@@ -2253,12 +2256,16 @@ export class Player extends EventRouter implements protocol.Serializable {
     //
     // @internal
     constructor(connection: Connection, session: Session | undefined);
+    // @internal (undocumented)
+    applyQueuedInputForSimulation(): void;
     readonly camera: PlayerCamera;
     // Warning: (ae-forgotten-export) The symbol "Connection" needs to be exported by the entry point index.d.ts
     //
     // @internal (undocumented)
     readonly connection: Connection;
     readonly cosmetics: Promise<PlayerCosmetics | void>;
+    // @internal (undocumented)
+    discardInputForSimulation(): void;
     disconnect(): void;
     getPersistedData(): Record<string, unknown> | undefined;
     readonly id: string;
@@ -2266,7 +2273,11 @@ export class Player extends EventRouter implements protocol.Serializable {
     get isInteractEnabled(): boolean;
     joinWorld(world: World): void;
     // @internal (undocumented)
+    get lastAppliedInputSequenceNumber(): number | undefined;
+    // @internal (undocumented)
     loadInitialPersistedData(): Promise<void>;
+    // @internal (undocumented)
+    markInputAppliedForSimulation(): void;
     get maxInteractDistance(): number;
     readonly profilePictureUrl: string | undefined;
     // @internal (undocumented)

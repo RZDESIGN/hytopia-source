@@ -433,6 +433,73 @@ The upward velocity applied to the entity when it jumps.
 </td></tr>
 <tr><td>
 
+[localPredictionJustSubmergedRemainingMs](./server.defaultplayerentitycontroller.localpredictionjustsubmergedremainingms.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+number
+
+
+</td><td>
+
+Remaining just-submerged sinking time for owner prediction, in milliseconds.
+
+\*\*Category:\*\* Controllers
+
+
+</td></tr>
+<tr><td>
+
+[localPredictionMotionBasisVelocity](./server.defaultplayerentitycontroller.localpredictionmotionbasisvelocity.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+[Vector3Like](./server.vector3like.md)
+
+
+</td><td>
+
+Owner-only motion basis velocity used by the client prediction path.
+
+
+</td></tr>
+<tr><td>
+
+[localPredictionSwimUpwardCooldownRemainingMs](./server.defaultplayerentitycontroller.localpredictionswimupwardcooldownremainingms.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+number
+
+
+</td><td>
+
+Remaining swim-upward cooldown for owner prediction, in milliseconds.
+
+\*\*Category:\*\* Controllers
+
+
+</td></tr>
+<tr><td>
+
 [platform](./server.defaultplayerentitycontroller.platform.md)
 
 

@@ -6,7 +6,7 @@
 
 Enables or disables `tickWithPlayerInput()` during the entity's tick.
 
-Use for: temporarily disabling player control (cutscenes, menus, stuns).
+Use for: temporarily disabling player control (cutscenes, menus, stuns). When disabled, queued input is discarded and active control state is cleared.
 
 **Signature:**
 

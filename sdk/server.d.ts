@@ -1,5 +1,5 @@
 import type { AnyPacket } from '@hytopia.com/server-protocol';
-import type { ErrorEvent as ErrorEvent_2 } from 'ws';
+import type { ErrorEvent } from 'ws';
 import EventEmitter from 'eventemitter3';
 import http from 'http';
 import type { InputSchema } from '@hytopia.com/server-protocol';
@@ -2865,6 +2865,7 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
 
 
 
+
     /**
      * @param options - Options for the controller.
      *
@@ -2901,6 +2902,28 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
      * **Category:** Controllers
      */
     get isSwimming(): boolean;
+    /**
+     * Owner-only motion basis velocity used by the client prediction path.
+     *
+     * @remarks
+     * This combines platform and external impulse motion, which are not derivable
+     * from deterministic input replay alone on the client.
+     *
+     * **Category:** Controllers
+     */
+    get localPredictionMotionBasisVelocity(): Vector3Like;
+    /**
+     * Remaining just-submerged sinking time for owner prediction, in milliseconds.
+     *
+     * **Category:** Controllers
+     */
+    get localPredictionJustSubmergedRemainingMs(): number;
+    /**
+     * Remaining swim-upward cooldown for owner prediction, in milliseconds.
+     *
+     * **Category:** Controllers
+     */
+    get localPredictionSwimUpwardCooldownRemainingMs(): number;
     /**
      * The platform the entity is on, if any.
      *
@@ -7314,6 +7337,8 @@ export declare class Player extends EventRouter implements protocol.Serializable
 
 
 
+
+
     /**
      * The current `PlayerInput` of the player.
      *
@@ -7338,6 +7363,7 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     get maxInteractDistance(): number;
+
     /**
      * The current `World` the player is in, or undefined if not yet joined.
      *
@@ -7466,6 +7492,11 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     setPersistedData(data: Record<string, unknown>): void;
+
+
+
+
+
 
 
 
@@ -8210,6 +8241,7 @@ export declare class PlayerEntity extends Entity {
      * Enables or disables `tickWithPlayerInput()` during the entity's tick.
      *
      * Use for: temporarily disabling player control (cutscenes, menus, stuns).
+     * When disabled, queued input is discarded and active control state is cleared.
      *
      * @param enabled - Whether `tickWithPlayerInput()` should be called.
      *

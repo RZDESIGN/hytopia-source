@@ -3,6 +3,7 @@ import * as GLTFLoader from 'three/addons/loaders/GLTFLoader.js';
 import Game from '../../Game';
 import MobileManager from '../../mobile/MobileManager';
 import { profanityFilter } from '../../services/hytopia/profanityFilter';
+import type { RaycastedBlock } from '../../chunks/ChunkManager';
 import type { OnStateCallback } from '../SceneUI';
 import type { ArrowCreateData } from '../../arrows/ArrowManager';
 
@@ -64,6 +65,26 @@ export class HytopiaUI {
   }
 
   /**
+   * Gets block data for a loaded chunk coordinate on the client.
+   * This reflects speculative block predictions too, if one is active.
+   * @param globalCoordinate - Global block coordinate in world space
+   * @returns The block type id and rotation index, or undefined if the chunk is not loaded
+   * @public
+   */
+  public getBlock(globalCoordinate: THREE.Vector3Like): { blockTypeId: number, blockRotationIndex: number } | undefined {
+    const block = Game.instance.chunkManager.getBlock(globalCoordinate);
+
+    if (!block) {
+      return undefined;
+    }
+
+    return {
+      blockTypeId: block.blockId,
+      blockRotationIndex: block.blockRotationIndex,
+    };
+  }
+
+  /**
    * Finds an entity by its name property and returns its ID.
    * If multiple entities have the same name, returns the first one found.
    * @param name - The exact name to search for (case-sensitive)
@@ -72,6 +93,23 @@ export class HytopiaUI {
    */
   public getEntityIdByName(name: string): number | undefined {
     return Game.instance.entityManager.findEntityByName(name)?.id;
+  }
+
+  /**
+   * Raycasts against currently rendered solid chunk meshes on the client.
+   * Use this to resolve block break/place targets before sending your gameplay action to the server.
+   * @param screenX - Screen X coordinate. Defaults to the viewport center.
+   * @param screenY - Screen Y coordinate. Defaults to the viewport center.
+   * @param maxDistance - Max raycast distance in world units.
+   * @returns Block hit information, or undefined if no solid block was hit
+   * @public
+   */
+  public raycastBlock(
+    screenX: number = window.innerWidth / 2,
+    screenY: number = window.innerHeight / 2,
+    maxDistance: number = 8,
+  ): RaycastedBlock | undefined {
+    return Game.instance.chunkManager.raycastBlockFromCamera(screenX, screenY, maxDistance);
   }
 
   /**
@@ -149,6 +187,40 @@ export class HytopiaUI {
    */
   public freezePointerLock(freeze: boolean): void {
     Game.instance.inputManager.freezePointerLock(freeze);
+  }
+
+  /**
+   * Applies an owner-only speculative block change on the client.
+   * The normal authoritative block sync from the server reconciles or overrides it.
+   * @param globalCoordinate - Global block coordinate in world space
+   * @param blockTypeId - Block id to display locally. Use 0 for air/removal.
+   * @param blockRotationIndex - Optional rotation index
+   * @param timeoutMs - Optional rollback timeout if the server never confirms the change
+   * @returns Whether the prediction was applied locally
+   * @public
+   */
+  public predictBlock(
+    globalCoordinate: THREE.Vector3Like,
+    blockTypeId: number,
+    blockRotationIndex?: number,
+    timeoutMs?: number,
+  ): boolean {
+    return Game.instance.chunkManager.predictBlock(
+      globalCoordinate,
+      blockTypeId,
+      blockRotationIndex,
+      timeoutMs,
+    );
+  }
+
+  /**
+   * Rolls back a previously predicted block change at the given coordinate.
+   * @param globalCoordinate - Global block coordinate in world space
+   * @returns Whether a speculative block was rolled back
+   * @public
+   */
+  public rollbackPredictedBlock(globalCoordinate: THREE.Vector3Like): boolean {
+    return Game.instance.chunkManager.rollbackPredictedBlock(globalCoordinate);
   }
 
   /**
