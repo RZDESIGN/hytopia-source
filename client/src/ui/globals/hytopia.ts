@@ -231,6 +231,16 @@ export class HytopiaUI {
   }
 
   /**
+   * Inverts vertical camera look for mouse, touch, and controller input.
+   * Useful for exposing an invert-Y toggle in your UI options menu.
+   * @param invert - `true` to invert vertical look, `false` for standard look controls
+   * @public
+   */
+  public setInvertVerticalLook(invert: boolean): void {
+    Game.instance.settingsManager.setInvertVerticalLook(invert);
+  }
+
+  /**
    * Applies color tint to an entity on the client only (does not affect other players' view).
    * Use for client-side visual effects like highlighting, damage indicators, or team colors.
    * @param entityId - ID of the entity to tint

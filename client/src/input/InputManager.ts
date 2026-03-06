@@ -9,6 +9,16 @@ const INTERACT_TAP_MAX_DURATION_MS = 200;
 
 // Max distance squared in pixels for a drag (vs tap) - 30px radius
 const INTERACT_DRAG_CANCEL_MAX_DISTANCE_SQ = 900;
+const GAMEPAD_LEFT_STICK_DEADZONE = 0.18;
+const GAMEPAD_RIGHT_STICK_DEADZONE = 0.12;
+const GAMEPAD_RUN_THRESHOLD = 0.7;
+const GAMEPAD_TRIGGER_THRESHOLD = 0.45;
+
+const GAMEPAD_BUTTON_BINDINGS = [
+  [0, 'sp'],
+  [6, 'mr'],
+  [7, 'ml'],
+] as const;
 
 type InputState = {
   w?: boolean;  // w
@@ -53,6 +63,15 @@ type ContinuousInputState = {
   cy?: number; // camera yaw radians
   jd?: number | null; // joystick direction radians, null signals server to stop joystick movement
 }
+
+type InputSource = 'hardware' | 'virtual' | 'gamepad';
+type InputSourceState = Record<InputSource, InputState>;
+type JoystickInputSource = 'virtual' | 'gamepad';
+type StickState = {
+  x: number;
+  y: number;
+  magnitude: number;
+};
 
 const CODE_TO_KEY_MAP: { [key: string]: string } = {
   'KeyW': 'w',
@@ -143,7 +162,7 @@ const SUPPORTED_INPUT_MAP: { [key: string]: keyof InputState } = {
   'mouse2': 'mr',
 };
 
-const SUPPORTED_INPUTS = Object.values(SUPPORTED_INPUT_MAP);
+const SUPPORTED_INPUTS = new Set(Object.values(SUPPORTED_INPUT_MAP));
 
 export default class InputManager {
   private _game: Game;
@@ -151,11 +170,20 @@ export default class InputManager {
   private _isPointerLockFrozen = false;
   private _inputEnabled: boolean = true;
   private _inputState: InputState = {};
+  private _inputStateBySource: InputSourceState = {
+    hardware: {},
+    virtual: {},
+    gamepad: {},
+  };
   private _networkedInputEnabled: boolean = true;
   private _continuousInputState: ContinuousInputState = {};
+  private _joystickDirectionBySource: Partial<Record<JoystickInputSource, number | null>> = {};
   private _onPressCallback: Map<string, () => void> = new Map();
   private _pointerLockRequested = !MobileManager.isMobile;
   private _pointerLockRequestedDecoupleInput: boolean = false;
+  private _preferredGamepadIndex: number | undefined;
+  private _moveStickState: StickState = { x: 0, y: 0, magnitude: 0 };
+  private _lookStickState: StickState = { x: 0, y: 0, magnitude: 0 };
 
   // Interact tracking - Map by pointerId to support multitouch
   private _interactPointers: Map<number, { x: number; y: number; time: number }> = new Map();
@@ -174,11 +202,11 @@ export default class InputManager {
 
   public enableInput(enabled: boolean): void {
     if (!enabled) {
-      Object.keys(this._inputState).forEach((key) => {
-        if (this._inputState[key as keyof InputState]) {
-          this._onInputChange(key, false);
-        }
-      });
+      this._clearInputSource('hardware');
+      this._clearInputSource('virtual');
+      this._clearInputSource('gamepad');
+      this._setJoystickDirectionForSource('virtual', undefined);
+      this._setJoystickDirectionForSource('gamepad', undefined);
     }
     
     this._inputEnabled = enabled;
@@ -215,11 +243,15 @@ export default class InputManager {
   }
 
   public pressInput(input: string, pressed: boolean): void {
-    this._onInputChange(input, pressed);
+    this._onInputChange(input, pressed, 'virtual');
   }
 
   public setJoystickDirection(radians: number | null): void {
-    this._continuousInputState.jd = radians;
+    this._setJoystickDirectionForSource('virtual', radians);
+  }
+
+  public update(frameDeltaS: number): void {
+    this._updateGamepadInput(frameDeltaS);
   }
 
   public requestPointerLock(): void {
@@ -274,10 +306,14 @@ export default class InputManager {
   }
 
   private _setupInputListeners(): void {
-    window.addEventListener('keydown', (event) => this._onKeyboardInputChange(event.code, true));
+    window.addEventListener('keydown', (event) => {
+      if (!event.repeat) {
+        this._onKeyboardInputChange(event.code, true);
+      }
+    });
     window.addEventListener('keyup', (event) => this._onKeyboardInputChange(event.code, false));
-    window.addEventListener('mousedown', (event) => this._onInputChange(`mouse${event.button}`, true));
-    window.addEventListener('mouseup', (event) => this._onInputChange(`mouse${event.button}`, false));
+    window.addEventListener('mousedown', (event) => this._onInputChange(`mouse${event.button}`, true, 'hardware'));
+    window.addEventListener('mouseup', (event) => this._onInputChange(`mouse${event.button}`, false, 'hardware'));
     window.addEventListener('pointerdown', (event) => this._onPointerDown(event));
     window.addEventListener('pointerup', (event) => this._onPointerUp(event));
     window.addEventListener('pointercancel', (event) => this._onPointerCancel(event));
@@ -312,11 +348,11 @@ export default class InputManager {
     // regardless of keyboard type or layout.
     const mappedInput = CODE_TO_KEY_MAP[code];
     if (mappedInput) {
-      this._onInputChange(mappedInput, isPressed);
+      this._onInputChange(mappedInput, isPressed, 'hardware');
     }
   }
 
-  private _onInputChange = (input: string, isPressed: boolean): void => {
+  private _onInputChange = (input: string, isPressed: boolean, source: InputSource): void => {
     if (!this._inputEnabled) { return; }
 
     const onPressCallback = this._onPressCallback.get(input);
@@ -327,17 +363,184 @@ export default class InputManager {
 
     let mappedInput = SUPPORTED_INPUT_MAP[input];
 
-    if (!mappedInput && SUPPORTED_INPUTS.includes(input as keyof InputState)) {
+    if (!mappedInput && SUPPORTED_INPUTS.has(input as keyof InputState)) {
       mappedInput = input as keyof InputState;
     }
 
-    if (mappedInput && this._inputState[mappedInput] !== isPressed) {
-      this._inputState[mappedInput] = isPressed;
-      
-      if (this._networkedInputEnabled) {
-        this._game.networkManager.sendInputPacket({ [mappedInput]: isPressed });
+    if (!mappedInput) {
+      return;
+    }
+
+    const sourceState = this._inputStateBySource[source];
+
+    if (!!sourceState[mappedInput] === isPressed) {
+      return;
+    }
+
+    if (isPressed) {
+      sourceState[mappedInput] = true;
+    } else {
+      delete sourceState[mappedInput];
+    }
+
+    this._syncMergedInput(mappedInput);
+  }
+
+  private _syncMergedInput(input: keyof InputState): void {
+    const isPressed =
+      !!this._inputStateBySource.hardware[input] ||
+      !!this._inputStateBySource.virtual[input] ||
+      !!this._inputStateBySource.gamepad[input];
+
+    if (!!this._inputState[input] === isPressed) {
+      return;
+    }
+
+    if (isPressed) {
+      this._inputState[input] = true;
+    } else {
+      delete this._inputState[input];
+    }
+
+    if (this._networkedInputEnabled) {
+      this._game.networkManager.sendInputPacket({ [input]: isPressed });
+    }
+  }
+
+  private _clearInputSource(source: InputSource): void {
+    const sourceState = this._inputStateBySource[source];
+    const activeInputs = Object.keys(sourceState) as (keyof InputState)[];
+
+    if (activeInputs.length === 0) {
+      return;
+    }
+
+    this._inputStateBySource[source] = {};
+
+    activeInputs.forEach((input) => this._syncMergedInput(input));
+  }
+
+  private _setJoystickDirectionForSource(source: JoystickInputSource, radians: number | null | undefined): void {
+    const previousDirection = this._getMergedJoystickDirection();
+
+    if (radians === undefined) {
+      delete this._joystickDirectionBySource[source];
+    } else {
+      this._joystickDirectionBySource[source] = radians;
+    }
+
+    const nextDirection = this._getMergedJoystickDirection();
+
+    if (previousDirection !== nextDirection) {
+      this._continuousInputState.jd = nextDirection ?? null;
+    }
+  }
+
+  private _getMergedJoystickDirection(): number | null | undefined {
+    if (this._joystickDirectionBySource.virtual !== undefined) {
+      return this._joystickDirectionBySource.virtual;
+    }
+
+    return this._joystickDirectionBySource.gamepad;
+  }
+
+  private _updateGamepadInput(frameDeltaS: number): void {
+    if (!this._inputEnabled) {
+      this._clearGamepadState();
+      return;
+    }
+
+    const gamepads = navigator.getGamepads?.();
+
+    if (!gamepads?.length) {
+      this._preferredGamepadIndex = undefined;
+      this._clearGamepadState();
+      return;
+    }
+
+    const gamepad = this._getActiveGamepad(gamepads);
+
+    if (!gamepad) {
+      this._preferredGamepadIndex = undefined;
+      this._clearGamepadState();
+      return;
+    }
+
+    this._preferredGamepadIndex = gamepad.index;
+
+    const hasMoveStick = this._normalizeStick(
+      gamepad.axes[0] ?? 0,
+      gamepad.axes[1] ?? 0,
+      GAMEPAD_LEFT_STICK_DEADZONE,
+      this._moveStickState,
+    );
+    const hasLookStick = this._normalizeStick(
+      gamepad.axes[2] ?? 0,
+      gamepad.axes[3] ?? 0,
+      GAMEPAD_RIGHT_STICK_DEADZONE,
+      this._lookStickState,
+    );
+
+    if (hasLookStick) {
+      this._game.camera.handleGamepadCameraMovement(this._lookStickState.x, this._lookStickState.y, frameDeltaS);
+    }
+
+    if (this._game.camera.isGameCameraActive && hasMoveStick) {
+      // Keep gamepad movement aligned with the existing mobile joystick convention used by the server.
+      this._setJoystickDirectionForSource('gamepad', Math.atan2(-this._moveStickState.x, -this._moveStickState.y));
+      this._onInputChange('shift', this._moveStickState.magnitude >= GAMEPAD_RUN_THRESHOLD, 'gamepad');
+    } else {
+      this._setJoystickDirectionForSource('gamepad', undefined);
+      this._onInputChange('shift', false, 'gamepad');
+    }
+
+    for (const [buttonIndex, input] of GAMEPAD_BUTTON_BINDINGS) {
+      const button = gamepad.buttons[buttonIndex];
+      const pressed = !!button && (button.pressed || button.value >= GAMEPAD_TRIGGER_THRESHOLD);
+      this._onInputChange(input, pressed, 'gamepad');
+    }
+  }
+
+  private _getActiveGamepad(gamepads: readonly (Gamepad | null)[]): Gamepad | undefined {
+    if (this._preferredGamepadIndex !== undefined) {
+      const preferredGamepad = gamepads[this._preferredGamepadIndex];
+      if (preferredGamepad?.connected) {
+        return preferredGamepad;
       }
     }
+
+    for (const gamepad of gamepads) {
+      if (gamepad?.connected) {
+        return gamepad;
+      }
+    }
+
+    return undefined;
+  }
+
+  private _normalizeStick(x: number, y: number, deadzone: number, target: StickState): boolean {
+    const magnitude = Math.hypot(x, y);
+
+    if (magnitude <= deadzone) {
+      target.x = 0;
+      target.y = 0;
+      target.magnitude = 0;
+      return false;
+    }
+
+    const normalizedMagnitude = Math.min(1, (magnitude - deadzone) / (1 - deadzone));
+    const scale = normalizedMagnitude / magnitude;
+
+    target.x = x * scale;
+    target.y = y * scale;
+    target.magnitude = normalizedMagnitude;
+
+    return true;
+  }
+
+  private _clearGamepadState(): void {
+    this._clearInputSource('gamepad');
+    this._setJoystickDirectionForSource('gamepad', undefined);
   }
 
   private _onPointerDown = (event: PointerEvent) => {

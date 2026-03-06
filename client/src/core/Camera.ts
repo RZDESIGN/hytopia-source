@@ -152,6 +152,18 @@ export default class Camera {
     this._updateCameraRotation(movementX, movementY, this._game.settingsManager.clientSettings.controls.touchSensitivityForRotation);
   }
 
+  public handleGamepadCameraMovement(axisX: number, axisY: number, frameDeltaS: number): void {
+    if (this._gameCameraTrackedEntity || this._gameCameraTrackedPosition) {
+      return;
+    }
+
+    const rotationSpeed = this._game.settingsManager.clientSettings.controls.gamepadSensitivityForRotation;
+    this._applyCameraRotationDelta(
+      axisY * rotationSpeed * frameDeltaS * this._gameCameraMouseSensitivityMultiplier,
+      -axisX * rotationSpeed * frameDeltaS * this._gameCameraMouseSensitivityMultiplier,
+    );
+  }
+
   public handleMobileCameraZoom(delta: number): void {
     this._gameCameraSkipNextFilmOffsetInterpolation = true;
     this._updateCameraZoom(delta * this._game.settingsManager.clientSettings.controls.pinchSensitivityForZoom);
@@ -419,13 +431,21 @@ export default class Camera {
   }
 
   private _updateCameraRotation(movementX: number, movementY: number, rotationSpeed: number): void {
+    this._applyCameraRotationDelta(
+      movementY * rotationSpeed * this._gameCameraMouseSensitivityMultiplier,
+      -movementX * rotationSpeed * this._gameCameraMouseSensitivityMultiplier,
+    );
+  }
+
+  private _applyCameraRotationDelta(deltaPitch: number, deltaYaw: number): void {
     const isGameCameraActive = this.isGameCameraActive;
+    const pitchDirection = this._game.settingsManager.clientSettings.controls.invertVerticalLook ? -1 : 1;
 
     let cameraPitch = isGameCameraActive ? this._gameCameraPitch : this._spectatorCameraPitch;
     let cameraYaw = isGameCameraActive ? this._gameCameraYaw : this._spectatorCameraYaw;
 
-    cameraPitch += movementY * rotationSpeed * this._gameCameraMouseSensitivityMultiplier;
-    cameraYaw -= movementX * rotationSpeed * this._gameCameraMouseSensitivityMultiplier;
+    cameraPitch += deltaPitch * pitchDirection;
+    cameraYaw += deltaYaw;
 
     // Clamp the pitch to avoid flipping & gimbal lock
     cameraPitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, cameraPitch));

@@ -281,6 +281,7 @@ export default class Renderer {
 
     this._game.arrowManager.update(frameDeltaS);
     this._game.blockMaterialManager.update();
+    this._game.inputManager.update(frameDeltaS);
     this._game.camera.update(frameDeltaS);
     this._game.audioManager.update();
     this._updateSkybox(frameDeltaS);

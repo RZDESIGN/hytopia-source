@@ -42,6 +42,8 @@ type QualityPerfTradeoff = {
 
 export type ClientSettings = {
   controls: {
+    gamepadSensitivityForRotation: number,
+    invertVerticalLook: boolean,
     mouseSensitivityForRotation: number,
     pinchSensitivityForZoom: number,
     touchSensitivityForRotation: number,
@@ -153,6 +155,8 @@ const DEFAULT_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = MobileManager.isMobi
 // TODO: Introduce a Client settings UI or something similar to allow users to intuitively update the settings.
 const DEFAULT_CLIENT_SETTINGS: ClientSettings = {
   controls: {
+    gamepadSensitivityForRotation: 4.5,
+    invertVerticalLook: false,
     mouseSensitivityForRotation: 0.0025,
     pinchSensitivityForZoom: 0.05,
     touchSensitivityForRotation: 0.008,
@@ -243,6 +247,13 @@ export default class SettingsManager {
   public setDistantBlockViewMode(mode: DistantBlockViewMode): void {
     this._clientSettings.distantBlockViewMode = mode;
     this._emitUpdateEvent();
+  }
+
+  public setInvertVerticalLook(invert: boolean): void {
+    this._clientSettings.controls = {
+      ...this._clientSettings.controls,
+      invertVerticalLook: invert,
+    };
   }
 
   private _emitUpdateEvent(): void {
