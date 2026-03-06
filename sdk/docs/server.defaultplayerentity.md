@@ -110,3 +110,4 @@ The cosmetic slots that are hidden.
 
 </td></tr>
 </tbody></table>
+

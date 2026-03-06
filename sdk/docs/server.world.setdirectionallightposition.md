@@ -51,6 +51,7 @@ The light position relative to the player's camera.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

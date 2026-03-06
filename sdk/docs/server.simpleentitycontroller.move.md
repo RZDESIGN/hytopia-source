@@ -83,6 +83,7 @@ _(Optional)_ Additional options for the move operation, such as callbacks.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

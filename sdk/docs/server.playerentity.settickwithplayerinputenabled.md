@@ -51,6 +51,7 @@ Whether `tickWithPlayerInput()` should be called.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

@@ -47,6 +47,7 @@ The block type ID to count.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 number

@@ -67,6 +67,7 @@ _(Optional)_ The player to set the outline for, if undefined the outline will be
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

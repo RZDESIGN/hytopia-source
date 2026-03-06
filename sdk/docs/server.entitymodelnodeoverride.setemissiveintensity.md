@@ -51,6 +51,7 @@ The emissive intensity to set.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

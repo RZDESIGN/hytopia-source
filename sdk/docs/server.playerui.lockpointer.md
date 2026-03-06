@@ -55,6 +55,7 @@ True to lock the pointer, false to unlock it.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

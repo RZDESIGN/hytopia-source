@@ -51,6 +51,7 @@ The hidden state to set.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

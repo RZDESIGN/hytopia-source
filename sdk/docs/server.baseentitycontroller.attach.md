@@ -49,6 +49,7 @@ The entity to attach the controller to.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

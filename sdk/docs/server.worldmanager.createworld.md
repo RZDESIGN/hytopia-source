@@ -49,6 +49,7 @@ The options for the world (ID is assigned automatically).
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 [World](./server.world.md)

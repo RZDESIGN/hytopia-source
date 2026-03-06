@@ -55,6 +55,7 @@ The UI HTML URI to append.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

@@ -85,6 +85,7 @@ _(Optional)_ The rotation of the block.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

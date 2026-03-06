@@ -1,5 +1,5 @@
 import type { AnyPacket } from '@hytopia.com/server-protocol';
-import type { ErrorEvent } from 'ws';
+import type { ErrorEvent as ErrorEvent_2 } from 'ws';
 import EventEmitter from 'eventemitter3';
 import http from 'http';
 import type { InputSchema } from '@hytopia.com/server-protocol';

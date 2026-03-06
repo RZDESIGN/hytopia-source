@@ -55,6 +55,7 @@ True to freeze pointer lock, false to unfreeze it.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

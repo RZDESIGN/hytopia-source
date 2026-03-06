@@ -53,6 +53,7 @@ The emissive color of the entity.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

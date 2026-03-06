@@ -51,6 +51,7 @@ _(Optional)_ The filter to determine if a model animation should be excluded fro
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

@@ -49,6 +49,7 @@ The collision groups for solid colliders of the rigid body.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

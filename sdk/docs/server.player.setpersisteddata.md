@@ -55,6 +55,7 @@ The data to merge into the persisted data.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

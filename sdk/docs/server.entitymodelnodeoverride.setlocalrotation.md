@@ -51,6 +51,7 @@ The local rotation to set.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

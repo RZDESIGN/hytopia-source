@@ -47,6 +47,7 @@ The color intensity at the start of lifetime. Values greater than 1 create HDR/b
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

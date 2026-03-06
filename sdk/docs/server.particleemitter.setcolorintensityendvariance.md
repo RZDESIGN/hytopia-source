@@ -47,6 +47,7 @@ The color intensity variance at the end of lifetime.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

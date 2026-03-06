@@ -51,6 +51,7 @@ Game initialization callback. It can be sync or async. If it accepts a world par
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

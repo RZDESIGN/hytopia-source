@@ -49,6 +49,7 @@ The half extents of the block collider.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

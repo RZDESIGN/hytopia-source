@@ -47,6 +47,7 @@ The name of the animation to get or create.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 [EntityModelAnimation](./server.entitymodelanimation.md) \| undefined

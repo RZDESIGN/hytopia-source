@@ -49,6 +49,7 @@ Whether the collider is enabled.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

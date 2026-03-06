@@ -51,6 +51,7 @@ The local scale to set.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

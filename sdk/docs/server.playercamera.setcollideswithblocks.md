@@ -49,6 +49,7 @@ Whether the camera should collide with blocks.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

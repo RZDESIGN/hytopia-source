@@ -51,6 +51,7 @@ True to allow interactions, false to block them.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

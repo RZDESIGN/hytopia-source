@@ -51,6 +51,7 @@ The blend mode of the entity model animation.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

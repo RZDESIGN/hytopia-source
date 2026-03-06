@@ -47,6 +47,7 @@ The ID returned from `Player.scheduleNotification`<!-- -->.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 Promise&lt;boolean&gt;

@@ -95,3 +95,4 @@ Emitted when a player interacts with a block type.
 
 </td></tr>
 </tbody></table>
+

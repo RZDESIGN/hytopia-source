@@ -49,6 +49,7 @@ The hit point on this block (global coordinates).
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 [Vector3Like](./server.vector3like.md)

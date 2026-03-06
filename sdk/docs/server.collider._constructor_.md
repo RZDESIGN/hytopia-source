@@ -51,3 +51,4 @@ The options for the collider instance.
 
 </td></tr>
 </tbody></table>
+

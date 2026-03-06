@@ -51,6 +51,7 @@ The cubemap URI of the skybox.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

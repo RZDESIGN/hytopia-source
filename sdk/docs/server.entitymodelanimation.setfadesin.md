@@ -51,6 +51,7 @@ Whether the animation should fade in when played or restarted.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

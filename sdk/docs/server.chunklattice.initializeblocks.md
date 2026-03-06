@@ -55,6 +55,7 @@ The blocks to initialize, keyed by block type ID.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

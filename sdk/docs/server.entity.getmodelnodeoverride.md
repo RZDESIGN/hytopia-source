@@ -47,6 +47,7 @@ The node selector for the model node override to get or create. Case-insensitive
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 [EntityModelNodeOverride](./server.entitymodelnodeoverride.md) \| undefined

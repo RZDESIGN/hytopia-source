@@ -47,6 +47,7 @@ The color intensity at the end of lifetime. Values greater than 1 create HDR/blo
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

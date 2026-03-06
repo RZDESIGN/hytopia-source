@@ -47,6 +47,7 @@ The local coordinate of the block to get the rotation of.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 [BlockRotation](./server.blockrotation.md)

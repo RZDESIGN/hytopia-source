@@ -69,6 +69,7 @@ _(Optional)_ The raycast hit result, if the interaction was triggered by a clien
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

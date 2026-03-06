@@ -47,6 +47,7 @@ The fixed rotation in degrees (x, y, z).
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

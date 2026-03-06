@@ -475,3 +475,4 @@ Emitted when the rotation of the entity is updated at the end of the tick, eithe
 
 </td></tr>
 </tbody></table>
+

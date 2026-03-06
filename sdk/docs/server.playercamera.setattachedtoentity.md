@@ -55,6 +55,7 @@ The entity to attach the camera to (must be spawned).
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

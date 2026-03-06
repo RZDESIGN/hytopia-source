@@ -49,6 +49,7 @@ The model URI, or `undefined` to clear.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

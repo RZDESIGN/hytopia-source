@@ -228,3 +228,4 @@ _(Optional)_ The initial blend weight of the entity model animation.
 
 </td></tr>
 </tbody></table>
+

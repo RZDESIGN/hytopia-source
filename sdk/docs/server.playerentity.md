@@ -203,3 +203,4 @@ Use for: temporarily disabling player control (cutscenes, menus, stuns). When di
 
 </td></tr>
 </tbody></table>
+

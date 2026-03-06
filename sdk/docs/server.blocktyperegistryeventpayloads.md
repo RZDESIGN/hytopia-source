@@ -57,3 +57,4 @@ Emitted when a block type is registered.
 
 </td></tr>
 </tbody></table>
+

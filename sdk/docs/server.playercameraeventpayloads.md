@@ -399,3 +399,4 @@ Emitted when the zoom of the camera is set.
 
 </td></tr>
 </tbody></table>
+

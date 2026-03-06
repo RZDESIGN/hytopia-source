@@ -67,6 +67,7 @@ _(Optional)_ Optional query filter flags for debug rendering.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

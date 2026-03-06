@@ -290,7 +290,7 @@ export default class BlockTextureRegistry {
       const fileContent = fs.readFileSync(absolutePath);
       
       hash.update(textureUri);
-      hash.update(fileContent);
+      hash.update(Uint8Array.from(fileContent));
     }
 
     return hash.digest('hex');

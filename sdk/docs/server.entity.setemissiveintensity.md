@@ -51,6 +51,7 @@ The emissive intensity of the entity. Use a value over 1 for brighter emissive e
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

@@ -49,6 +49,7 @@ Whether the collider is a sensor.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

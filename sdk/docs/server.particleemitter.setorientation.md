@@ -47,6 +47,7 @@ The orientation mode. 'billboard' faces the camera, 'billboardY' faces the camer
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

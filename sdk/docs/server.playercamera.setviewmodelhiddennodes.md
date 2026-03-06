@@ -49,6 +49,7 @@ Node name substrings to hide.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

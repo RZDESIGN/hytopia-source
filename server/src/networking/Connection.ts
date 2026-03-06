@@ -62,7 +62,7 @@ export interface ConnectionEventPayloads {
  * @internal
  */
 export default class Connection extends EventRouter {
-  private static _cachedPacketsSerializedBuffer: Map<AnyPacket[], Buffer> = new Map();
+  private static _cachedPacketsSerializedBuffer: Map<AnyPacket[], Uint8Array<ArrayBuffer>> = new Map();
 
   private _closeTimeout: NodeJS.Timeout | null = null;
   private _isDuplicate: boolean = false;
@@ -152,7 +152,7 @@ export default class Connection extends EventRouter {
    *
    * **Category:** Networking
    */
-  public static serializePackets(packets: AnyPacket[]): Buffer | void {    
+  public static serializePackets(packets: AnyPacket[]): Uint8Array<ArrayBuffer> | void {
     for (const packet of packets) {
       if (!protocol.isValidPacket(packet)) {
         return ErrorHandler.error(`Connection.serializePackets(): Invalid packet payload: ${JSON.stringify(packet)}`);
@@ -177,10 +177,10 @@ export default class Connection extends EventRouter {
         'packetIds': packets.map(p => p[0]).join(','),
       },
     }, span => {
-      let outputBuffer = msgpackr.pack(packets);
+      let outputBuffer = Uint8Array.from(msgpackr.pack(packets));
       
       if (outputBuffer.byteLength > 64 * 1024) { // Compress packets larger than 64kb, mainly chunks.
-        outputBuffer = gzipSync(outputBuffer, { level: 1 });
+        outputBuffer = Uint8Array.from(gzipSync(outputBuffer, { level: 1 }));
       }
 
       span?.setAttribute('serializedBytes', outputBuffer.byteLength);

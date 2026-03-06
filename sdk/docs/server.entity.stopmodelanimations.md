@@ -51,6 +51,7 @@ The model animation names to stop.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

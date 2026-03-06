@@ -53,6 +53,7 @@ The world to join the player to.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

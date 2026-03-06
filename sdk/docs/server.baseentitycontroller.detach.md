@@ -49,6 +49,7 @@ The entity being detached.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

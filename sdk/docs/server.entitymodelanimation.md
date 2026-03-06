@@ -552,3 +552,4 @@ Stops the entity model animation, does nothing if already stopped.
 
 </td></tr>
 </tbody></table>
+

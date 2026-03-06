@@ -49,6 +49,7 @@ Whether the rigid body has enabled positional movement.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

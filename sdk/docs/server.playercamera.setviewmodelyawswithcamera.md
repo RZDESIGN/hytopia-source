@@ -49,6 +49,7 @@ Whether the view model should yaw with the camera.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

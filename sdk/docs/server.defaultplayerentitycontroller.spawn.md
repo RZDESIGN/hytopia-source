@@ -49,6 +49,7 @@ The entity that is spawned.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

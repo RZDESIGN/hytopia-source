@@ -1594,3 +1594,4 @@ Wakes up the rigid body. Physics otherwise optimizes waking it when necessary.
 
 </td></tr>
 </tbody></table>
+

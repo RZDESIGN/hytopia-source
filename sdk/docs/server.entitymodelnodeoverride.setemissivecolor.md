@@ -51,6 +51,7 @@ The emissive color to set.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

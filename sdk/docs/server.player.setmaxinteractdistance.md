@@ -49,6 +49,7 @@ The maximum distance in blocks used for the interact raycast.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

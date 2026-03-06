@@ -51,6 +51,7 @@ Whether the animation should fade out when paused or stopped.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

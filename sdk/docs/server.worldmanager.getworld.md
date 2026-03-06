@@ -47,6 +47,7 @@ The ID of the world to get.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 [World](./server.world.md) \| undefined

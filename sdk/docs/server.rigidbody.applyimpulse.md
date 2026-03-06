@@ -49,6 +49,7 @@ The impulse to apply to the rigid body.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

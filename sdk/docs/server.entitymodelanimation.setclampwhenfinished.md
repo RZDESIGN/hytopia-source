@@ -51,6 +51,7 @@ Whether to clamp when finished.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

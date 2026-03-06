@@ -100,3 +100,4 @@ _(Optional)_ The radius of the capsule collider.
 
 </td></tr>
 </tbody></table>
+

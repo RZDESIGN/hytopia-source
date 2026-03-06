@@ -133,3 +133,4 @@ _(Optional)_ The thickness of the outline in world units. Defaults to 0.03.
 
 </td></tr>
 </tbody></table>
+

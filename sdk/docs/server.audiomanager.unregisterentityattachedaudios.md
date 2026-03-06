@@ -53,6 +53,7 @@ The entity to pause and unregister audio instances for.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void

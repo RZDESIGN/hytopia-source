@@ -515,3 +515,4 @@ _(Optional)_ The normalized horizontal velocity applied to the entity when it wa
 
 </td></tr>
 </tbody></table>
+

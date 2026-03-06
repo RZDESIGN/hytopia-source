@@ -49,6 +49,7 @@ The friction of the collider.
 
 </td></tr>
 </tbody></table>
+
 **Returns:**
 
 void
