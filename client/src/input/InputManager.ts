@@ -163,7 +163,9 @@ export namespace InputManagerEventPayload {
     a: boolean;
     s: boolean;
     d: boolean;
+    sp: boolean;
     sh: boolean;
+    c: boolean;
   }
 }
 
@@ -405,7 +407,9 @@ export default class InputManager {
           a: !!this._inputState.a,
           s: !!this._inputState.s,
           d: !!this._inputState.d,
+          sp: !!this._inputState.sp,
           sh: !!this._inputState.sh,
+          c: !!this._inputState.c,
         });
       }
 

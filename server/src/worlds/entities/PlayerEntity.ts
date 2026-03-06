@@ -119,13 +119,22 @@ export default class PlayerEntity extends Entity {
    * Enables or disables `tickWithPlayerInput()` during the entity's tick.
    *
    * Use for: temporarily disabling player control (cutscenes, menus, stuns).
+   * When disabled, queued input is discarded and active control state is cleared.
    *
    * @param enabled - Whether `tickWithPlayerInput()` should be called.
    *
    * **Category:** Entities
    */  
   public setTickWithPlayerInputEnabled(enabled: boolean) {
+    if (this._tickWithPlayerInputEnabled === enabled) {
+      return;
+    }
+
     this._tickWithPlayerInputEnabled = enabled;
+
+    if (!enabled) {
+      this.player.discardInputForSimulation();
+    }
   }
 
   /** @internal */  
@@ -149,13 +158,17 @@ export default class PlayerEntity extends Entity {
       return ErrorHandler.error(`PlayerEntity.tick(): PlayerEntity "${this.name}" must have a controller.`);
     }
 
+    if (!this._tickWithPlayerInputEnabled) {
+      this.player.discardInputForSimulation();
+      super.tick(tickDeltaMs);
+      return;
+    }
+
     this.player.applyQueuedInputForSimulation();
 
-    if (this._tickWithPlayerInputEnabled) {
-      const { input, camera } = this.player;
+    const { input, camera } = this.player;
 
-      this.controller.tickWithPlayerInput(this, input, camera.orientation, tickDeltaMs);
-    }
+    this.controller.tickWithPlayerInput(this, input, camera.orientation, tickDeltaMs);
 
     super.tick(tickDeltaMs);
   }

@@ -7,6 +7,7 @@ import AudioStats from '../audio/AudioStats';
 import ChunkStats from '../chunks/ChunkStats';
 import EntityStats from '../entities/EntityStats';
 import GLTFStats from '../gltf/GLTFStats';
+import LocalPredictionStats from '../entities/LocalPredictionStats';
 import SceneUIStats from '../ui/SceneUIStats';
 
 const DEBUG_PANEL_Z_INDEX = '100000';
@@ -44,6 +45,19 @@ export interface DebugPanelConfig {
     worldMatrixUpdateCount: number;
     lightLevelUpdateCount: number;
     customTextureCount: number;
+  };
+  prediction: {
+    entityId: number;
+    supportsInputAcknowledgements: boolean;
+    bufferedCommandCount: number;
+    lastAcknowledgedInputSequenceNumber: number;
+    lastReplayCommandCount: number;
+    lastReplaySubstepCount: number;
+    peakReplayCommandCount: number;
+    peakReplaySubstepCount: number;
+    horizontalError: number;
+    verticalError: number;
+    rotationErrorDeg: number;
   };
   chunk: {
     count: number;
@@ -122,6 +136,19 @@ export default class DebugPanel {
       worldMatrixUpdateCount: 0,
       lightLevelUpdateCount: 0,
       customTextureCount: 0,
+    },
+    prediction: {
+      entityId: -1,
+      supportsInputAcknowledgements: false,
+      bufferedCommandCount: 0,
+      lastAcknowledgedInputSequenceNumber: -1,
+      lastReplayCommandCount: 0,
+      lastReplaySubstepCount: 0,
+      peakReplayCommandCount: 0,
+      peakReplaySubstepCount: 0,
+      horizontalError: 0,
+      verticalError: 0,
+      rotationErrorDeg: 0,
     },
     chunk: {
       count: 0,
@@ -231,6 +258,19 @@ export default class DebugPanel {
     entityFolder.add(this._config.entity, 'lightLevelUpdateCount').name('L Level Update');
     entityFolder.add(this._config.entity, 'customTextureCount').name('Custom textures');
 
+    const predictionFolder = this._gui.addFolder('Prediction').close();
+    predictionFolder.add(this._config.prediction, 'entityId').name('Entity ID');
+    predictionFolder.add(this._config.prediction, 'supportsInputAcknowledgements').name('Ack Support');
+    predictionFolder.add(this._config.prediction, 'bufferedCommandCount').name('Buffered Commands');
+    predictionFolder.add(this._config.prediction, 'lastAcknowledgedInputSequenceNumber').name('Last Acked SQ');
+    predictionFolder.add(this._config.prediction, 'lastReplayCommandCount').name('Last Replay Cmds');
+    predictionFolder.add(this._config.prediction, 'lastReplaySubstepCount').name('Last Replay Steps');
+    predictionFolder.add(this._config.prediction, 'peakReplayCommandCount').name('Peak Replay Cmds');
+    predictionFolder.add(this._config.prediction, 'peakReplaySubstepCount').name('Peak Replay Steps');
+    predictionFolder.add(this._config.prediction, 'horizontalError').name('Horizontal Error');
+    predictionFolder.add(this._config.prediction, 'verticalError').name('Vertical Error');
+    predictionFolder.add(this._config.prediction, 'rotationErrorDeg').name('Rotation Error');
+
     // Chunk stats panel
     const chunkFolder = this._gui.addFolder('Chunks');
     chunkFolder.add(this._config.chunk, 'count').name('Count');
@@ -304,6 +344,7 @@ export default class DebugPanel {
     this._updateMemoryStats();
     this._updateRttStats();
     this._updateEntityStats();
+    this._updatePredictionStats();
     this._updateChunkStats();
     this._updateGltfStats();
     this._updateSceneUIStats();
@@ -361,6 +402,20 @@ export default class DebugPanel {
     this._config.entity.worldMatrixUpdateCount = EntityStats.worldMatrixUpdateCount;
     this._config.entity.lightLevelUpdateCount = EntityStats.lightLevelUpdateCount;
     this._config.entity.customTextureCount = EntityStats.customTextureCount;
+  }
+
+  private _updatePredictionStats(): void {
+    this._config.prediction.entityId = LocalPredictionStats.entityId;
+    this._config.prediction.supportsInputAcknowledgements = LocalPredictionStats.supportsInputAcknowledgements;
+    this._config.prediction.bufferedCommandCount = LocalPredictionStats.bufferedCommandCount;
+    this._config.prediction.lastAcknowledgedInputSequenceNumber = LocalPredictionStats.lastAcknowledgedInputSequenceNumber;
+    this._config.prediction.lastReplayCommandCount = LocalPredictionStats.lastReplayCommandCount;
+    this._config.prediction.lastReplaySubstepCount = LocalPredictionStats.lastReplaySubstepCount;
+    this._config.prediction.peakReplayCommandCount = LocalPredictionStats.peakReplayCommandCount;
+    this._config.prediction.peakReplaySubstepCount = LocalPredictionStats.peakReplaySubstepCount;
+    this._config.prediction.horizontalError = Number(LocalPredictionStats.horizontalError.toFixed(3));
+    this._config.prediction.verticalError = Number(LocalPredictionStats.verticalError.toFixed(3));
+    this._config.prediction.rotationErrorDeg = Number(LocalPredictionStats.rotationErrorDeg.toFixed(2));
   }
 
   private _updateChunkStats(): void {

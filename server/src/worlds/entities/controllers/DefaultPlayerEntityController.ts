@@ -283,6 +283,9 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
   /** @internal - Reusable vector for platform velocity fallback to avoid per-tick allocation */
   private readonly _reusablePlatformVelocity = { x: 0, y: 0, z: 0 };
 
+  /** @internal - Reusable vector for owner prediction motion basis sync */
+  private readonly _reusableOwnerPredictionMotionBasisVelocity = { x: 0, y: 0, z: 0 };
+
   /** @internal - Reusable vector for target velocities to avoid per-tick allocation */
   private readonly _reusableTargetVelocities = { x: 0, y: 0, z: 0 };
 
@@ -372,6 +375,43 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
    * **Category:** Controllers
    */
   public get isSwimming(): boolean { return this._liquidContactCount > 0; }
+
+  /**
+   * Owner-only motion basis velocity used by the client prediction path.
+   *
+   * @remarks
+   * This combines platform and external impulse motion, which are not derivable
+   * from deterministic input replay alone on the client.
+   *
+   * **Category:** Controllers
+   */
+  public get localPredictionMotionBasisVelocity(): Vector3Like {
+    const platformVelocity = this._platform?.linearVelocity ?? this._reusablePlatformVelocity;
+
+    this._reusableOwnerPredictionMotionBasisVelocity.x = platformVelocity.x + this._externalVelocity.x;
+    this._reusableOwnerPredictionMotionBasisVelocity.y = platformVelocity.y + this._externalVelocity.y;
+    this._reusableOwnerPredictionMotionBasisVelocity.z = platformVelocity.z + this._externalVelocity.z;
+
+    return this._reusableOwnerPredictionMotionBasisVelocity;
+  }
+
+  /**
+   * Remaining just-submerged sinking time for owner prediction, in milliseconds.
+   *
+   * **Category:** Controllers
+   */
+  public get localPredictionJustSubmergedRemainingMs(): number {
+    return Math.max(0, this._justSubmergedUntil - performance.now());
+  }
+
+  /**
+   * Remaining swim-upward cooldown for owner prediction, in milliseconds.
+   *
+   * **Category:** Controllers
+   */
+  public get localPredictionSwimUpwardCooldownRemainingMs(): number {
+    return Math.max(0, this._swimUpwardCooldownAt - performance.now());
+  }
 
   /**
    * The platform the entity is on, if any.

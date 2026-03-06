@@ -17,6 +17,7 @@ import { ChunkLatticeEvent } from '@/worlds/blocks/ChunkLattice';
 import { EntityEvent } from '@/worlds/entities/Entity';
 import { EntityModelAnimationEvent } from '@/worlds/entities/EntityModelAnimation';
 import { EntityModelNodeOverrideEvent } from '@/worlds/entities/EntityModelNodeOverride';
+import DefaultPlayerEntityController from '@/worlds/entities/controllers/DefaultPlayerEntityController';
 import { ParticleEmitterEvent } from '@/worlds/particles/ParticleEmitter';
 import { PlayerEvent } from '@/players/Player';
 import { PlayerCameraEvent, PlayerCameraMode } from '@/players/PlayerCamera';
@@ -44,6 +45,8 @@ const PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK = Object.prototype.hasOwnProperty.call(
   PROTOCOL_ENTITY_SCHEMA?.properties ?? {},
   'aq',
 );
+const ENTITY_LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
+const ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
 
 type SyncQueue<TId, TSchema extends object | null> = {
   broadcast: IterationMap<TId, TSchema>;
@@ -74,6 +77,7 @@ export default class NetworkSynchronizer {
   private _outboundPerPlayerReliablePackets: IterationMap<Player, IPacket<number, any>[]> = new IterationMap();
   private _outboundSharedReliablePackets: AnyPacket[] = [];
   private _outboundSharedUnreliablePackets: AnyPacket[] = [];
+  private _lastSentInputAcknowledgementByPlayer: WeakMap<Player, number> = new WeakMap();
 
   private _queuedAudioSyncs: SyncQueue<number, protocol.AudioSchema> = { broadcast: new IterationMap(), perPlayer: new IterationMap() };
   private _queuedBlockSyncs: SyncQueue<string, protocol.BlockSchema> = { broadcast: new IterationMap(), perPlayer: new IterationMap() };
@@ -1089,6 +1093,7 @@ export default class NetworkSynchronizer {
 
   private _onPlayerJoinedWorld = (payload: EventPayloads[PlayerEvent.JOINED_WORLD]) => {
     const { player } = payload;
+    this._lastSentInputAcknowledgementByPlayer.delete(player);
 
     // Order doesn't matter here - synchronize() handles send order.
     // Use _assignUndefined to avoid overwriting properties already set by other event handlers.
@@ -1155,11 +1160,13 @@ export default class NetworkSynchronizer {
   };
 
   private _onPlayerLeftWorld = (payload: EventPayloads[PlayerEvent.LEFT_WORLD]) => {
+    this._lastSentInputAcknowledgementByPlayer.delete(payload.player);
     const playerSync = this._createOrGetQueuedPlayerSync(payload.player);
     playerSync.rm = true;
   };
 
   private _onPlayerReconnectedWorld = (payload: EventPayloads[PlayerEvent.RECONNECTED_WORLD]) => {
+    this._lastSentInputAcknowledgementByPlayer.delete(payload.player);
     this._onPlayerJoinedWorld(payload); // resync player state
   };
 
@@ -1565,6 +1572,46 @@ export default class NetworkSynchronizer {
     }
   }
 
+  private _queuePlayerEntityOwnerPredictionState(
+    playerEntity: PlayerEntity,
+    entitySync: protocol.EntitySchema & {
+      aq?: number;
+      js?: number;
+      mv?: protocol.VectorSchema;
+      pf?: number;
+      sc?: number;
+    },
+  ): void {
+    const controller = playerEntity.controller;
+
+    if (!(controller instanceof DefaultPlayerEntityController)) {
+      return;
+    }
+
+    let predictionFlags = 0;
+    if (controller.isGrounded) {
+      predictionFlags |= ENTITY_LOCAL_PREDICTION_FLAG_GROUNDED;
+    }
+    if (controller.isSwimming) {
+      predictionFlags |= ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING;
+    }
+
+    entitySync.pf = predictionFlags;
+    entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
+    entitySync.js = undefined;
+    entitySync.sc = undefined;
+
+    const justSubmergedRemainingMs = controller.localPredictionJustSubmergedRemainingMs;
+    if (justSubmergedRemainingMs > 0) {
+      entitySync.js = justSubmergedRemainingMs;
+    }
+
+    const swimUpwardCooldownRemainingMs = controller.localPredictionSwimUpwardCooldownRemainingMs;
+    if (swimUpwardCooldownRemainingMs > 0) {
+      entitySync.sc = swimUpwardCooldownRemainingMs;
+    }
+  }
+
   private _queuePlayerInputAcknowledgements(): void {
     if (!PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK) {
       return;
@@ -1584,8 +1631,19 @@ export default class NetworkSynchronizer {
         continue;
       }
 
-      const entitySync = this._createOrGetQueuedEntitySync(playerEntity, playerEntity.player);
-      (entitySync as protocol.EntitySchema & { aq?: number }).aq = acknowledgedInputSequence;
+      const lastSentAcknowledgedInputSequence = this._lastSentInputAcknowledgementByPlayer.get(playerEntity.player);
+      if (lastSentAcknowledgedInputSequence === acknowledgedInputSequence) {
+        continue;
+      }
+
+      const entitySync = this._createOrGetQueuedEntitySync(playerEntity, playerEntity.player) as protocol.EntitySchema & {
+        aq?: number;
+      };
+      entitySync.aq = acknowledgedInputSequence;
+      entitySync.p ??= Serializer.serializeVector(playerEntity.position);
+      entitySync.r ??= Serializer.serializeQuaternion(playerEntity.rotation);
+      this._queuePlayerEntityOwnerPredictionState(playerEntity, entitySync);
+      this._lastSentInputAcknowledgementByPlayer.set(playerEntity.player, acknowledgedInputSequence);
     }
   }
 }

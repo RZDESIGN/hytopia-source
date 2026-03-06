@@ -14,6 +14,7 @@ import type { VectorSchema } from './Vector';
 
 export type EntitySchema = {
   aq?: number;                    // last applied input sequence number (owner-only)
+  js?: number;                    // local prediction just-submerged remaining ms (owner-only)
   i: number;                      // entity id
   bh?: VectorSchema;              // block half extents
   bt?: string;                    // block texture uri
@@ -23,17 +24,20 @@ export type EntitySchema = {
   m?: string;                     // model uri
   ma?: ModelAnimationSchema[];    // model animations
   mo?: ModelNodeOverrideSchema[]; // model node overrides
+  mv?: VectorSchema;              // local prediction motion-basis velocity (owner-only)
   mt?: string;                    // model texture uri (custom override)
   n?: string;                     // name
   o?: number;                     // opacity
   ol?: OutlineSchema;             // outline options
   p?: VectorSchema;               // position
   pe?: number;                    // parent entity id
+  pf?: number;                    // local prediction flags bitmask (owner-only)
   pi?: number;                    // position interpolation time in milliseconds
   pn?: string;                    // parent node name
   r?: QuaternionSchema;           // rotation
   ri?: number;                    // rotation interpolation time in milliseconds
   rm?: boolean;                   // removed/remove
+  sc?: number;                    // local prediction swim-upward cooldown remaining ms (owner-only)
   si?: number;                    // model scale interpolation time in milliseconds
   sv?: VectorSchema;              // model scale vector for each axis
   t?: RgbColorSchema;             // tint color
@@ -43,6 +47,7 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
   type: 'object',
   properties: {
     aq: { type: 'number', nullable: true },
+    js: { type: 'number', nullable: true },
     i: { type: 'number' },
     bh: { ...vectorSchema, nullable: true },
     bt: { type: 'string', nullable: true },
@@ -52,6 +57,7 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
     m: { type: 'string', nullable: true },
     ma: { type: 'array', items: { ...modelAnimationSchema }, nullable: true },
     mo: { type: 'array', items: { ...modelNodeOverrideSchema }, nullable: true },
+    mv: { ...vectorSchema, nullable: true },
     mt: { type: 'string', nullable: true },
     n: { type: 'string', nullable: true },
     o: { type: 'number', nullable: true },
@@ -59,10 +65,12 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
     p: { ...vectorSchema, nullable: true },
     pi: { type: 'number', nullable: true },
     pe: { type: 'number', nullable: true },
+    pf: { type: 'number', nullable: true },
     pn: { type: 'string', nullable: true },
     r: { ...quaternionSchema, nullable: true },
     ri: { type: 'number', nullable: true },
     rm: { type: 'boolean', nullable: true },
+    sc: { type: 'number', nullable: true },
     si: { type: 'number', nullable: true },
     sv: { ...vectorSchema, nullable: true },
     t: { ...rgbColorSchema, nullable: true },

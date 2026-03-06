@@ -2,6 +2,7 @@ import protocol from '@hytopia.com/server-protocol';
 import { gunzipSync } from 'fflate';
 import { Packr, FLOAT32_OPTIONS } from 'msgpackr';
 import Deserializer from './Deserializer';
+import NetworkConditionSimulator from './NetworkConditionSimulator';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
 import Servers from './Servers';
@@ -105,6 +106,7 @@ export default class NetworkManager {
   private _serverLobbyId: string | undefined;
   private _serverVersion: string | undefined;
   private _syncStartTimeS: number = 0;
+  private _networkConditionSimulator: NetworkConditionSimulator;
 
   // Whether the World Packet has been received. This is intended to be used, for example,
   // as a reference point to determine whether game initialization has started.
@@ -112,8 +114,15 @@ export default class NetworkManager {
 
   public constructor(game: Game) {
     this._game = game;
+    this._networkConditionSimulator = new NetworkConditionSimulator(new URLSearchParams(window.location.search));
 
     window.addEventListener('beforeunload', () => this._killConnection());
+
+    if (this._networkConditionSimulator.enabled) {
+      console.info(
+        `NetworkManager: simulated network conditions enabled (${this._networkConditionSimulator.describe()}).`,
+      );
+    }
   }
 
   public get game(): Game { return this._game; }
@@ -224,6 +233,12 @@ export default class NetworkManager {
 
   public sendPacket(packet: protocol.AnyPacket, reliable: boolean = true): void {
     const serializedPacket = packr.pack(packet);
+    this._networkConditionSimulator.schedule('outgoing', reliable, () => {
+      this._sendSerializedPacket(serializedPacket, reliable);
+    });
+  }
+
+  private _sendSerializedPacket(serializedPacket: Uint8Array, reliable: boolean): void {
 
     if (this._wt) {
       this._lastSendProtocol = 'wt';
@@ -292,8 +307,7 @@ export default class NetworkManager {
         try {
           // Zero-copy unframer: callback receives view, must process immediately
           const unframe = protocol.createPacketBufferUnframer((message: Uint8Array) => {
-            this._onMessage(message);
-            this._lastReceiveProtocol = 'wt';
+            this._scheduleIncomingMessage(message, true, 'wt');
           });
 
           while (true) {
@@ -315,8 +329,7 @@ export default class NetworkManager {
             const { value, done } = await reader.read();
             if (done) break;
             
-            this._lastReceiveProtocol = 'wt';
-            this._onMessage(value);
+            this._scheduleIncomingMessage(value, false, 'wt');
           }
         } catch (error) {
           console.log('NetworkManager: Datagrams no longer available.', error);
@@ -346,9 +359,19 @@ export default class NetworkManager {
       this._ws.onerror = () => this._ws!.close();
       this._ws.onclose = () => this._reconnect();
       this._ws.onmessage = (event: MessageEvent) => {
-        this._lastReceiveProtocol = 'ws';
-        this._onMessage(new Uint8Array(event.data as ArrayBuffer));
+        this._scheduleIncomingMessage(new Uint8Array(event.data as ArrayBuffer), true, 'ws');
       };
+    });
+  }
+
+  private _scheduleIncomingMessage(
+    data: Uint8Array,
+    reliable: boolean,
+    protocolName: 'wt' | 'ws',
+  ): void {
+    this._networkConditionSimulator.schedule('incoming', reliable, () => {
+      this._lastReceiveProtocol = protocolName;
+      this._onMessage(data);
     });
   }
 

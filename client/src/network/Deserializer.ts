@@ -105,6 +105,10 @@ export type DeserializedEntity = {
   outline?: DeserializedOutlineOptions | null;
   parentEntityId?: number | null;
   parentNodeName?: string | null;
+  localPredictionFlags?: number;
+  localPredictionJustSubmergedRemainingMs?: number;
+  localPredictionMotionBasisVelocity?: THREE.Vector3Like;
+  localPredictionSwimUpwardCooldownRemainingMs?: number;
   position?: THREE.Vector3Like;
   positionInterpolationMs?: number | null;
   rotation?: THREE.QuaternionLike;
@@ -382,7 +386,13 @@ export default class Deserializer {
   }
 
   public static deserializeEntity(entity: protocol.EntitySchema): DeserializedEntity {
-    const entityWithInputAck = entity as protocol.EntitySchema & { aq?: number };
+    const entityWithInputAck = entity as protocol.EntitySchema & {
+      aq?: number;
+      js?: number;
+      mv?: protocol.VectorSchema;
+      pf?: number;
+      sc?: number;
+    };
 
     return {
       acknowledgedInputSequenceNumber: entityWithInputAck.aq,
@@ -401,6 +411,10 @@ export default class Deserializer {
       outline: 'ol' in entity ? (entity.ol ? this.deserializeOutlineOptions(entity.ol) : null) : undefined,
       parentEntityId: 'pe' in entity ? (entity.pe ?? null) : undefined,
       parentNodeName: 'pn' in entity ? (entity.pn ?? null) : undefined,
+      localPredictionFlags: entityWithInputAck.pf,
+      localPredictionJustSubmergedRemainingMs: entityWithInputAck.js,
+      localPredictionMotionBasisVelocity: entityWithInputAck.mv ? this.deserializeVector(entityWithInputAck.mv) : undefined,
+      localPredictionSwimUpwardCooldownRemainingMs: entityWithInputAck.sc,
       position: entity.p ? this.deserializeVector(entity.p) : undefined,
       positionInterpolationMs: 'pi' in entity ? (entity.pi ?? null) : undefined,
       rotation: entity.r ? this.deserializeQuaternion(entity.r) : undefined,

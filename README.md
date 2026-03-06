@@ -36,6 +36,31 @@ cd client && npm run dev
 
 Open `http://localhost:5173` in your browser. Game server logic is written in `server/src/playground.ts` and hot-reloads on save.
 
+### Simulating Network Conditions
+
+For client-side prediction tuning, the dev client can inject artificial one-way latency, jitter, and unreliable packet loss from the browser URL:
+
+- `simNetLagMs`: base one-way delay added to incoming and outgoing packets
+- `simNetJitterMs`: random `+/-` jitter added per packet
+- `simNetLossPct`: loss percentage applied only to unreliable packets
+
+Check the debug panel's send/receive protocol while testing. Loss simulation is most representative on the WebTransport path, because WebSocket fallback still carries inbound traffic over a reliable channel.
+
+Example URLs:
+
+- `http://localhost:5173/?debug&simNetLagMs=60`
+- `http://localhost:5173/?debug&simNetLagMs=60&simNetJitterMs=30`
+- `http://localhost:5173/?debug&simNetLagMs=60&simNetJitterMs=30&simNetLossPct=5`
+
+Suggested CSP review matrix:
+
+- Baseline: `?debug`
+- Added latency: `?debug&simNetLagMs=60`
+- Latency + jitter: `?debug&simNetLagMs=60&simNetJitterMs=30`
+- Latency + jitter + unreliable loss: `?debug&simNetLagMs=60&simNetJitterMs=30&simNetLossPct=5`
+
+Open the `Prediction` section in the debug panel while testing. Watch buffered commands, last/peak replay work, and current horizontal/vertical/rotation error while moving, stopping, jumping, and rapidly changing camera yaw.
+
 ## Architecture
 
 ### Client (`client/`)

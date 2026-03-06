@@ -517,6 +517,27 @@ export default class Player extends EventRouter implements protocol.Serializable
   }
 
   /** @internal */
+  public discardInputForSimulation(): void {
+    this._input = {};
+
+    if (this._queuedSequencedMovementInputs.length > 0) {
+      const lastQueuedCommand = this._queuedSequencedMovementInputs[this._queuedSequencedMovementInputs.length - 1];
+      this._lastAppliedInputSequenceNumber = Math.max(
+        this._lastAppliedInputSequenceNumber,
+        lastQueuedCommand.sequenceNumber,
+      );
+      this._queuedSequencedMovementInputs.length = 0;
+    }
+
+    if (this._lastUnreliableInputSequenceNumber >= 0) {
+      this._lastAppliedInputSequenceNumber = Math.max(
+        this._lastAppliedInputSequenceNumber,
+        this._lastUnreliableInputSequenceNumber,
+      );
+    }
+  }
+
+  /** @internal */
   public applyQueuedInputForSimulation(): void {
     if (this._queuedSequencedMovementInputs.length === 0) {
       this.markInputAppliedForSimulation();
@@ -524,9 +545,20 @@ export default class Player extends EventRouter implements protocol.Serializable
     }
 
     let sawJumpPressed = false;
+    let latestPitch: number | undefined;
+    let latestYaw: number | undefined;
     for (let i = 0; i < this._queuedSequencedMovementInputs.length; i++) {
-      if (this._queuedSequencedMovementInputs[i].sp) {
+      const queuedCommand = this._queuedSequencedMovementInputs[i];
+      if (queuedCommand.sp) {
         sawJumpPressed = true;
+      }
+
+      if (queuedCommand.cp !== undefined) {
+        latestPitch = queuedCommand.cp;
+      }
+
+      if (queuedCommand.cy !== undefined) {
+        latestYaw = queuedCommand.cy;
       }
     }
 
@@ -546,14 +578,14 @@ export default class Player extends EventRouter implements protocol.Serializable
       this._input.jd = command.jd;
     }
 
-    if (command.cp !== undefined) {
-      this._input.cp = command.cp;
-      this.camera.setOrientationPitch(command.cp);
+    if (latestPitch !== undefined) {
+      this._input.cp = latestPitch;
+      this.camera.setOrientationPitch(latestPitch);
     }
 
-    if (command.cy !== undefined) {
-      this._input.cy = command.cy;
-      this.camera.setOrientationYaw(command.cy);
+    if (latestYaw !== undefined) {
+      this._input.cy = latestYaw;
+      this.camera.setOrientationYaw(latestYaw);
     }
 
     this._lastAppliedInputSequenceNumber = command.sequenceNumber;

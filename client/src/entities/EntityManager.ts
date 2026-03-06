@@ -1,7 +1,8 @@
-import { Color, Frustum, Matrix4, Object3D, Vector2, Vector3, Quaternion } from 'three';
+import { Color, Frustum, MathUtils, Matrix4, Object3D, Vector2, Vector3, Quaternion } from 'three';
 import Entity from './Entity';
 import { type EntityId, MAX_OUTLINES } from './EntityConstants';
 import EntityStats from './EntityStats';
+import LocalPredictionStats from './LocalPredictionStats';
 import StaticEntity from './StaticEntity';
 import StaticEntityManager from './StaticEntityManager';
 import { type RendererEventPayload, RendererEventType } from '../core/Renderer';
@@ -47,6 +48,10 @@ const DEFAULT_OUTLINE_OPTIONS: OutlineOptions = {
 
 const LOCAL_PREDICTION_DEFAULT_WALK_SPEED = 4;
 const LOCAL_PREDICTION_DEFAULT_RUN_SPEED = 8;
+const LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY = 10;
+const LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED = 5;
+const LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED = 3;
+const LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY = 2;
 const LOCAL_PREDICTION_MIN_SPEED = 0.2;
 const LOCAL_PREDICTION_MAX_SPEED = 20;
 const LOCAL_PREDICTION_SPEED_REJECT_THRESHOLD = 30;
@@ -75,10 +80,14 @@ const LOCAL_PREDICTION_IDLE_ROTATION_ERROR_DEAD_ZONE = 0.05;
 const LOCAL_PREDICTION_ROTATION_SNAP_ANGLE = 1.2;
 const LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE = 4;
 const LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE = 12;
+const LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR = 0.05;
+const LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR = 0.8;
 const LOCAL_PREDICTION_COMMAND_BUFFER_SIZE = 96;
 const LOCAL_PREDICTION_PRE_ACK_RECONCILE_GRACE_S = 0.2;
 const LOCAL_PREDICTION_ACK_SUPPORT_DETECTION_TIMEOUT_S = 2.0;
 const INPUT_MANAGER_MOVEMENT_PACKET_SENT_EVENT = 'INPUT_MANAGER.MOVEMENT_PACKET_SENT';
+const LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
+const LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
 
 type LocalPredictionCommand = {
   sequenceNumber: number;
@@ -89,7 +98,9 @@ type LocalPredictionCommand = {
   a: boolean;
   s: boolean;
   d: boolean;
+  sp: boolean;
   sh: boolean;
+  c: boolean;
 };
 
 type MovementPacketSentPayload = {
@@ -101,7 +112,22 @@ type MovementPacketSentPayload = {
   a: boolean;
   s: boolean;
   d: boolean;
+  sp: boolean;
   sh: boolean;
+  c: boolean;
+};
+
+type LocalPredictionControllerState = {
+  authoritativeMotionBasisVelocity: Vector3;
+  predictedMotionBasisVelocity: Vector3;
+  authoritativeGrounded: boolean;
+  predictedGrounded: boolean;
+  authoritativeSwimming: boolean;
+  predictedSwimming: boolean;
+  authoritativeJustSubmergedRemainingS: number;
+  predictedJustSubmergedRemainingS: number;
+  authoritativeSwimUpwardCooldownRemainingS: number;
+  predictedSwimUpwardCooldownRemainingS: number;
 };
 
 type LocalPredictionState = {
@@ -125,6 +151,7 @@ type LocalPredictionState = {
   hasAuthoritativeRotation: boolean;
   lastAuthoritativePositionServerTick: number;
   lastAuthoritativeRotationServerTick: number;
+  controllerState: LocalPredictionControllerState;
   commandBuffer: LocalPredictionCommand[];
   commandBufferHead: number;
   commandBufferCount: number;
@@ -149,6 +176,18 @@ export default class EntityManager {
     predictedRotation: new Quaternion(),
     authoritativePosition: new Vector3(),
     authoritativeRotation: new Quaternion(),
+    controllerState: {
+      authoritativeMotionBasisVelocity: new Vector3(),
+      predictedMotionBasisVelocity: new Vector3(),
+      authoritativeGrounded: false,
+      predictedGrounded: false,
+      authoritativeSwimming: false,
+      predictedSwimming: false,
+      authoritativeJustSubmergedRemainingS: 0,
+      predictedJustSubmergedRemainingS: 0,
+      authoritativeSwimUpwardCooldownRemainingS: 0,
+      predictedSwimUpwardCooldownRemainingS: 0,
+    },
     estimatedVerticalVelocity: 0,
     estimatedWalkSpeed: LOCAL_PREDICTION_DEFAULT_WALK_SPEED,
     estimatedRunSpeed: LOCAL_PREDICTION_DEFAULT_RUN_SPEED,
@@ -173,7 +212,9 @@ export default class EntityManager {
       a: false,
       s: false,
       d: false,
+      sp: false,
       sh: false,
+      c: false,
     })),
     commandBufferHead: 0,
     commandBufferCount: 0,
@@ -381,6 +422,8 @@ export default class EntityManager {
       this._staticEnvironmentEntityManager.updateSkyLight();
     }
     this._needsSkyLightRefresh = false;
+
+    this._syncLocalPredictionStats();
   }
 
   private _onEntitiesPacket = (payload: NetworkManagerEventPayload.IEntitiesPacket): void => {
@@ -548,6 +591,18 @@ export default class EntityManager {
       const shouldInterpolateTransform =
         deserializedEntity.parentEntityId === undefined &&
         deserializedEntity.parentNodeName === undefined;
+      const hasLocalPredictionSupport = this._hasLocalPredictionSupport(deserializedEntity);
+
+      if (entity instanceof Entity && hasLocalPredictionSupport) {
+        this._bindLocalPredictionToEntity(entity);
+      } else if (
+        entity instanceof Entity &&
+        this._localPredictionState.entityId === entity.id &&
+        deserializedEntity.acknowledgedInputSequenceNumber !== undefined
+      ) {
+        this._resetLocalPredictionState();
+      }
+
       const shouldUseLocalPrediction =
         entity instanceof Entity &&
         this._localPredictionState.entityId === entity.id &&
@@ -555,8 +610,8 @@ export default class EntityManager {
         entity.parentEntityId == null &&
         entity.parentNodeName == null;
 
-      if (shouldUseLocalPrediction && deserializedEntity.acknowledgedInputSequenceNumber !== undefined) {
-        this._setLocalAcknowledgedInputSequenceNumber(deserializedEntity.acknowledgedInputSequenceNumber);
+      if (shouldUseLocalPrediction && hasLocalPredictionSupport) {
+        this._setLocalAuthoritativeControllerState(deserializedEntity);
       }
 
       if (deserializedEntity.position) {
@@ -585,6 +640,10 @@ export default class EntityManager {
         }
       }
 
+      if (shouldUseLocalPrediction && deserializedEntity.acknowledgedInputSequenceNumber !== undefined) {
+        this._setLocalAcknowledgedInputSequenceNumber(deserializedEntity.acknowledgedInputSequenceNumber);
+      }
+
       if (deserializedEntity.scale) {
         entity.setScale(deserializedEntity.scale);
       }
@@ -604,35 +663,26 @@ export default class EntityManager {
   }
 
   private _updateLocalPredictionEntityBinding(): void {
-    const nextEntityId = this._game.camera.gameCameraAttachedEntity?.id;
-    if (this._localPredictionState.entityId === nextEntityId) {
-      if (nextEntityId !== undefined && !this._entities.has(nextEntityId)) {
-        this._resetLocalPredictionState();
-      }
+    const entityId = this._localPredictionState.entityId;
+
+    if (entityId === undefined) {
       return;
     }
 
-    this._resetLocalPredictionState(nextEntityId);
-
-    if (nextEntityId === undefined) {
-      return;
+    const entity = this._entities.get(entityId);
+    if (
+      !entity ||
+      entity instanceof StaticEntity ||
+      entity.attached ||
+      entity.parentEntityId != null ||
+      entity.parentNodeName != null
+    ) {
+      this._resetLocalPredictionState();
     }
-
-    const entity = this._entities.get(nextEntityId);
-    if (!entity || entity instanceof StaticEntity) {
-      return;
-    }
-
-    this._localPredictionState.predictedPosition.copy(entity.position);
-    this._localPredictionState.predictedRotation.copy(entity.rotation);
-    this._localPredictionState.authoritativePosition.copy(entity.position);
-    this._localPredictionState.authoritativeRotation.copy(entity.rotation);
-    this._localPredictionState.hasPredictedTransform = true;
-    this._localPredictionState.hasAuthoritativePosition = true;
-    this._localPredictionState.hasAuthoritativeRotation = true;
   }
 
   private _resetLocalPredictionState(nextEntityId?: number): void {
+    LocalPredictionStats.reset();
     this._localPredictionState.entityId = nextEntityId;
     this._localPredictionState.estimatedVerticalVelocity = 0;
     this._localPredictionState.estimatedWalkSpeed = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
@@ -648,12 +698,78 @@ export default class EntityManager {
     this._localPredictionState.hasAuthoritativeRotation = false;
     this._localPredictionState.lastAuthoritativePositionServerTick = 0;
     this._localPredictionState.lastAuthoritativeRotationServerTick = 0;
+    this._localPredictionState.controllerState.authoritativeMotionBasisVelocity.set(0, 0, 0);
+    this._localPredictionState.controllerState.predictedMotionBasisVelocity.set(0, 0, 0);
+    this._localPredictionState.controllerState.authoritativeGrounded = false;
+    this._localPredictionState.controllerState.predictedGrounded = false;
+    this._localPredictionState.controllerState.authoritativeSwimming = false;
+    this._localPredictionState.controllerState.predictedSwimming = false;
+    this._localPredictionState.controllerState.authoritativeJustSubmergedRemainingS = 0;
+    this._localPredictionState.controllerState.predictedJustSubmergedRemainingS = 0;
+    this._localPredictionState.controllerState.authoritativeSwimUpwardCooldownRemainingS = 0;
+    this._localPredictionState.controllerState.predictedSwimUpwardCooldownRemainingS = 0;
     this._localPredictionState.commandBufferHead = 0;
     this._localPredictionState.commandBufferCount = 0;
     this._localPredictionState.lastAcknowledgedInputSequenceNumber = -1;
     this._localPredictionState.preAckReconcileGraceRemainingS = 0;
     this._localPredictionState.ackSupportDetectionElapsedS = 0;
     this._localPredictionState.shouldBufferCommandsBeforeAck = true;
+    this._syncLocalPredictionStats();
+  }
+
+  private _bindLocalPredictionToEntity(entity: Entity): void {
+    const isFirstOwnedBinding = this._localPredictionState.entityId === undefined;
+
+    if (this._localPredictionState.entityId !== entity.id) {
+      if (!isFirstOwnedBinding) {
+        this._resetLocalPredictionState(entity.id);
+      } else {
+        this._localPredictionState.entityId = entity.id;
+        this._localPredictionState.hasPredictedTransform = false;
+        this._localPredictionState.hasAuthoritativePosition = false;
+        this._localPredictionState.hasAuthoritativeRotation = false;
+        this._localPredictionState.lastAuthoritativePositionServerTick = 0;
+        this._localPredictionState.lastAuthoritativeRotationServerTick = 0;
+      }
+    }
+
+    this._localPredictionState.predictedPosition.copy(entity.position);
+    this._localPredictionState.predictedRotation.copy(entity.rotation);
+    this._localPredictionState.authoritativePosition.copy(entity.position);
+    this._localPredictionState.authoritativeRotation.copy(entity.rotation);
+    this._localPredictionState.hasPredictedTransform = true;
+    this._localPredictionState.hasAuthoritativePosition = true;
+    this._localPredictionState.hasAuthoritativeRotation = true;
+    this._syncLocalPredictionStats();
+  }
+
+  private _hasLocalPredictionSupport(deserializedEntity: DeserializedEntity): boolean {
+    return (
+      deserializedEntity.localPredictionFlags !== undefined ||
+      deserializedEntity.localPredictionMotionBasisVelocity !== undefined ||
+      deserializedEntity.localPredictionJustSubmergedRemainingMs !== undefined ||
+      deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs !== undefined
+    );
+  }
+
+  private _setLocalAuthoritativeControllerState(deserializedEntity: DeserializedEntity): void {
+    const controllerState = this._localPredictionState.controllerState;
+    const predictionFlags = deserializedEntity.localPredictionFlags ?? 0;
+    controllerState.authoritativeGrounded = (predictionFlags & LOCAL_PREDICTION_FLAG_GROUNDED) !== 0;
+    controllerState.authoritativeSwimming = (predictionFlags & LOCAL_PREDICTION_FLAG_SWIMMING) !== 0;
+    controllerState.authoritativeMotionBasisVelocity.set(
+      deserializedEntity.localPredictionMotionBasisVelocity?.x ?? 0,
+      deserializedEntity.localPredictionMotionBasisVelocity?.y ?? 0,
+      deserializedEntity.localPredictionMotionBasisVelocity?.z ?? 0,
+    );
+    controllerState.authoritativeJustSubmergedRemainingS = Math.max(
+      0,
+      (deserializedEntity.localPredictionJustSubmergedRemainingMs ?? 0) / 1000,
+    );
+    controllerState.authoritativeSwimUpwardCooldownRemainingS = Math.max(
+      0,
+      (deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs ?? 0) / 1000,
+    );
   }
 
   private _setLocalAuthoritativePosition(position: { x: number; y: number; z: number }, serverTick: number): void {
@@ -797,16 +913,34 @@ export default class EntityManager {
       this._localPredictionState.predictedRotation.copy(this._localPredictionState.authoritativeRotation);
     }
 
+    this._localPredictionState.controllerState.predictedMotionBasisVelocity.copy(
+      this._localPredictionState.controllerState.authoritativeMotionBasisVelocity,
+    );
+    this._localPredictionState.controllerState.predictedGrounded =
+      this._localPredictionState.controllerState.authoritativeGrounded;
+    this._localPredictionState.controllerState.predictedSwimming =
+      this._localPredictionState.controllerState.authoritativeSwimming;
+    this._localPredictionState.controllerState.predictedJustSubmergedRemainingS =
+      this._localPredictionState.controllerState.authoritativeJustSubmergedRemainingS;
+    this._localPredictionState.controllerState.predictedSwimUpwardCooldownRemainingS =
+      this._localPredictionState.controllerState.authoritativeSwimUpwardCooldownRemainingS;
+
+    let replayedCommandCount = 0;
+    let replayedSubstepCount = 0;
+
     for (let i = 0; i < this._localPredictionState.commandBufferCount; i++) {
       const command = this._localPredictionState.commandBuffer[
         (this._localPredictionState.commandBufferHead + i) % LOCAL_PREDICTION_COMMAND_BUFFER_SIZE
       ];
 
-      this._replayPredictedCommand(command);
+      replayedSubstepCount += this._replayPredictedCommand(command);
+      replayedCommandCount++;
     }
+
+    this._syncLocalPredictionStats(replayedCommandCount, replayedSubstepCount);
   }
 
-  private _replayPredictedCommand(command: LocalPredictionCommand): void {
+  private _replayPredictedCommand(command: LocalPredictionCommand): number {
     let remainingDeltaS = Math.min(
       Math.max(command.deltaTimeS, 0),
       LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S,
@@ -816,8 +950,7 @@ export default class EntityManager {
     while (remainingDeltaS > 0 && substeps < LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND) {
       const stepDeltaS = Math.min(LOCAL_PREDICTION_SUBSTEP_DELTA_S, remainingDeltaS);
 
-      this._localPredictionState.predictedPosition.y += this._localPredictionState.estimatedVerticalVelocity * stepDeltaS;
-      this._applyPredictedMovementFromInputs(
+      this._stepPredictedMovement(
         stepDeltaS,
         command.yaw,
         command.joystickDirection,
@@ -825,23 +958,19 @@ export default class EntityManager {
         command.a,
         command.s,
         command.d,
+        command.sp,
         command.sh,
+        command.c,
       );
 
       remainingDeltaS -= stepDeltaS;
       substeps++;
     }
+
+    return substeps;
   }
 
   private _onMovementPacketSent = (payload: MovementPacketSentPayload): void => {
-    if (this._localPredictionState.entityId === undefined) {
-      return;
-    }
-
-    if (!this._entities.has(this._localPredictionState.entityId)) {
-      return;
-    }
-
     if (
       !this._localPredictionState.supportsInputAcknowledgements &&
       !this._localPredictionState.shouldBufferCommandsBeforeAck
@@ -872,7 +1001,9 @@ export default class EntityManager {
     command.a = payload.a;
     command.s = payload.s;
     command.d = payload.d;
+    command.sp = payload.sp;
     command.sh = payload.sh;
+    command.c = payload.c;
 
     this._localPredictionState.commandBufferCount++;
 
@@ -913,8 +1044,7 @@ export default class EntityManager {
     while (remainingDeltaS > 0 && substeps < LOCAL_PREDICTION_MAX_SUBSTEPS) {
       const stepDeltaS = Math.min(LOCAL_PREDICTION_SUBSTEP_DELTA_S, remainingDeltaS);
 
-      this._localPredictionState.predictedPosition.y += this._localPredictionState.estimatedVerticalVelocity * stepDeltaS;
-      isActivelyMoving = this._applyPredictedMovementFromInputs(
+      isActivelyMoving = this._stepPredictedMovement(
         stepDeltaS,
         this._game.camera.gameCameraYaw,
         this._game.inputManager.joystickDirection,
@@ -922,7 +1052,9 @@ export default class EntityManager {
         !!inputState.a,
         !!inputState.s,
         !!inputState.d,
+        !!inputState.sp,
         !!inputState.sh,
+        !!inputState.c,
       ) || isActivelyMoving;
 
       remainingDeltaS -= stepDeltaS;
@@ -960,7 +1092,7 @@ export default class EntityManager {
     );
   }
 
-  private _applyPredictedMovementFromInputs(
+  private _stepPredictedMovement(
     deltaTimeS: number,
     yaw: number,
     joystickDirection: number | null,
@@ -968,8 +1100,20 @@ export default class EntityManager {
     a: boolean,
     s: boolean,
     d: boolean,
+    sp: boolean,
     sh: boolean,
+    c: boolean,
   ): boolean {
+    const controllerState = this._localPredictionState.controllerState;
+    controllerState.predictedJustSubmergedRemainingS = Math.max(
+      0,
+      controllerState.predictedJustSubmergedRemainingS - deltaTimeS,
+    );
+    controllerState.predictedSwimUpwardCooldownRemainingS = Math.max(
+      0,
+      controllerState.predictedSwimUpwardCooldownRemainingS - deltaTimeS,
+    );
+
     const movementDirection = resolveDeterministicMovementDirection({
       yaw,
       joystickDirection,
@@ -979,21 +1123,66 @@ export default class EntityManager {
       d,
     });
     const isActivelyMoving = movementDirection.lengthSq > 0;
-    if (!isActivelyMoving) {
-      return false;
+    const motionBasisVelocity = controllerState.predictedMotionBasisVelocity;
+    const movementSpeed = controllerState.predictedSwimming
+      ? (sh ? LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED : LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED)
+      : (
+        sh
+          ? Math.max(
+            Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed),
+            this._localPredictionState.estimatedRunSpeed,
+          )
+          : Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed)
+      );
+
+    const movementVelocityX = isActivelyMoving ? movementDirection.x * movementSpeed : 0;
+    const movementVelocityZ = isActivelyMoving ? movementDirection.z * movementSpeed : 0;
+    this._localPredictionState.predictedPosition.x += (movementVelocityX + motionBasisVelocity.x) * deltaTimeS;
+    this._localPredictionState.predictedPosition.z += (movementVelocityZ + motionBasisVelocity.z) * deltaTimeS;
+
+    let predictedVerticalVelocity = this._localPredictionState.estimatedVerticalVelocity + motionBasisVelocity.y;
+
+    if (controllerState.predictedSwimming) {
+      if (c) {
+        predictedVerticalVelocity = -LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY + motionBasisVelocity.y;
+      } else if (controllerState.predictedJustSubmergedRemainingS > 0) {
+        predictedVerticalVelocity =
+          (-LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY * LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR) +
+          motionBasisVelocity.y;
+      } else if (!sp) {
+        predictedVerticalVelocity =
+          (-this._localPredictionState.estimatedVerticalVelocity * LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR) +
+          motionBasisVelocity.y;
+      }
     }
 
-    const walkSpeed = Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed);
-    const runSpeed = Math.max(walkSpeed, this._localPredictionState.estimatedRunSpeed);
-    const movementSpeed = sh ? runSpeed : walkSpeed;
-    this._localPredictionState.predictedPosition.x += movementDirection.x * movementSpeed * deltaTimeS;
-    this._localPredictionState.predictedPosition.z += movementDirection.z * movementSpeed * deltaTimeS;
+    if (sp) {
+      if (
+        controllerState.predictedGrounded &&
+        !controllerState.predictedSwimming &&
+        this._localPredictionState.estimatedVerticalVelocity > -0.001 &&
+        this._localPredictionState.estimatedVerticalVelocity <= 3
+      ) {
+        predictedVerticalVelocity = LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY + motionBasisVelocity.y;
+        controllerState.predictedGrounded = false;
+      } else if (
+        controllerState.predictedSwimming &&
+        controllerState.predictedSwimUpwardCooldownRemainingS <= 0
+      ) {
+        predictedVerticalVelocity = LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY + motionBasisVelocity.y;
+        controllerState.predictedSwimUpwardCooldownRemainingS = 0.6;
+      }
+    }
 
-    const movementYaw = resolveDeterministicMovementYaw(movementDirection.x, movementDirection.z);
-    const halfMovementYaw = movementYaw * 0.5;
-    this._localPredictionState.predictedRotation.set(0, Math.sin(halfMovementYaw), 0, Math.cos(halfMovementYaw));
+    this._localPredictionState.predictedPosition.y += predictedVerticalVelocity * deltaTimeS;
 
-    return true;
+    if (isActivelyMoving) {
+      const movementYaw = resolveDeterministicMovementYaw(movementDirection.x, movementDirection.z);
+      const halfMovementYaw = movementYaw * 0.5;
+      this._localPredictionState.predictedRotation.set(0, Math.sin(halfMovementYaw), 0, Math.cos(halfMovementYaw));
+    }
+
+    return isActivelyMoving || motionBasisVelocity.lengthSq() > 0 || Math.abs(predictedVerticalVelocity) > 0.001;
   }
 
   private _setLastAcknowledgedMovementDirection(command?: LocalPredictionCommand): void {
@@ -1173,6 +1362,51 @@ export default class EntityManager {
           this._localPredictionState.predictedRotation.slerp(this._localPredictionState.authoritativeRotation, correctionT);
         }
       }
+    }
+  }
+
+  private _syncLocalPredictionStats(
+    lastReplayCommandCount?: number,
+    lastReplaySubstepCount?: number,
+  ): void {
+    LocalPredictionStats.entityId = this._localPredictionState.entityId ?? -1;
+    LocalPredictionStats.supportsInputAcknowledgements = this._localPredictionState.supportsInputAcknowledgements;
+    LocalPredictionStats.bufferedCommandCount = this._localPredictionState.commandBufferCount;
+    LocalPredictionStats.lastAcknowledgedInputSequenceNumber = this._localPredictionState.lastAcknowledgedInputSequenceNumber;
+
+    if (lastReplayCommandCount !== undefined) {
+      LocalPredictionStats.lastReplayCommandCount = lastReplayCommandCount;
+      LocalPredictionStats.peakReplayCommandCount = Math.max(
+        LocalPredictionStats.peakReplayCommandCount,
+        lastReplayCommandCount,
+      );
+    }
+
+    if (lastReplaySubstepCount !== undefined) {
+      LocalPredictionStats.lastReplaySubstepCount = lastReplaySubstepCount;
+      LocalPredictionStats.peakReplaySubstepCount = Math.max(
+        LocalPredictionStats.peakReplaySubstepCount,
+        lastReplaySubstepCount,
+      );
+    }
+
+    if (this._localPredictionState.hasAuthoritativePosition && this._localPredictionState.hasPredictedTransform) {
+      const dx = this._localPredictionState.authoritativePosition.x - this._localPredictionState.predictedPosition.x;
+      const dz = this._localPredictionState.authoritativePosition.z - this._localPredictionState.predictedPosition.z;
+      LocalPredictionStats.horizontalError = Math.sqrt((dx * dx) + (dz * dz));
+      LocalPredictionStats.verticalError =
+        this._localPredictionState.authoritativePosition.y - this._localPredictionState.predictedPosition.y;
+    } else {
+      LocalPredictionStats.horizontalError = 0;
+      LocalPredictionStats.verticalError = 0;
+    }
+
+    if (this._localPredictionState.hasAuthoritativeRotation && this._localPredictionState.hasPredictedTransform) {
+      LocalPredictionStats.rotationErrorDeg = MathUtils.radToDeg(
+        this._localPredictionState.predictedRotation.angleTo(this._localPredictionState.authoritativeRotation),
+      );
+    } else {
+      LocalPredictionStats.rotationErrorDeg = 0;
     }
   }
 
