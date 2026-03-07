@@ -20,7 +20,9 @@
     "rootDir": "./src",
     "outDir": "./build",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@gameplay-shared/*": ["./src/shared/gameplay/*"],
+      "@engine-shared/*": ["./src/shared/*"]
     },
     "removeComments": false,
     "esModuleInterop": true,

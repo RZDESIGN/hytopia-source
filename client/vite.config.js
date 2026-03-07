@@ -66,6 +66,12 @@ const localIpEndpointPlugin = () => ({
 const assetProxyTarget = process.env.VITE_ASSET_PROXY_TARGET;
 
 export default {
+  resolve: {
+    alias: {
+      '@gameplay-shared': join(__dirname, '..', 'server', 'src', 'shared', 'gameplay'),
+      '@engine-shared': join(__dirname, '..', 'server', 'src', 'shared'),
+    },
+  },
   server: {
     watch: {
       usePolling: true

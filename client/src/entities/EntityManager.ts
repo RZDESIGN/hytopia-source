@@ -18,7 +18,7 @@ import {
 import {
   resolveDeterministicMovementDirection,
   resolveDeterministicMovementYaw,
-} from '../shared/movement/DeterministicMovementCore';
+} from '@gameplay-shared/DeterministicMovementCore';
 
 // Working variables
 const fromVec2 = new Vector2();

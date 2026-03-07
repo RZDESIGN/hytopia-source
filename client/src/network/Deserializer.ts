@@ -79,6 +79,7 @@ export type DeserializedChatMessage = {
 export type DeserializedChatMessages = DeserializedChatMessage[];
 
 export type DeserializedConnection = {
+  featureFlags?: number;
   id?: string;
   kill?: boolean;
 }
@@ -416,7 +417,12 @@ export default class Deserializer {
   }
 
   public static deserializeConnection(connection: protocol.ConnectionSchema): DeserializedConnection {
+    const connectionWithFeatures = connection as protocol.ConnectionSchema & {
+      f?: number;
+    };
+
     return {
+      featureFlags: connectionWithFeatures.f,
       id: connection.i,
       kill: connection.k,
     };

@@ -1,6 +1,7 @@
 import Game from '../Game';
 import EventRouter from '../events/EventRouter';
 import MobileManager from '../mobile/MobileManager';
+import { DISCRETE_MOVEMENT_INPUT_SET } from '@gameplay-shared/InputContract';
 import { CameraEventType } from '../core/Camera';
 import type { CameraEventPayload } from '../core/Camera';
 
@@ -169,8 +170,6 @@ const SUPPORTED_INPUT_MAP: { [key: string]: keyof InputState } = {
 };
 
 const SUPPORTED_INPUTS = new Set(Object.values(SUPPORTED_INPUT_MAP));
-const NETWORKED_MOVEMENT_INPUT_KEYS: (keyof InputState)[] = [ 'w', 'a', 's', 'd', 'sp', 'sh', 'c' ];
-const NETWORKED_MOVEMENT_INPUT_KEY_SET = new Set<keyof InputState>(NETWORKED_MOVEMENT_INPUT_KEYS);
 
 export enum InputManagerEventType {
   MovementPacketSent = 'INPUT_MANAGER.MOVEMENT_PACKET_SENT',
@@ -584,7 +583,7 @@ export default class InputManager {
     }
 
     if (this._networkedInputEnabled) {
-      if (NETWORKED_MOVEMENT_INPUT_KEY_SET.has(input)) {
+      if (DISCRETE_MOVEMENT_INPUT_SET.has(input)) {
         this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
         this._scheduleImmediateMovementPacketFlush();
       } else {

@@ -7,6 +7,11 @@ import PlatformGateway from '@/networking/PlatformGateway';
 import PlayerCamera from '@/players/PlayerCamera';
 import PlayerUI from '@/players/PlayerUI';
 import Serializer from '@/networking/Serializer';
+import {
+  SEQUENCED_MOVEMENT_INPUT_SET,
+  SEQUENCED_MOVEMENT_INPUTS,
+  SUPPORTED_INPUTS as SHARED_SUPPORTED_INPUTS,
+} from '@gameplay-shared/InputContract';
 import type Connection from '@/networking/Connection';
 import { PlayerUIEvent } from '@/players/PlayerUI';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
@@ -21,29 +26,8 @@ import type { RaycastHit } from '@/worlds/physics/Simulation';
  * **Category:** Players
  * @public
  */
-export const SUPPORTED_INPUTS = [
-  'w', 'a', 's', 'd',                               // Common movement keys
-  'sp', 'sh', 'tb',                                 // Common action keys - space, shift, tab
-  'ml', 'mr',                                       // Mouse keys - mouse left, mouse right
-  'q', 'e', 'r', 'f', 'z', 'x', 'c', 'v',           // Other keys
-  'u', 'i', 'o', 'j', 'k', 'l', 'n', 'm',           // Other keys
-  '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', // Number keys
-  'cp', 'cy',                                       // Camera pitch/yaw (radians)
-  'iro', 'ird',                                     // Interact ray origin/direction
-  'jd',                                             // Joystick direction (radians)
-] as const satisfies readonly (keyof InputSchema)[];
+export const SUPPORTED_INPUTS = SHARED_SUPPORTED_INPUTS;
 
-const SEQUENCED_MOVEMENT_INPUTS = [
-  'w',
-  'a',
-  's',
-  'd',
-  'sp',
-  'sh',
-  'c',
-  'jd',
-] as const satisfies readonly (keyof InputSchema)[];
-const SEQUENCED_MOVEMENT_INPUT_SET = new Set<string>(SEQUENCED_MOVEMENT_INPUTS);
 const MAX_QUEUED_SEQUENCED_MOVEMENT_COMMANDS = 64;
 
 type SequencedMovementInputCommand = {
@@ -661,7 +645,7 @@ export default class Player extends EventRouter implements protocol.Serializable
       }
 
       // Sequenced movement state is applied on simulation ticks from the command queue.
-      if (hasSequencedMovementInput && SEQUENCED_MOVEMENT_INPUT_SET.has(key)) {
+      if (hasSequencedMovementInput && SEQUENCED_MOVEMENT_INPUT_SET.has(key as keyof InputSchema)) {
         continue;
       }
 

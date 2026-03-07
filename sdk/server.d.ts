@@ -2762,6 +2762,7 @@ declare const connectionPacketDefinition: IPacketDefinition<PacketId.CONNECTION,
 
 declare type ConnectionSchema = {
     i?: string;
+    f?: number;
     k?: boolean;
 };
 

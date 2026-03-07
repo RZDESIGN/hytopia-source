@@ -7,6 +7,11 @@
     "skipLibCheck": true,
 
     /* Bundler mode */
+    "baseUrl": ".",
+    "paths": {
+      "@gameplay-shared/*": ["../server/src/shared/gameplay/*"],
+      "@engine-shared/*": ["../server/src/shared/*"]
+    },
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "isolatedModules": true,

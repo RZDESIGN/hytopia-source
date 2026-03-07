@@ -2,6 +2,11 @@ import { gzipSync } from 'zlib';
 import { WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import protocol from '@hytopia.com/server-protocol';
+import { CONNECTION_FEATURE_FLAGS } from '@engine-shared/network/ConnectionFeatureFlags';
+import {
+  connectionPacketDefinitionWithFeatures,
+  registerConnectionFeaturePacketDefinition,
+} from '@engine-shared/network/ConnectionFeaturePacket';
 import ErrorHandler from '@/errors/ErrorHandler';
 import EventRouter from '@/events/EventRouter';
 import msgpackr from '@/shared/helpers/msgpackr';
@@ -13,6 +18,8 @@ import type { WebTransportSessionImpl } from '@fails-components/webtransport/dis
 import type { WebTransportReceiveStream } from '@fails-components/webtransport';
 
 const RECONNECT_WINDOW_MS = 30 * 1000; // 30 seconds
+
+registerConnectionFeaturePacketDefinition();
 
 /**
  * Event types a Connection can emit.
@@ -530,10 +537,17 @@ export default class Connection extends EventRouter {
   }
 
   private _signalConnectionId(): void {
-    this.send([ protocol.createPacket(protocol.bidirectionalPackets.connectionPacketDefinition, { i: this.id }) ]);
+    this.send([
+      protocol.createPacket(connectionPacketDefinitionWithFeatures, {
+        i: this.id,
+        f: CONNECTION_FEATURE_FLAGS,
+      }),
+    ]);
   }
 
   private _signalKill(): void {
-    this.send([ protocol.createPacket(protocol.bidirectionalPackets.connectionPacketDefinition, { k: true }) ]);   
+    this.send([
+      protocol.createPacket(connectionPacketDefinitionWithFeatures, { k: true }),
+    ]);
   }
 }

@@ -1,10 +1,19 @@
 import protocol from '@hytopia.com/server-protocol';
 import { gunzipSync } from 'fflate';
 import { Packr, FLOAT32_OPTIONS } from 'msgpackr';
-import Deserializer from './Deserializer';
+import {
+  connectionFeatureFlagsToFeatures,
+  type NegotiatedConnectionFeatures,
+} from '@engine-shared/network/ConnectionFeatureFlags';
+import { SEQUENCED_MOVEMENT_INPUT_SET, UNSEQUENCED_UNRELIABLE_INPUT_SET } from '@gameplay-shared/InputContract';
+import {
+  dispatchInboundPacket,
+  type InboundPacketRouterDependencies,
+} from './InboundPacketRouter';
 import NetworkConditionSimulator from './NetworkConditionSimulator';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
+import { NetworkManagerEventType } from './NetworkEvents';
 import Servers from './Servers';
 
 import type {
@@ -26,42 +35,14 @@ import type {
   DeserializedUIDatas,
   DeserializedWorld,
 } from './Deserializer';
+import type { InputSchema } from '@hytopia.com/server-protocol';
 
 const packr = new Packr({ useFloat32: FLOAT32_OPTIONS.ALWAYS });
 
 const HEARTBEAT_INTERVAL_MS = 5000;
 let heartbeatReported = false;
-const SEQUENCED_MOVEMENT_INPUT_KEYS = new Set([
-  'w', 'a', 's', 'd',
-  'sp', 'sh', 'c',
-  'jd',
-]);
-const UNSEQUENCED_UNRELIABLE_INPUT_KEYS = new Set([ 'cp', 'cy' ]);
 
-type ServerFeatures = {
-  supportsSceneInteract?: boolean;
-}
-
-export enum NetworkManagerEventType {
-  AudiosPacket = 'NETWORK_MANAGER.AUDIOS_PACKET',
-  BlocksPacket = 'NETWORK_MANAGER.BLOCKS_PACKET',
-  BlockTypesPacket = 'NETWORK_MANAGER.BLOCK_TYPES_PACKET',
-  CameraPacket = 'NETWORK_MANAGER.CAMERA_PACKET',
-  ChatMessagesPacket = 'NETWORK_MANAGER.CHAT_MESSAGE_PACKET',
-  ChunksPacket = 'NETWORK_MANAGER.CHUNKS_PACKET',
-  ConnectionPacket = 'NETWORK_MANAGER.CONNECTION_PACKET',
-  EntitiesPacket = 'NETWORK_MANAGER.ENTITIES_PACKET',
-  NotificationPermissionRequestPacket = 'NETWORK_MANAGER.NOTIFICATION_PERMISSION_REQUEST_PACKET',
-  ParticleEmittersPacket = 'NETWORK_MANAGER.PARTICLE_EMITTERS_PACKET',
-  PhysicsDebugRaycastsPacket = 'NETWORK_MANAGER.PHYSICS_DEBUG_RAYCASTS_PACKET',
-  PhysicsDebugRenderPacket = 'NETWORK_MANAGER.PHYSICS_DEBUG_RENDER_PACKET',
-  PlayersPacket = 'NETWORK_MANAGER.PLAYERS_PACKET',
-  SceneUIsPacket = 'NETWORK_MANAGER.SCENE_UIS_PACKET',
-  SyncResponsePacket = 'NETWORK_MANAGER.SYNC_RESPONSE_PACKET',
-  UIPacket = 'NETWORK_MANAGER.UI_PACKET',
-  UIDatasPacket = 'NETWORK_MANAGER.UI_DATAS_PACKET',
-  WorldPacket = 'NETWORK_MANAGER.WORLD_PACKET',
-}
+export { NetworkManagerEventType } from './NetworkEvents';
 
 export namespace NetworkManagerEventPayload {
   export interface IAudiosPacket { deserializedAudios: DeserializedAudios; serverTick: number; }
@@ -101,12 +82,13 @@ export default class NetworkManager {
   private _lastInputSequenceNumber: number = 0;
   private _roundTripTimeS: number = 0;
   private _roundTripTimeMaxS: number = 0;
-  private _serverFeatures: ServerFeatures = {};
+  private _serverFeatures: NegotiatedConnectionFeatures = connectionFeatureFlagsToFeatures(undefined);
   private _serverHostname: string | undefined;
   private _serverLobbyId: string | undefined;
   private _serverVersion: string | undefined;
   private _syncStartTimeS: number = 0;
   private _networkConditionSimulator: NetworkConditionSimulator;
+  private _inboundPacketRouterDependencies: InboundPacketRouterDependencies;
 
   // Whether the World Packet has been received. This is intended to be used, for example,
   // as a reference point to determine whether game initialization has started.
@@ -115,6 +97,12 @@ export default class NetworkManager {
   public constructor(game: Game) {
     this._game = game;
     this._networkConditionSimulator = new NetworkConditionSimulator(new URLSearchParams(window.location.search));
+    this._inboundPacketRouterDependencies = {
+      onConnectionPacket: this._onConnectionPacket,
+      onFirstWorldPacket: this._onFirstWorldPacket,
+      onHeartbeatPacket: this._onHeartbeatPacket,
+      onSyncResponsePacket: this._onSyncResponsePacket,
+    };
 
     window.addEventListener('beforeunload', () => this._killConnection());
 
@@ -128,7 +116,7 @@ export default class NetworkManager {
   public get game(): Game { return this._game; }
   public get roundTripTimeS(): number { return this._roundTripTimeS; }
   public get roundTripTimeMaxS(): number { return this._roundTripTimeMaxS; }
-  public get serverFeatures(): ServerFeatures { return this._serverFeatures; }
+  public get serverFeatures(): NegotiatedConnectionFeatures { return this._serverFeatures; }
   public get serverHostname(): string | undefined { return this._serverHostname; }
   public get serverLobbyId(): string | undefined { return this._serverLobbyId; }
   public get serverVersion(): string | undefined { return this._serverVersion; }
@@ -147,9 +135,6 @@ export default class NetworkManager {
     this._serverHostname = hostname;
     this._serverLobbyId = lobbyId;
     this._serverVersion = version;
-    this._serverFeatures = {
-      supportsSceneInteract: this.isServerAtLeastVersion('0.14.26'),
-    };
 
     performance.mark('NetworkManager:connecting');
 
@@ -175,39 +160,14 @@ export default class NetworkManager {
     performance.measure('NetworkManager:connected-time', 'NetworkManager:connecting', 'NetworkManager:connected');
   }
 
-  public isServerAtLeastVersion(version: string): boolean {
-    if (!this._serverVersion) {
-      return false;
-    }
-
-    if (this._serverVersion.includes('DEV')) {
-      return true;
-    }
-
-    // Split on - to handle things like -dev versions, IE 0.4.1-dev.1
-    const [ major, minor, patch ] = this._serverVersion.split('.').map(n => Number(n.split('-')[0]));
-    const [ majorMin, minorMin, patchMin ] = version.split('.').map(n => Number(n.split('-')[0]));
-
-    // major comparison
-    if (major > majorMin) return true;
-    if (major < majorMin) return false;
-
-    // major === majorMin, minor comparison
-    if (minor > minorMin) return true;
-    if (minor < minorMin) return false;
-
-    // major === majorMin && minor === minorMin, patch comparison
-    return patch >= patchMin;
-  }
-
   public sendInputPacket(changedInputState: Record<string, any>, reliableOverride?: boolean): number | undefined {
     let hasSequencedMovementInput = false;
     let hasReliableNonMovementInput = false;
 
     for (const key in changedInputState) {
-      if (SEQUENCED_MOVEMENT_INPUT_KEYS.has(key)) {
+      if (SEQUENCED_MOVEMENT_INPUT_SET.has(key as keyof InputSchema)) {
         hasSequencedMovementInput = true;
-      } else if (!UNSEQUENCED_UNRELIABLE_INPUT_KEYS.has(key)) {
+      } else if (!UNSEQUENCED_UNRELIABLE_INPUT_SET.has(key as keyof InputSchema)) {
         hasReliableNonMovementInput = true;
       }
     }
@@ -435,139 +395,31 @@ export default class NetworkManager {
 
     for (let i = 0; i < packets.length; i++) {
       const packet = packets[i];
-      const packetId = packet[0];
-      const data = packet[1];
-      const serverTick = packet[2] as number;
+      const serverTick = packet[2];
+      if (typeof serverTick === 'number') {
+        this._lastPacketServerTick = serverTick;
+      }
 
-      this._lastPacketServerTick = serverTick;
-
-      // Keep gameplay-dominant packets near the top of the dispatch chain.
-      switch (packetId) {
-        case protocol.PacketId.ENTITIES:
-          EventRouter.instance.emit(NetworkManagerEventType.EntitiesPacket, {
-            deserializedEntities: Deserializer.deserializeEntities(data as protocol.EntitiesSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.CHUNKS:
-          EventRouter.instance.emit(NetworkManagerEventType.ChunksPacket, {
-            deserializedChunks: Deserializer.deserializeChunks(data as protocol.ChunksSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.BLOCKS:
-          EventRouter.instance.emit(NetworkManagerEventType.BlocksPacket, {
-            deserializedBlocks: Deserializer.deserializeBlocks(data as protocol.BlocksSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.WORLD:
-          if (!this._worldPacketReceived) { // only send on first world packet
-            performance.mark('NetworkManager:world-packet-received');
-            performance.measure('NetworkManager:connected-to-first-packet-time', 'NetworkManager:connected', 'NetworkManager:world-packet-received');
-            performance.measure('NetworkManager:game-ready-time', 'NetworkManager:connecting', 'NetworkManager:world-packet-received');
-            this._game.bridgeManager.sendGameReady();
-            this._worldPacketReceived = true;
-          }
-
-          EventRouter.instance.emit(NetworkManagerEventType.WorldPacket, {
-            deserializedWorld: Deserializer.deserializeWorld(data as protocol.WorldSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.PLAYERS:
-          EventRouter.instance.emit(NetworkManagerEventType.PlayersPacket, {
-            deserializedPlayers: Deserializer.deserializePlayers(data as protocol.PlayersSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.CAMERA:
-          EventRouter.instance.emit(NetworkManagerEventType.CameraPacket, {
-            deserializedCamera: Deserializer.deserializeCamera(data as protocol.CameraSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.UI_DATAS:
-          EventRouter.instance.emit(NetworkManagerEventType.UIDatasPacket, {
-            deserializedUIDatas: Deserializer.deserializeUIDatas(data as protocol.UIDatasSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.UI:
-          EventRouter.instance.emit(NetworkManagerEventType.UIPacket, {
-            deserializedUI: Deserializer.deserializeUI(data as protocol.UISchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.AUDIOS:
-          EventRouter.instance.emit(NetworkManagerEventType.AudiosPacket, {
-            deserializedAudios: Deserializer.deserializeAudios(data as protocol.AudiosSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.BLOCK_TYPES:
-          EventRouter.instance.emit(NetworkManagerEventType.BlockTypesPacket, {
-            deserializedBlockTypes: Deserializer.deserializeBlockTypes(data as protocol.BlockTypesSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.PARTICLE_EMITTERS:
-          EventRouter.instance.emit(NetworkManagerEventType.ParticleEmittersPacket, {
-            deserializedParticleEmitters: Deserializer.deserializeParticleEmitters(data as protocol.ParticleEmittersSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.SCENE_UIS:
-          EventRouter.instance.emit(NetworkManagerEventType.SceneUIsPacket, {
-            deserializedSceneUIs: Deserializer.deserializeSceneUIs(data as protocol.SceneUIsSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.CHAT_MESSAGES:
-          EventRouter.instance.emit(NetworkManagerEventType.ChatMessagesPacket, {
-            deserializedChatMessages: Deserializer.deserializeChatMessages(data as protocol.ChatMessagesSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.HEARTBEAT:
-          this._lastHeartbeat = performance.now();
-          break;
-        case protocol.PacketId.SYNC_RESPONSE:
-          this._onSyncResponsePacket(
-            Deserializer.deserializeSyncResponse(data as protocol.SyncResponseSchema),
-            serverTick,
-          );
-          break;
-        case protocol.PacketId.CONNECTION:
-          this._onConnectionPacket(
-            Deserializer.deserializeConnection(data as protocol.ConnectionSchema),
-          );
-          break;
-        case protocol.PacketId.NOTIFICATION_PERMISSION_REQUEST:
-          EventRouter.instance.emit(NetworkManagerEventType.NotificationPermissionRequestPacket, {
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.LIGHTS:
-          // NOOP - PointLight/SpotLight not supported with switch to MeshBasicMaterial, Reimplement later.
-          break;
-        case protocol.PacketId.PHYSICS_DEBUG_RAYCASTS:
-          EventRouter.instance.emit(NetworkManagerEventType.PhysicsDebugRaycastsPacket, {
-            deserializedPhysicsDebugRaycasts: Deserializer.deserializePhysicsDebugRaycasts(data as protocol.PhysicsDebugRaycastsSchema),
-            serverTick,
-          });
-          break;
-        case protocol.PacketId.PHYSICS_DEBUG_RENDER:
-          EventRouter.instance.emit(NetworkManagerEventType.PhysicsDebugRenderPacket, {
-            deserializedPhysicsDebugRender: Deserializer.deserializePhysicsDebugRender(data as protocol.PhysicsDebugRenderSchema),
-            serverTick,
-          });
-          break;
-        default:
-          console.warn(`Received unknown packet id: ${packetId}, packet data:`, data);
-          break;
+      if (!dispatchInboundPacket(packet, this._inboundPacketRouterDependencies)) {
+        console.warn(`Received unknown packet id: ${packet[0]}, packet data:`, packet[1]);
       }
     }
+  }
+
+  private _onFirstWorldPacket = (): void => {
+    if (this._worldPacketReceived) {
+      return;
+    }
+
+    performance.mark('NetworkManager:world-packet-received');
+    performance.measure('NetworkManager:connected-to-first-packet-time', 'NetworkManager:connected', 'NetworkManager:world-packet-received');
+    performance.measure('NetworkManager:game-ready-time', 'NetworkManager:connecting', 'NetworkManager:world-packet-received');
+    this._game.bridgeManager.sendGameReady();
+    this._worldPacketReceived = true;
+  }
+
+  private _onHeartbeatPacket = (): void => {
+    this._lastHeartbeat = performance.now();
   }
 
   private _onConnectionPacket = async (deserializedConnection: DeserializedConnection): Promise<void> => {
@@ -579,6 +431,8 @@ export default class NetworkManager {
     if (deserializedConnection.id) {
       this._connectionId = deserializedConnection.id;
     }
+
+    this._serverFeatures = connectionFeatureFlagsToFeatures(deserializedConnection.featureFlags);
 
     // If the server tells the client to kill its connection, do so.
     // We need to disable reconnects, and kill all active connections.

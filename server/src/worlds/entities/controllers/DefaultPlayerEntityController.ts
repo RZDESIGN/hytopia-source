@@ -7,7 +7,7 @@ import { EntityModelAnimationBlendMode, EntityModelAnimationLoopMode } from '@/w
 import ErrorHandler from '@/errors/ErrorHandler';
 import PlayerEntity from '@/worlds/entities/PlayerEntity';
 import BlockType from '@/worlds/blocks/BlockType';
-import { resolveDeterministicMovementDirection } from '@/worlds/entities/controllers/shared/DeterministicMovementCore';
+import { resolveDeterministicMovementDirection } from '@gameplay-shared/DeterministicMovementCore';
 import type { PlayerInput } from '@/players/Player';
 import type { PlayerCameraOrientation } from '@/players/PlayerCamera';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
