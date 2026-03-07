@@ -322,11 +322,12 @@ export default class Renderer {
 
     this._game.arrowManager.update(frameDeltaS);
     this._game.blockMaterialManager.update();
-    this._game.camera.update(frameDeltaS);
-    this._game.audioManager.update();
-    this._updateSkybox(frameDeltaS);
-
     this._game.gltfManager.update();
+    // Update the camera as late as possible so rendering uses the freshest
+    // entity transforms and latest look input for this frame.
+    this._game.camera.update(frameDeltaS);
+    this._updateSkybox(frameDeltaS);
+    this._game.audioManager.update();
     this._updateSceneUI(frameDeltaS);
 
     this._applyUnderWaterEffect();

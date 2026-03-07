@@ -24,6 +24,7 @@ const CAMERA_ATTACHED_POSITION_LERP_TIME_S = 0.06;
 const CAMERA_ATTACHED_POSITION_SNAP_DISTANCE_SQ = 9;
 const CAMERA_POSITION_DEADZONE_SQ = 0.0004; // 2cm
 const CAMERA_LOOK_AT_MIN_DISTANCE_SQ = 0.0004;
+const SUPPORTS_POINTER_RAW_UPDATE = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
 
 // Working variables
 const vec2 = new Vector2();
@@ -284,6 +285,9 @@ export default class Camera {
 
   private _setupEventListeners(): void {
     document.addEventListener('mousemove', this._onMouseMove);
+    if (SUPPORTS_POINTER_RAW_UPDATE) {
+      document.addEventListener('pointerrawupdate', this._onPointerRawUpdate);
+    }
     document.addEventListener('wheel', this._onWheel);
  
     this._game.inputManager.onPress(']', this._toggleSpectator);
@@ -468,15 +472,21 @@ export default class Camera {
   }
 
   private _onMouseMove = (event: MouseEvent): void => {
-    if (
-      this._gameCameraTrackedEntity ||
-      this._gameCameraTrackedPosition ||
-      !this._game.inputManager.isPointerLocked
-    ) {
+    if (SUPPORTS_POINTER_RAW_UPDATE || !this._canProcessPointerLook()) {
       return;
     }
 
-    this._updateCameraRotation(event.movementX, event.movementY, this._game.settingsManager.clientSettings.controls.mouseSensitivityForRotation);
+    this._applyPointerLook(event.movementX, event.movementY);
+  }
+
+  private _onPointerRawUpdate = (rawEvent: Event): void => {
+    const event = rawEvent as PointerEvent;
+
+    if (event.pointerType !== 'mouse' || !this._canProcessPointerLook()) {
+      return;
+    }
+
+    this._applyPointerLook(event.movementX, event.movementY);
   }
 
   private _onWheel = (event: WheelEvent): void => {
@@ -497,6 +507,20 @@ export default class Camera {
       movementY * rotationSpeed * this._gameCameraMouseSensitivityMultiplier,
       -movementX * rotationSpeed * this._gameCameraMouseSensitivityMultiplier,
     );
+  }
+
+  private _applyPointerLook(movementX: number, movementY: number): void {
+    this._updateCameraRotation(
+      movementX,
+      movementY,
+      this._game.settingsManager.clientSettings.controls.mouseSensitivityForRotation,
+    );
+  }
+
+  private _canProcessPointerLook(): boolean {
+    return !this._gameCameraTrackedEntity &&
+      !this._gameCameraTrackedPosition &&
+      this._game.inputManager.isPointerLocked;
   }
 
   private _applyCameraRotationDelta(deltaPitch: number, deltaYaw: number): void {

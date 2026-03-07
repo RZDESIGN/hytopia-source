@@ -189,13 +189,15 @@ const DEFAULT_CLIENT_SETTINGS: ClientSettings = {
 // FPS, so we allow a small margin below the ideal FPS as specified.
 const HIGH_FPS_THRESHOLD_OFFSET = 1.0;
 
-// When performance drops to the point where smooth operation is no longer possible, we want
-// to lower the quality level. While there's no strong evidence, using a fixed threshold around
-// 30 FPS seems reasonable. However, since some platforms have a refresh rate of around 30 FPS,
-// we also provide a relative threshold based on the refresh rate and use the smaller of the
-// two as the final threshold.
+// When performance drops to the point where responsiveness starts to noticeably degrade, we want
+// to lower the quality level. On standard 60Hz displays, a 30 FPS fallback still makes sense.
+// On high-refresh displays though, waiting until 30 FPS is far too late and leaves the game
+// feeling sluggish for a long time. Use a more aggressive relative threshold there.
 const LOW_FPS_THRESHOLD = 30;
 const LOW_FPS_THRESHOLD_RATIO = 0.50;
+const HIGH_REFRESH_RATE_THRESHOLD = 100;
+const HIGH_REFRESH_LOW_FPS_THRESHOLD_RATIO = 0.75;
+const HIGH_REFRESH_QUALITY_DOWN_TIME_THRESHOLD = 1.0;
 
 // If the FPS stays above or below the threshold for the specified duration, we attempt to adjust
 // quality. Since increasing quality might degrade performance and force us to revert it
@@ -336,8 +338,13 @@ export default class SettingsManager {
 
     if (!targetFps) return;
 
+    this._lowFpsStats.durationThreshold =
+      targetFps >= HIGH_REFRESH_RATE_THRESHOLD
+        ? HIGH_REFRESH_QUALITY_DOWN_TIME_THRESHOLD
+        : QUALITY_DOWN_TIME_THRESHOLD;
+
     this._changeQualityIfNeeded(fps >= targetFps - HIGH_FPS_THRESHOLD_OFFSET, deltaTime, this._highFpsStats, INCREASE_QUALITY);
-    this._changeQualityIfNeeded(fps < Math.min(LOW_FPS_THRESHOLD, targetFps * LOW_FPS_THRESHOLD_RATIO), deltaTime, this._lowFpsStats, DECREASE_QUALITY);
+    this._changeQualityIfNeeded(fps < this._getLowFpsThreshold(targetFps), deltaTime, this._lowFpsStats, DECREASE_QUALITY);
   }
 
   public setQualityPreset(preset: keyof typeof QUALITY_PRESETS | undefined): void {
@@ -411,5 +418,13 @@ export default class SettingsManager {
 
     this._emitUpdateEvent();
     this._levelChangeHistory.push(change);
+  }
+
+  private _getLowFpsThreshold(targetFps: number): number {
+    if (targetFps >= HIGH_REFRESH_RATE_THRESHOLD) {
+      return Math.max(LOW_FPS_THRESHOLD, targetFps * HIGH_REFRESH_LOW_FPS_THRESHOLD_RATIO);
+    }
+
+    return Math.min(LOW_FPS_THRESHOLD, targetFps * LOW_FPS_THRESHOLD_RATIO);
   }
 }
