@@ -1,7 +1,7 @@
 import protocol from '@hytopia.com/server-protocol';
 import Collider, { ColliderShape } from '@/worlds/physics/Collider';
 import CollisionGroupsBuilder, { CollisionGroup } from '@/worlds/physics/CollisionGroupsBuilder';
-import EntityModelAnimation from '@/worlds/entities/EntityModelAnimation';
+import EntityModelAnimation, { EntityModelAnimationLoopMode } from '@/worlds/entities/EntityModelAnimation';
 import EntityModelNodeOverride from '@/worlds/entities/EntityModelNodeOverride';
 import ErrorHandler from '@/errors/ErrorHandler';
 import ModelRegistry from '@/models/ModelRegistry';
@@ -340,6 +340,12 @@ export default class Entity extends RigidBody implements protocol.Serializable {
   private _modelNodeOverrides: Map<string, EntityModelNodeOverride> = new Map(); // name match -> model node override
 
   /** @internal */
+  private _modelHiddenNodes: Set<string> = new Set();
+
+  /** @internal */
+  private _modelShownNodes: Set<string> = new Set();
+
+  /** @internal */
   private _modelPreferredShape: ColliderShape | undefined;
 
   /** @internal */
@@ -606,6 +612,26 @@ export default class Entity extends RigidBody implements protocol.Serializable {
   public get modelNodeOverrides(): Readonly<EntityModelNodeOverride[]> { return Array.from(this._modelNodeOverrides.values()); }
 
   /**
+   * Model nodes that will not be rendered for this entity.
+   *
+   * @remarks
+   * Uses case-insensitive substring matching.
+   *
+   * **Category:** Entities
+   */
+  public get modelHiddenNodes(): Set<string> { return this._modelHiddenNodes; }
+
+  /**
+   * Model nodes that will be rendered for this entity, overriding hidden nodes.
+   *
+   * @remarks
+   * Uses case-insensitive substring matching.
+   *
+   * **Category:** Entities
+   */
+  public get modelShownNodes(): Set<string> { return this._modelShownNodes; }
+
+  /**
    * The preferred collider shape when auto-generating colliders from the model.
    *
    * **Category:** Entities
@@ -758,6 +784,8 @@ export default class Entity extends RigidBody implements protocol.Serializable {
       return;
     }
 
+    this._modelHiddenNodes.clear();
+    this._modelShownNodes.clear();
     this.removeModelNodeOverrides(Array.from(this._modelNodeOverrides.keys()));
   }
 
@@ -924,6 +952,8 @@ export default class Entity extends RigidBody implements protocol.Serializable {
     }
 
     nameMatch = nameMatch.toLowerCase();
+    this._modelHiddenNodes.delete(nameMatch);
+    this._modelShownNodes.delete(nameMatch);
 
     const entityModelNodeOverride = this._modelNodeOverrides.get(nameMatch);
 
@@ -1112,6 +1142,73 @@ export default class Entity extends RigidBody implements protocol.Serializable {
         modelTextureUri,
       });
     }
+  }
+
+  /**
+   * Sets model nodes to hide for this entity.
+   *
+   * @remarks
+   * This compatibility API is backed by model node overrides. Exact node-match
+   * overrides are created with `hidden=true`, while shown-node overrides remain
+   * exact-match `hidden=false` so they continue to win over broader hidden rules.
+   *
+   * **Category:** Entities
+   */
+  public setModelHiddenNodes(hiddenNodes: string[]) {
+    if (!this.isModelEntity) {
+      return;
+    }
+
+    const nextHiddenNodes = new Set(hiddenNodes.map(node => node.toLowerCase()));
+
+    for (const hiddenNode of this._modelHiddenNodes) {
+      if (!nextHiddenNodes.has(hiddenNode)) {
+        this.removeModelNodeOverride(hiddenNode);
+      }
+    }
+
+    for (const hiddenNode of nextHiddenNodes) {
+      if (this._modelShownNodes.has(hiddenNode)) {
+        continue;
+      }
+
+      this.getModelNodeOverride(hiddenNode)?.setHidden(true);
+    }
+
+    this._modelHiddenNodes = nextHiddenNodes;
+  }
+
+  /**
+   * Sets model nodes to explicitly show for this entity.
+   *
+   * @remarks
+   * This compatibility API is backed by exact-match model node overrides with
+   * `hidden=false`, allowing shown nodes to override broader hidden matches.
+   *
+   * **Category:** Entities
+   */
+  public setModelShownNodes(shownNodes: string[]) {
+    if (!this.isModelEntity) {
+      return;
+    }
+
+    const nextShownNodes = new Set(shownNodes.map(node => node.toLowerCase()));
+
+    for (const shownNode of this._modelShownNodes) {
+      if (!nextShownNodes.has(shownNode)) {
+        if (this._modelHiddenNodes.has(shownNode)) {
+          this.getModelNodeOverride(shownNode)?.setHidden(true);
+        } else {
+          this.removeModelNodeOverride(shownNode);
+        }
+      }
+    }
+
+    for (const shownNode of nextShownNodes) {
+      this.getModelNodeOverride(shownNode)?.setHidden(false);
+    }
+
+    this._modelShownNodes = nextShownNodes;
   }
 
   /**
@@ -1424,6 +1521,62 @@ export default class Entity extends RigidBody implements protocol.Serializable {
       const modelAnimation = this._modelAnimations.get(modelAnimationName);
       if (!modelAnimation) continue;
       modelAnimation.stop();
+    }
+  }
+
+  /**
+   * Starts the provided model animations as looped animations for the entity.
+   *
+   * @param modelAnimationNames - The model animation names to start looping.
+   *
+   * **Side effects:** May emit `EntityModelAnimationEvent.SET_LOOP_MODE` and
+   * `EntityModelAnimationEvent.PLAY` for each started animation.
+   *
+   * **Category:** Entities
+   */
+  public startModelLoopedAnimations(modelAnimationNames: readonly string[]) {
+    for (const modelAnimationName of modelAnimationNames) {
+      const modelAnimation = this.getModelAnimation(modelAnimationName);
+      if (!modelAnimation) continue;
+
+      modelAnimation.setLoopMode(EntityModelAnimationLoopMode.LOOP);
+      modelAnimation.play();
+    }
+  }
+
+  /**
+   * Starts the provided model animations as one-shot animations for the entity.
+   *
+   * @param modelAnimationNames - The model animation names to restart once.
+   *
+   * **Side effects:** May emit `EntityModelAnimationEvent.SET_LOOP_MODE` and
+   * `EntityModelAnimationEvent.RESTART` for each started animation.
+   *
+   * **Category:** Entities
+   */
+  public startModelOneshotAnimations(modelAnimationNames: readonly string[]) {
+    for (const modelAnimationName of modelAnimationNames) {
+      const modelAnimation = this.getModelAnimation(modelAnimationName);
+      if (!modelAnimation) continue;
+
+      modelAnimation.setLoopMode(EntityModelAnimationLoopMode.ONCE);
+      modelAnimation.restart();
+    }
+  }
+
+  /**
+   * Sets the playback rate for all currently created model animations on the entity.
+   *
+   * @param playbackRate - The playback rate to apply to the entity's model animations.
+   *
+   * **Side effects:** May emit `EntityModelAnimationEvent.SET_PLAYBACK_RATE` for
+   * each tracked model animation.
+   *
+   * **Category:** Entities
+   */
+  public setModelAnimationsPlaybackRate(playbackRate: number) {
+    for (const modelAnimation of this._modelAnimations.values()) {
+      modelAnimation.setPlaybackRate(playbackRate);
     }
   }
 
