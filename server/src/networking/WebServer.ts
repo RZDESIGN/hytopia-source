@@ -7,6 +7,8 @@ import { setGlobalDispatcher, Agent } from 'undici';
 import AssetsLibrary from '@/assets/AssetsLibrary';
 import ErrorHandler from '@/errors/ErrorHandler';
 import EventRouter from '@/events/EventRouter';
+import PerformanceBaseline from '@/metrics/PerformanceBaseline';
+import Telemetry from '@/metrics/Telemetry';
 import PlayerManager from '@/players/PlayerManager';
 import { SSL_CERT, SSL_KEY } from '@/networking/ssl/certs';
 import type { Socket as RawSocket } from 'net';
@@ -125,6 +127,7 @@ export interface WebServerEventPayloads {
 }
 
 const CORS = { 'access-control-allow-origin': '*' };
+const PERF_ENDPOINTS_ENABLED = process.env.HYTOPIA_ENABLE_PERF_ENDPOINTS === 'true' || process.env.NODE_ENV !== 'production';
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.json': 'application/json', '.gltf': 'model/gltf+json', '.glb': 'model/gltf-binary',
@@ -256,6 +259,26 @@ export default class WebServer extends EventRouter {
         playerCount: PlayerManager.instance.playerCount,
         localNetworkAddresses: getLocalNetworkAddresses(),
       }) : undefined);
+
+      return;
+    }
+
+    if (PERF_ENDPOINTS_ENABLED && reqPath === '/__perf' && method === 'GET') {
+      respond(200, { 'content-type': 'application/json' });
+      res.end(!isHead ? JSON.stringify({
+        playerCount: PlayerManager.instance.playerCount,
+        process: Telemetry.getProcessStats(),
+        snapshot: PerformanceBaseline.snapshot(),
+        version: SDK_VERSION,
+      }) : undefined);
+
+      return;
+    }
+
+    if (PERF_ENDPOINTS_ENABLED && reqPath === '/__perf/reset' && (method === 'POST' || method === 'DELETE')) {
+      PerformanceBaseline.reset();
+      respond(204);
+      res.end();
 
       return;
     }

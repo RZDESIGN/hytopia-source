@@ -33,11 +33,11 @@ import Assets from '../network/Assets';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
 import { modalAlert } from '../ui/Modal';
-import { NetworkManagerEventType } from '../network/NetworkManager';
+import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
+import { NetworkManagerEventType } from '../network/NetworkEvents';
 import { getTransparentSortKey, lerpColor } from '../three/utils';
 import { CSS2DObject, CSS2DRenderer } from '../three/CSS2DRenderer';
 import type Entity from '../entities/Entity';
-import type { NetworkManagerEventPayload } from '../network/NetworkManager';
 import { type ClientSettingsEventPayload, ClientSettingsEventType } from '../settings/SettingsManager';
 
 const MISSING_SKYBOX_TEXTURE_PATH = '/textures/missing-skybox';
@@ -314,6 +314,7 @@ export default class Renderer {
     this._game.settingsManager.update();
 
     const frameDeltaS = this._game.performanceMetricsManager.deltaTime;
+    this._game.performanceBaselineManager.recordFrame(frameDeltaS * 1000);
     this._game.inputManager.update(frameDeltaS);
 
     this._updateFog(frameDeltaS);
@@ -322,10 +323,9 @@ export default class Renderer {
 
     this._game.arrowManager.update(frameDeltaS);
     this._game.blockMaterialManager.update();
+    const gltfUpdateStartMs = performance.now();
     this._game.gltfManager.update();
-    // Update the camera as late as possible so rendering uses the freshest
-    // entity transforms and latest look input for this frame.
-    this._game.camera.update(frameDeltaS);
+    this._game.performanceBaselineManager.recordGLTFUpdate(performance.now() - gltfUpdateStartMs);
     this._updateSkybox(frameDeltaS);
     this._game.audioManager.update();
     this._updateSceneUI(frameDeltaS);

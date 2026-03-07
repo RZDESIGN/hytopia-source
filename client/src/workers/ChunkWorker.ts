@@ -156,6 +156,7 @@ class ChunkWorker {
   private _textureAtlasManager: BlockTextureAtlasManagerBase;
   private _chunkRegistry = new ChunkRegistry();
   private _blockTypeRegistry = new BlockTypeRegistry();
+  private _latestChunkBatchBuildRequestVersion: Map<BatchId, number> = new Map();
   private _trimeshOcclusionProfiles: Map<BlockId, TrimeshOcclusionProfile> = new Map();
   private _receiveQueue: MessageEvent[] = [];
   private _processing: boolean = false;
@@ -220,6 +221,10 @@ class ChunkWorker {
 
   private _onMessage(event: MessageEvent): void {
     const message = event.data as ToChunkWorkerMessage;
+
+    if (message.type === 'chunk_batch_build') {
+      this._latestChunkBatchBuildRequestVersion.set(message.batchId, message.requestVersion);
+    }
 
     // Clear blocks_update references when merging could cause issues
     // (e.g., mixing updates from before and after chunk-level changes)
@@ -440,7 +445,7 @@ class ChunkWorker {
     // Rebuild each affected batch
     for (const [ batchId, chunkIds ] of affectedBatches) {
       if (chunkIds.length > 0) {
-        this._buildChunkBatchGeometries(batchId, chunkIds);
+        this._buildChunkBatchGeometries(batchId, chunkIds, this._latestChunkBatchBuildRequestVersion.get(batchId) ?? 0);
       }
     }
 
@@ -450,13 +455,25 @@ class ChunkWorker {
   };
 
   private _onChunkBatchBuild = (message: ChunkWorkerChunkBatchBuildMessage): Promise<void> => {
-    this._buildChunkBatchGeometries(message.batchId, message.chunkIds);
+    if (this._latestChunkBatchBuildRequestVersion.get(message.batchId) !== message.requestVersion) {
+      const staleMessage: ChunkWorkerChunkBatchBuiltMessage = {
+        type: 'chunk_batch_built',
+        batchId: message.batchId,
+        chunkIds: message.chunkIds,
+        requestVersion: message.requestVersion,
+        blockCount: 0,
+      };
+      self.postMessage(staleMessage);
+      return Promise.resolve();
+    }
+
+    this._buildChunkBatchGeometries(message.batchId, message.chunkIds, message.requestVersion);
     // Yield control to process accumulated messages and allow blocks_update merging
     // after potentially long-running geometry build operations
     return new Promise(resolve => setTimeout(resolve, 0));
   };
 
-  private _buildChunkBatchGeometries(batchId: BatchId, chunkIds: ChunkId[]): void {
+  private _buildChunkBatchGeometries(batchId: BatchId, chunkIds: ChunkId[], requestVersion: number): void {
     const { liquidGeometry, opaqueSolidGeometry, transparentSolidGeometry, blockCount, lightLevelVolumes, skyDistanceVolumes } =
       this._createChunkBatchGeometries(batchId, chunkIds);
 
@@ -478,6 +495,7 @@ class ChunkWorker {
       chunkIds,
       liquidGeometry,
       opaqueSolidGeometry,
+      requestVersion,
       transparentSolidGeometry,
       blockCount,
     };

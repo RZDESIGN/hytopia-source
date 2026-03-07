@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/node';
+import PerformanceBaseline from '@/metrics/PerformanceBaseline';
 import { SDK_VERSION } from '@/networking/WebServer';
 
 /**
@@ -222,14 +223,27 @@ export default class Telemetry {
    * **Category:** Telemetry
    */
   public static startSpan<T>(options: TelemetrySpanOptions, callback: (span?: Sentry.Span) => T): T {
+    const runCallback = (span?: Sentry.Span): T => {
+      const startTimeMs = performance.now();
+      try {
+        return callback(span);
+      } finally {
+        PerformanceBaseline.recordSpan(
+          options.operation,
+          performance.now() - startTimeMs,
+          options.attributes,
+        );
+      }
+    };
+
     if (Sentry.isInitialized()) {
       return Sentry.startSpan({
         attributes: options.attributes,
         name: options.operation,
         op: options.operation,
-      }, callback);
+      }, runCallback);
     } else {
-      return callback();
+      return runCallback();
     }
   }
 

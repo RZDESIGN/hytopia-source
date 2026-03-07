@@ -53,6 +53,7 @@ export default class ChunkWorkerClient {
       chunkIds: message.chunkIds,
       liquidGeometry: message.liquidGeometry,
       opaqueSolidGeometry: message.opaqueSolidGeometry,
+      requestVersion: message.requestVersion,
       transparentSolidGeometry: message.transparentSolidGeometry,
       blockCount: message.blockCount,
     });

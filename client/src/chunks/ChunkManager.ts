@@ -11,10 +11,8 @@ import {
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
 import type { DeserializedBlock } from '../network/Deserializer';
-import {
-  NetworkManagerEventType,
-  type NetworkManagerEventPayload,
-} from '../network/NetworkManager';
+import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
+import { NetworkManagerEventType } from '../network/NetworkEvents';
 import {
   type ChunkWorkerChunkBatchBuildMessage,
   type ChunkWorkerBlocksUpdateMessage,
@@ -69,6 +67,7 @@ export type RaycastedBlock = {
 export default class ChunkManager {
   private _game: Game;
   private _registry: ChunkRegistry = new ChunkRegistry();
+  private _chunkBatchBuildRequestVersions: Map<BatchId, number> = new Map();
   private _firstChunkBatchBuilt: boolean = false;
   private _predictedBlocks: Map<string, PredictedBlockEntry> = new Map();
   private _visibleBatchIds: Set<BatchId> = new Set();
@@ -252,17 +251,36 @@ export default class ChunkManager {
         continue;
       }
 
+      const requestVersion = (this._chunkBatchBuildRequestVersions.get(batchId) ?? 0) + 1;
+      this._chunkBatchBuildRequestVersions.set(batchId, requestVersion);
       const message: ChunkWorkerChunkBatchBuildMessage = {
         type: 'chunk_batch_build',
         batchId,
         chunkIds,
+        requestVersion,
       };
+      this._game.performanceBaselineManager.markChunkBatchBuildRequested();
       this._game.chunkWorkerClient.postMessage(message);
     }
   }
 
   private _onChunkBatchBuilt = (payload: WorkerEventPayload.IChunkBatchBuilt): void => {
-    const { batchId, chunkIds, liquidGeometry, opaqueSolidGeometry, transparentSolidGeometry, blockCount } = payload;
+    const {
+      batchId,
+      chunkIds,
+      liquidGeometry,
+      opaqueSolidGeometry,
+      requestVersion,
+      transparentSolidGeometry,
+      blockCount,
+    } = payload;
+
+    if ((this._chunkBatchBuildRequestVersions.get(batchId) ?? 0) !== requestVersion) {
+      this._game.performanceBaselineManager.markChunkBatchBuildCompleted(true);
+      return;
+    }
+
+    this._game.performanceBaselineManager.markChunkBatchBuildCompleted(false);
 
     // Verify at least one chunk in the batch still exists
     const validChunkIds = chunkIds.filter(chunkId => this._registry.getChunk(chunkId));
@@ -278,6 +296,11 @@ export default class ChunkManager {
       this._firstChunkBatchBuilt = true;
       performance.mark('ChunkManager:first-chunk-batch-built');
       performance.measure('ChunkManager:first-chunk-batch-built-time', 'NetworkManager:connected', 'ChunkManager:first-chunk-batch-built');
+      const entries = performance.getEntriesByName('ChunkManager:first-chunk-batch-built-time', 'measure');
+      this._game.performanceBaselineManager.recordFirstChunkBatchBuilt(
+        entries.length > 0 ? entries[entries.length - 1].duration : 0,
+      );
+      performance.clearMeasures('ChunkManager:first-chunk-batch-built-time');
     }
 
     // Update batch meshes

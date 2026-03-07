@@ -60,7 +60,6 @@ export class CSS2DObject extends Object3D {
 
 const _vector = new Vector3();
 const _a = new Vector3();
-const _b = new Vector3();
 
 export type CSS2DParameters = {
   element?: HTMLElement;
@@ -139,7 +138,12 @@ export class CSS2DRenderer {
       return;
     }
 
-    _vector.setFromMatrixPosition(object.matrixWorld);
+    const matrixWorld = object.matrixWorld.elements;
+    const worldX = matrixWorld[12];
+    const worldY = matrixWorld[13];
+    const worldZ = matrixWorld[14];
+
+    _vector.set(worldX, worldY, worldZ);
     _vector.applyMatrix4(this._viewProjectionMatrix);
 
     // As an optimization, make CSS2DObjects outside the viewport invisible similar to Frustum culling.
@@ -178,8 +182,10 @@ export class CSS2DRenderer {
       element.style.transform = tmpEl.style.transform;
     }
 
-    _b.setFromMatrixPosition(object.matrixWorld);
-    object.distanceToCameraSquared = _a.distanceToSquared(_b);
+    const deltaX = _a.x - worldX;
+    const deltaY = _a.y - worldY;
+    const deltaZ = _a.z - worldZ;
+    object.distanceToCameraSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
   };
 
   private _zOrder(): void {

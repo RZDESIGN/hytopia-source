@@ -1259,6 +1259,7 @@ export declare class BlockType extends EventRouter implements protocol.Serializa
 
 
 
+
     /**
      * Creates a new block type instance.
      *
@@ -1788,6 +1789,7 @@ declare const chatMessagesSchema: JSONSchemaType<ChatMessagesSchema>;
  * @public
  */
 export declare class Chunk implements protocol.Serializable {
+
 
 
 
@@ -12033,6 +12035,7 @@ export declare interface WedgeColliderOptions extends BaseColliderOptions {
  * @public
  */
 export declare class World extends EventRouter implements protocol.Serializable {
+
 
 
 

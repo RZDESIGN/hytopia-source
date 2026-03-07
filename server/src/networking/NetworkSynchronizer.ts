@@ -3,7 +3,7 @@ import ErrorHandler from '@/errors/ErrorHandler';
 import IterationMap from '@/shared/classes/IterationMap';
 import Telemetry, { TelemetrySpanOperation } from '@/metrics/Telemetry';
 import { DEFAULT_TICK_RATE } from '@/worlds/physics/Simulation';
-import type { AnyPacket, IPacket, IPacketDefinition, PacketId } from '@hytopia.com/server-protocol';
+import type { AnyPacket, IPacketDefinition, PacketId } from '@hytopia.com/server-protocol';
 import type { EventPayloads } from '@/events/Events';
 
 import Connection from '@/networking/Connection';
@@ -60,6 +60,16 @@ type SingletonSyncQueue<TSchema extends object | null> = {
   perPlayer: IterationMap<Player, TSchema>;
 };
 
+type ReliablePacketSlot = {
+  perPlayerPackets?: Map<Player, AnyPacket[]>;
+  sharedPackets?: AnyPacket[];
+};
+
+type PacketPlan = {
+  reliableSlots: ReliablePacketSlot[];
+  sharedUnreliablePackets: AnyPacket[];
+};
+
 /**
  * Batches world state changes into network packets for connected players.
  *
@@ -75,10 +85,6 @@ type SingletonSyncQueue<TSchema extends object | null> = {
  * @internal
  */
 export default class NetworkSynchronizer {
-
-  private _outboundPerPlayerReliablePackets: IterationMap<Player, IPacket<number, any>[]> = new IterationMap();
-  private _outboundSharedReliablePackets: AnyPacket[] = [];
-  private _outboundSharedUnreliablePackets: AnyPacket[] = [];
   private _lastSentInputAcknowledgementByPlayer: WeakMap<Player, number> = new WeakMap();
 
   private _queuedAudioSyncs: SyncQueue<number, protocol.AudioSchema> = { broadcast: new IterationMap(), perPlayer: new IterationMap() };
@@ -173,121 +179,17 @@ export default class NetworkSynchronizer {
 
     const currentTick = this._world.loop.currentTick;
     this._queuePlayerInputAcknowledgements();
+    const packetPlan = Telemetry.startSpan({
+      operation: TelemetrySpanOperation.BUILD_PACKETS,
+    }, () => this._buildPacketPlan(currentTick));
 
-    // 1. entities
-    /**
-     * Entity synchronizations specific to rotational and positional updates
-     * account for 90%+ of all packets sent. Because these are not deltas and 
-     * send as full position / rotation updates, we can send them over the
-     * unreliable channel to drastically reduce blocking on the client and stutter
-     * in poor network conditions. To do this, we split the entity synchronizations
-     * into two arrays, one for reliable updates and one for unreliable updates.
-     */
-    if (this._queuedEntitySyncs.broadcast.size > 0) {
-      const reliableUpdates: protocol.EntitySchema[] = [];
-      const unreliableUpdates: protocol.EntitySchema[] = [];
-
-      for (const entitySync of this._queuedEntitySyncs.broadcast.valuesArray) {
-        let isReliableUpdate = false;
-        
-        for (const key in entitySync) {
-          isReliableUpdate = key !== 'i' && key !== 'p' && key !== 'r';
-          if (isReliableUpdate) { break; }
-        }
-
-        (isReliableUpdate ? reliableUpdates : unreliableUpdates).push(entitySync);
-      }
-
-      if (unreliableUpdates.length > 0) {
-        const unreliablePacket = protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, unreliableUpdates, currentTick);
-        this._outboundSharedUnreliablePackets.push(unreliablePacket);
-      }
-      
-      if (reliableUpdates.length > 0) {
-        const reliablePacket = protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, reliableUpdates, currentTick);
-        this._outboundSharedReliablePackets.push(reliablePacket);
-        for (const packets of this._outboundPerPlayerReliablePackets.valuesArray) { packets.push(reliablePacket); }
-      }
-    }
-
-    if (this._queuedEntitySyncs.perPlayer.size > 0) {
-      for (const [ player, entitySyncs ] of this._queuedEntitySyncs.perPlayer.entries()) {
-        this._outboundPerPlayerReliablePackets.get(player)?.push(
-          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, entitySyncs.valuesArray, currentTick),
-        );
-      }
-    }
-
-    // 2. Camera
-    this._collectSingletonSyncToOutboundPackets(this._queuedCameraSyncs, protocol.outboundPackets.cameraPacketDefinition);
-
-    // 3. Audios
-    this._collectSyncToOutboundPackets(this._queuedAudioSyncs, protocol.outboundPackets.audiosPacketDefinition);
-
-    // 4. block types
-    this._collectSyncToOutboundPackets(this._queuedBlockTypeSyncs, protocol.outboundPackets.blockTypesPacketDefinition);
-
-    // 5. chunks
-    this._collectSyncToOutboundPackets(this._queuedChunkSyncs, protocol.outboundPackets.chunksPacketDefinition);
-
-    // 6. blocks
-    this._collectSyncToOutboundPackets(this._queuedBlockSyncs, protocol.outboundPackets.blocksPacketDefinition);
-    
-    // 7. particle emitters
-    this._collectSyncToOutboundPackets(this._queuedParticleEmitterSyncs, protocol.outboundPackets.particleEmittersPacketDefinition);
-
-    // 8. player UIs
-    this._collectSingletonSyncToOutboundPackets(this._queuedUISyncs, protocol.outboundPackets.uiPacketDefinition);
-
-    // 9. player UI datas
-    this._collectSingletonSyncToOutboundPackets(this._queuedUIDatasSyncs, protocol.outboundPackets.uiDatasPacketDefinition);
-    
-    // 10. scene UIs
-    this._collectSyncToOutboundPackets(this._queuedSceneUISyncs, protocol.outboundPackets.sceneUIsPacketDefinition);
-
-    // 11. world
-    this._collectSingletonSyncToOutboundPackets(this._queuedWorldSyncs, protocol.outboundPackets.worldPacketDefinition);
-
-    // 12. players
-    this._collectSyncToOutboundPackets(this._queuedPlayerSyncs, protocol.outboundPackets.playersPacketDefinition);
-
-    // 13. chat messages
-    this._collectSingletonSyncToOutboundPackets(this._queuedChatMessagesSyncs, protocol.outboundPackets.chatMessagesPacketDefinition);
-
-    // 14. notification permission request
-    this._collectSingletonSyncToOutboundPackets(this._queuedNotificationPermissionRequestSyncs, protocol.outboundPackets.notificationPermissionRequestPacketDefinition);
-
-    // 15. debug renders
-    this._collectSingletonSyncToOutboundPackets(this._queuedDebugRenderSyncs, protocol.outboundPackets.physicsDebugRenderPacketDefinition);
-
-    // 16. debug raycasts
-    this._collectSingletonSyncToOutboundPackets(this._queuedDebugRaycastsSyncs, protocol.outboundPackets.physicsDebugRaycastsPacketDefinition);
-
-    /*
-     * Send packets to players
-     */
-    Telemetry.startSpan({ operation: TelemetrySpanOperation.SEND_ALL_PACKETS }, () => {
-      for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
-        const reliablePackets = this._outboundPerPlayerReliablePackets.get(player) ?? this._outboundSharedReliablePackets;
-
-        if (reliablePackets.length > 0) {
-          player.connection.send(reliablePackets);
-        }
-
-        if (this._outboundSharedUnreliablePackets.length > 0) {
-          player.connection.send(this._outboundSharedUnreliablePackets, false);
-        }
-      }
-    });
+    this._sendPacketPlan(packetPlan);
 
     /*
      * Clear sync queues - We only clear queues if they aren't empty,
      * otherwise it causes significant memory growth and triggers unnecessary major GCs.
      */
     Telemetry.startSpan({ operation: TelemetrySpanOperation.NETWORK_SYNCHRONIZE_CLEANUP }, () => {
-      if (this._outboundPerPlayerReliablePackets.size > 0) { this._outboundPerPlayerReliablePackets.clear(); }
-      if (this._outboundSharedReliablePackets.length > 0) { this._outboundSharedReliablePackets.length = 0; }
-      if (this._outboundSharedUnreliablePackets.length > 0) { this._outboundSharedUnreliablePackets.length = 0; }
       if (this._loadedSceneUIs.size > 0) { this._loadedSceneUIs.clear(); }
       if (this._spawnedChunks.size > 0) { this._spawnedChunks.clear(); }
       if (this._spawnedEntities.size > 0) { this._spawnedEntities.clear(); }
@@ -1505,9 +1407,6 @@ export default class NetworkSynchronizer {
         syncQueue.perPlayer.set(forPlayer, syncMap);
       }
 
-      if (!this._outboundPerPlayerReliablePackets.has(forPlayer)) {
-        this._outboundPerPlayerReliablePackets.set(forPlayer, []);
-      }
     } else {
       syncMap = syncQueue.broadcast;
     }
@@ -1535,10 +1434,6 @@ export default class NetworkSynchronizer {
 
       if (forPlayer) {
         syncQueue.perPlayer.set(forPlayer, sync);
-
-        if (!this._outboundPerPlayerReliablePackets.has(forPlayer)) {
-          this._outboundPerPlayerReliablePackets.set(forPlayer, []);
-        }
       } else {
         syncQueue.broadcast = sync;
       }
@@ -1557,38 +1452,259 @@ export default class NetworkSynchronizer {
     if (syncQueue.perPlayer.size > 0) { syncQueue.perPlayer.clear(); }
   }
 
-  private _collectSingletonSyncToOutboundPackets<TId extends PacketId, TSchema extends object | null>(
+  private _appendPerPlayerSlotPacket(slot: ReliablePacketSlot, player: Player, packet: AnyPacket): void {
+    if (!slot.perPlayerPackets) {
+      slot.perPlayerPackets = new Map();
+    }
+
+    const existingPackets = slot.perPlayerPackets.get(player);
+    if (existingPackets) {
+      existingPackets.push(packet);
+      return;
+    }
+
+    slot.perPlayerPackets.set(player, [ packet ]);
+  }
+
+  private _buildPacketPlan(currentTick: number): PacketPlan {
+    const packetPlan: PacketPlan = {
+      reliableSlots: [],
+      sharedUnreliablePackets: [],
+    };
+
+    const entitySlot = this._buildEntityPacketSlot(currentTick, packetPlan.sharedUnreliablePackets);
+    if (entitySlot) {
+      packetPlan.reliableSlots.push(entitySlot);
+    }
+
+    // 2. Camera
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedCameraSyncs, protocol.outboundPackets.cameraPacketDefinition, currentTick),
+    );
+
+    // 3. Audios
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSyncPacketSlot(this._queuedAudioSyncs, protocol.outboundPackets.audiosPacketDefinition, currentTick),
+    );
+
+    // 4. block types
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSyncPacketSlot(this._queuedBlockTypeSyncs, protocol.outboundPackets.blockTypesPacketDefinition, currentTick),
+    );
+
+    // 5. chunks
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSyncPacketSlot(this._queuedChunkSyncs, protocol.outboundPackets.chunksPacketDefinition, currentTick),
+    );
+
+    // 6. blocks
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSyncPacketSlot(this._queuedBlockSyncs, protocol.outboundPackets.blocksPacketDefinition, currentTick),
+    );
+
+    // 7. particle emitters
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSyncPacketSlot(this._queuedParticleEmitterSyncs, protocol.outboundPackets.particleEmittersPacketDefinition, currentTick),
+    );
+
+    // 8. player UIs
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedUISyncs, protocol.outboundPackets.uiPacketDefinition, currentTick),
+    );
+
+    // 9. player UI datas
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedUIDatasSyncs, protocol.outboundPackets.uiDatasPacketDefinition, currentTick),
+    );
+
+    // 10. scene UIs
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSyncPacketSlot(this._queuedSceneUISyncs, protocol.outboundPackets.sceneUIsPacketDefinition, currentTick),
+    );
+
+    // 11. world
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedWorldSyncs, protocol.outboundPackets.worldPacketDefinition, currentTick),
+    );
+
+    // 12. players
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSyncPacketSlot(this._queuedPlayerSyncs, protocol.outboundPackets.playersPacketDefinition, currentTick),
+    );
+
+    // 13. chat messages
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedChatMessagesSyncs, protocol.outboundPackets.chatMessagesPacketDefinition, currentTick),
+    );
+
+    // 14. notification permission request
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedNotificationPermissionRequestSyncs, protocol.outboundPackets.notificationPermissionRequestPacketDefinition, currentTick),
+    );
+
+    // 15. debug renders
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedDebugRenderSyncs, protocol.outboundPackets.physicsDebugRenderPacketDefinition, currentTick),
+    );
+
+    // 16. debug raycasts
+    this._pushReliablePacketSlot(
+      packetPlan.reliableSlots,
+      this._buildSingletonSyncPacketSlot(this._queuedDebugRaycastsSyncs, protocol.outboundPackets.physicsDebugRaycastsPacketDefinition, currentTick),
+    );
+
+    return packetPlan;
+  }
+
+  private _buildEntityPacketSlot(currentTick: number, sharedUnreliablePackets: AnyPacket[]): ReliablePacketSlot | undefined {
+    const slot: ReliablePacketSlot = {};
+
+    /**
+     * Entity synchronizations specific to rotational and positional updates
+     * account for 90%+ of all packets sent. Because these are not deltas and
+     * send as full position / rotation updates, we can send them over the
+     * unreliable channel to drastically reduce blocking on the client and stutter
+     * in poor network conditions. To do this, we split the entity synchronizations
+     * into two arrays, one for reliable updates and one for unreliable updates.
+     */
+    if (this._queuedEntitySyncs.broadcast.size > 0) {
+      const reliableUpdates: protocol.EntitySchema[] = [];
+      const unreliableUpdates: protocol.EntitySchema[] = [];
+
+      for (const entitySync of this._queuedEntitySyncs.broadcast.valuesArray) {
+        let isReliableUpdate = false;
+
+        for (const key in entitySync) {
+          isReliableUpdate = key !== 'i' && key !== 'p' && key !== 'r';
+          if (isReliableUpdate) { break; }
+        }
+
+        (isReliableUpdate ? reliableUpdates : unreliableUpdates).push(entitySync);
+      }
+
+      if (unreliableUpdates.length > 0) {
+        sharedUnreliablePackets.push(
+          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, unreliableUpdates, currentTick),
+        );
+      }
+
+      if (reliableUpdates.length > 0) {
+        slot.sharedPackets = [
+          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, reliableUpdates, currentTick),
+        ];
+      }
+    }
+
+    if (this._queuedEntitySyncs.perPlayer.size > 0) {
+      for (const [ player, entitySyncs ] of this._queuedEntitySyncs.perPlayer.entries()) {
+        this._appendPerPlayerSlotPacket(
+          slot,
+          player,
+          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, entitySyncs.valuesArray, currentTick),
+        );
+      }
+    }
+
+    return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
+  }
+
+  private _buildSingletonSyncPacketSlot<TId extends PacketId, TSchema extends object | null>(
     singletonSyncQueue: SingletonSyncQueue<TSchema>,
     packetDefinition: IPacketDefinition<TId, TSchema>,
-  ) {
+    currentTick: number,
+  ): ReliablePacketSlot | undefined {
+    const slot: ReliablePacketSlot = {};
+
     if (singletonSyncQueue.broadcast !== undefined) {
-      const reliablePacket = protocol.createPacket(packetDefinition, singletonSyncQueue.broadcast, this._world.loop.currentTick);
-      this._outboundSharedReliablePackets.push(reliablePacket);
-      for (const packets of this._outboundPerPlayerReliablePackets.valuesArray) { packets.push(reliablePacket); }
+      slot.sharedPackets = [
+        protocol.createPacket(packetDefinition, singletonSyncQueue.broadcast, currentTick),
+      ];
     }
 
     if (singletonSyncQueue.perPlayer.size > 0) {
       for (const [ player, sync ] of singletonSyncQueue.perPlayer.entries()) {
-        this._outboundPerPlayerReliablePackets.get(player)?.push(protocol.createPacket(packetDefinition, sync, this._world.loop.currentTick));
+        this._appendPerPlayerSlotPacket(
+          slot,
+          player,
+          protocol.createPacket(packetDefinition, sync, currentTick),
+        );
       }
     }
+
+    return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
   }
 
-  private _collectSyncToOutboundPackets<TKey, TId extends PacketId, TSchema extends object | null>(
+  private _buildSyncPacketSlot<TKey, TId extends PacketId, TSchema extends object | null>(
     syncQueue: SyncQueue<TKey, TSchema>,
     packetDefinition: IPacketDefinition<TId, TSchema[]>,
-  ) {
+    currentTick: number,
+  ): ReliablePacketSlot | undefined {
+    const slot: ReliablePacketSlot = {};
+
     if (syncQueue.broadcast.size > 0) {
-      const reliablePacket = protocol.createPacket(packetDefinition, syncQueue.broadcast.valuesArray, this._world.loop.currentTick);
-      this._outboundSharedReliablePackets.push(reliablePacket);
-      for (const packets of this._outboundPerPlayerReliablePackets.valuesArray) { packets.push(reliablePacket); }
+      slot.sharedPackets = [
+        protocol.createPacket(packetDefinition, syncQueue.broadcast.valuesArray, currentTick),
+      ];
     }
 
     if (syncQueue.perPlayer.size > 0) {
       for (const [ player, sync ] of syncQueue.perPlayer.entries()) {
-        this._outboundPerPlayerReliablePackets.get(player)?.push(protocol.createPacket(packetDefinition, sync.valuesArray, this._world.loop.currentTick));
+        this._appendPerPlayerSlotPacket(
+          slot,
+          player,
+          protocol.createPacket(packetDefinition, sync.valuesArray, currentTick),
+        );
       }
     }
+
+    return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
+  }
+
+  private _hasReliablePacketSlotPackets(slot: ReliablePacketSlot): boolean {
+    return (slot.sharedPackets?.length ?? 0) > 0 || (slot.perPlayerPackets?.size ?? 0) > 0;
+  }
+
+  private _pushReliablePacketSlot(slots: ReliablePacketSlot[], slot: ReliablePacketSlot | undefined): void {
+    if (slot) {
+      slots.push(slot);
+    }
+  }
+
+  private _sendPacketPlan(packetPlan: PacketPlan): void {
+    Telemetry.startSpan({ operation: TelemetrySpanOperation.SEND_ALL_PACKETS }, () => {
+      for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
+        for (let i = 0; i < packetPlan.reliableSlots.length; i++) {
+          const slot = packetPlan.reliableSlots[i];
+
+          if (slot.sharedPackets && slot.sharedPackets.length > 0) {
+            player.connection.send(slot.sharedPackets);
+          }
+
+          const perPlayerPackets = slot.perPlayerPackets?.get(player);
+          if (perPlayerPackets && perPlayerPackets.length > 0) {
+            player.connection.send(perPlayerPackets);
+          }
+        }
+
+        if (packetPlan.sharedUnreliablePackets.length > 0) {
+          player.connection.send(packetPlan.sharedUnreliablePackets, false);
+        }
+      }
+    });
   }
 
   private _syncPlayerCameraAttachedEntityModel(playerCamera: PlayerCamera): void {

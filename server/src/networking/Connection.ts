@@ -10,6 +10,7 @@ import {
 import ErrorHandler from '@/errors/ErrorHandler';
 import EventRouter from '@/events/EventRouter';
 import msgpackr from '@/shared/helpers/msgpackr';
+import PerformanceBaseline from '@/metrics/PerformanceBaseline';
 import Telemetry, { TelemetrySpanOperation } from '@/metrics/Telemetry';
 import type { AnyPacket } from '@hytopia.com/server-protocol';
 import type { MessageEvent, ErrorEvent } from 'ws';
@@ -18,6 +19,7 @@ import type { WebTransportSessionImpl } from '@fails-components/webtransport/dis
 import type { WebTransportReceiveStream } from '@fails-components/webtransport';
 
 const RECONNECT_WINDOW_MS = 30 * 1000; // 30 seconds
+const VALIDATE_OUTBOUND_PACKETS = process.env.NODE_ENV !== 'production' || process.env.HYTOPIA_VALIDATE_OUTBOUND_PACKETS === 'true';
 
 registerConnectionFeaturePacketDefinition();
 
@@ -69,7 +71,7 @@ export interface ConnectionEventPayloads {
  * @internal
  */
 export default class Connection extends EventRouter {
-  private static _cachedPacketsSerializedBuffer: Map<AnyPacket[], Uint8Array> = new Map();
+  private static _cachedPacketsSerializedBuffer: Map<AnyPacket[], { buffer: Uint8Array; rawBytes: number }> = new Map();
 
   private _closeTimeout: NodeJS.Timeout | null = null;
   private _isDuplicate: boolean = false;
@@ -159,17 +161,26 @@ export default class Connection extends EventRouter {
    *
    * **Category:** Networking
    */
-  public static serializePackets(packets: AnyPacket[]): Uint8Array | void {
+  public static serializePackets(packets: AnyPacket[]): { buffer: Uint8Array; rawBytes: number } | void {
     const cachedSerializedBuffer = Connection._cachedPacketsSerializedBuffer.get(packets);
 
     if (cachedSerializedBuffer) {
       return cachedSerializedBuffer;
     }
 
-    for (const packet of packets) {
-      if (!protocol.isValidPacket(packet)) {
-        return ErrorHandler.error(`Connection.serializePackets(): Invalid packet payload: ${JSON.stringify(packet)}`);
+    if (VALIDATE_OUTBOUND_PACKETS) {
+      for (const packet of packets) {
+        if (!protocol.isValidPacket(packet)) {
+          return ErrorHandler.error(`Connection.serializePackets(): Invalid packet payload: ${JSON.stringify(packet)}`);
+        }
       }
+    }
+
+    const telemetryAttributes: Record<string, string | number> = {
+      packets: packets.length,
+    };
+    if (Telemetry.sentry().isInitialized()) {
+      telemetryAttributes.packetIds = packets.map(packet => packet[0]).join(',');
     }
 
     // We cache the packet after the first time its encoded so that
@@ -179,22 +190,26 @@ export default class Connection extends EventRouter {
     // per player.
     return Telemetry.startSpan({
       operation: TelemetrySpanOperation.SERIALIZE_PACKETS,
-      attributes: {
-        'packets': packets.length,
-        'packetIds': packets.map(p => p[0]).join(','),
-      },
+      attributes: telemetryAttributes,
     }, span => {
-      let outputBuffer = msgpackr.pack(packets) as unknown as Uint8Array;
-      
-      if (outputBuffer.byteLength > 64 * 1024) { // Compress packets larger than 64kb, mainly chunks.
-        outputBuffer = gzipSync(outputBuffer, { level: 1 }) as unknown as Uint8Array;
+      const rawBuffer = msgpackr.pack(packets) as unknown as Uint8Array;
+      let outputBuffer = rawBuffer;
+
+      if (rawBuffer.byteLength > 64 * 1024) { // Compress packets larger than 64kb, mainly chunks.
+        outputBuffer = gzipSync(rawBuffer, { level: 1 }) as unknown as Uint8Array;
       }
 
       span?.setAttribute('serializedBytes', outputBuffer.byteLength);
+      span?.setAttribute('serializedBytesRaw', rawBuffer.byteLength);
 
-      Connection._cachedPacketsSerializedBuffer.set(packets, outputBuffer);
+      const serialized = {
+        buffer: outputBuffer,
+        rawBytes: rawBuffer.byteLength,
+      };
 
-      return outputBuffer;
+      Connection._cachedPacketsSerializedBuffer.set(packets, serialized);
+
+      return serialized;
     });
   }
 
@@ -409,9 +424,11 @@ export default class Connection extends EventRouter {
       operation: TelemetrySpanOperation.SEND_PACKETS,
     }, () => {
       try {
-        const serializedBuffer = Connection.serializePackets(packets);
+        const serializedPackets = Connection.serializePackets(packets);
 
-        if (!serializedBuffer) return; // failed to serialize.
+        if (!serializedPackets) return; // failed to serialize.
+
+        const serializedBuffer = serializedPackets.buffer;
 
         if (wtConnected) {
           if (reliable || serializedBuffer.byteLength > 1200) { // Unreliable Datagram cannot handle > 1200 bytes, we should make this dynamic based on session.
@@ -427,6 +444,12 @@ export default class Connection extends EventRouter {
         } else {
           this._ws!.send(serializedBuffer);
         }
+
+        PerformanceBaseline.recordPackets(packets, {
+          rawBytes: serializedPackets.rawBytes,
+          reliable,
+          wireBytes: serializedBuffer.byteLength,
+        });
 
         this.emitWithGlobal(ConnectionEvent.PACKETS_SENT, {
           connection: this,

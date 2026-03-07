@@ -1,6 +1,7 @@
 import Game from '../Game';
 import Assets from '../network/Assets';
 import {
+  Box3,
   BufferGeometry,
   CompressedTexture,
   Color,
@@ -20,6 +21,7 @@ import {
   Scene,
   Source,
   Texture,
+  Vector3,
   WebGLProgramParametersWithUniforms,
   WebGLRenderer,
   WebGLRenderTarget,
@@ -50,6 +52,8 @@ const USE_INSTANCED_MESH_THRESHOLD_TRANSPARENT = 4;
 const TRANSPARENT_INSTANCED_SORT_INTERVAL_SMALL = 2;
 const TRANSPARENT_INSTANCED_SORT_INTERVAL_MEDIUM = 3;
 const TRANSPARENT_INSTANCED_SORT_INTERVAL_LARGE = 4;
+const TRANSPARENT_SORT_CAMERA_POSITION_DELTA_SQ_THRESHOLD = 0.05 * 0.05;
+const TRANSPARENT_SORT_VIEW_ALIGNMENT_DOT_THRESHOLD = 0.9995;
 
 // Creates or deletes an appropriately sized InstancedMesh when the number of Cloned Meshes exceeds the thresholds.
 // There is a difference between the thresholds for creating and deleting.
@@ -595,10 +599,16 @@ type InstancedMeshPair = {
 };
 
 type InstancedMeshUsageState = {
-  prevOpaqueIndex: number;
-  prevTransparentIndex: number;
+  lastTransparentSortCameraPosX: number;
+  lastTransparentSortCameraPosY: number;
+  lastTransparentSortCameraPosZ: number;
   lastTransparentSortFrame: number;
   lastTransparentSortCount: number;
+  lastTransparentSortViewDirX: number;
+  lastTransparentSortViewDirY: number;
+  lastTransparentSortViewDirZ: number;
+  prevOpaqueIndex: number;
+  prevTransparentIndex: number;
 };
 
 type SourceMeshAttributeCounters = {
@@ -632,6 +642,8 @@ type GLTFEntry = {
   clonedToSourceMesh: Map<Mesh, Mesh>;
   gltf: GLTF | null,
   gltfPromise: Promise<GLTF>;
+  localBoundingBox: Box3 | null;
+  modelCenter: Vector3 | null;
   needsInstancedTextureRefresh: boolean;
   sourceMeshSet: Set<Mesh>;
   sourceTextureToCustomTextures: Map<Texture /* source texture */, Map<Texture /* custom texture */, { referenceCount: number, texture: Texture /* cloned custom texture */}>>;
@@ -669,31 +681,14 @@ export default class GLTFManager {
   private _createEntry(uri: string): void {
     const gltfPromise = Assets.gltfLoader.loadAsync(uri);
 
-    // Model analysis
-    if (this._game.inDebugMode) {
-      gltfPromise.then(gltf => {
-        let nodeCount = 0;
-        let meshCount = 0;
-        const materials = new Set();
-
-        gltf.scene.traverse(obj => {
-          nodeCount++;
-          if (obj instanceof Mesh) {
-            meshCount++;
-            materials.add(obj.material);
-          }
-        });
-
-        console.log(`glTF model analysis: URL=${uri}, NodeCount=${nodeCount}, MeshCount=${meshCount}, MaterialCount=${materials.size}.`)
-      });
-    }
-
     const entry: GLTFEntry = {
       clonedGltfPromiseSet: new Set(),
       clonedGltfSet: new Set(),
       clonedToSourceMesh: new Map(),
       gltf: null,
       gltfPromise,
+      localBoundingBox: null,
+      modelCenter: null,
       needsInstancedTextureRefresh: false,
       sourceMeshSet: new Set(),
       sourceTextureToCustomTextures: new Map(),
@@ -704,6 +699,31 @@ export default class GLTFManager {
       sourceToAttributeCounters: new Map(),
       uri,
     };
+
+    gltfPromise.then(gltf => {
+      const localBoundingBox = new Box3().setFromObject(gltf.scene, true);
+      entry.localBoundingBox = localBoundingBox;
+      entry.modelCenter = localBoundingBox.getCenter(new Vector3());
+
+      if (!this._game.inDebugMode) {
+        return;
+      }
+
+      let nodeCount = 0;
+      let meshCount = 0;
+      const materials = new Set();
+
+      gltf.scene.traverse(obj => {
+        nodeCount++;
+        if (obj instanceof Mesh) {
+          meshCount++;
+          materials.add(obj.material);
+        }
+      });
+
+      console.log(`glTF model analysis: URL=${uri}, NodeCount=${nodeCount}, MeshCount=${meshCount}, MaterialCount=${materials.size}.`);
+    });
+
     this._uriToEntry.set(uri, entry);
 
     GLTFStats.fileCount = this._uriToEntry.size;
@@ -731,6 +751,8 @@ export default class GLTFManager {
 
     entry.clonedToSourceMesh.clear();
     entry.gltf = null;
+    entry.localBoundingBox = null;
+    entry.modelCenter = null;
 
     entry.sourceMeshSet.clear();
     entry.sourceToClonedMeshSet.clear();
@@ -803,10 +825,16 @@ export default class GLTFManager {
             instancedMeshPairs = [];
             entry.sourceToInstancedMeshes.set(sourceMesh, instancedMeshPairs);
             entry.sourceToInstancedMeshUsageState.set(sourceMesh, {
+              lastTransparentSortCameraPosX: Number.NaN,
+              lastTransparentSortCameraPosY: Number.NaN,
+              lastTransparentSortCameraPosZ: Number.NaN,
               prevOpaqueIndex: -1,
               prevTransparentIndex: -1,
               lastTransparentSortFrame: -1,
               lastTransparentSortCount: -1,
+              lastTransparentSortViewDirX: Number.NaN,
+              lastTransparentSortViewDirY: Number.NaN,
+              lastTransparentSortViewDirZ: Number.NaN,
             });
 
             opaqueMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as EmissiveMeshBasicMaterial, this._game);
@@ -1027,6 +1055,18 @@ export default class GLTFManager {
     this._gltfToEntry.set(clonedGltfPromise, entry);
 
     return clonedGltfPromise;
+  }
+
+  public getModelBounds(gltf: GLTF): { localBoundingBox: Box3; modelCenter: Vector3 } | undefined {
+    const entry = this._gltfToEntry.get(gltf);
+    if (!entry?.localBoundingBox || !entry.modelCenter) {
+      return undefined;
+    }
+
+    return {
+      localBoundingBox: entry.localBoundingBox.clone(),
+      modelCenter: entry.modelCenter.clone(),
+    };
   }
 
   // A method to cancel the loading of a glTF model before it completes
@@ -1596,6 +1636,42 @@ export default class GLTFManager {
     return TRANSPARENT_INSTANCED_SORT_INTERVAL_SMALL;
   }
 
+  private _hasTransparentSortViewChanged(usage: InstancedMeshUsageState): boolean {
+    const cameraPos = this._game.camera.activeCamera.position;
+    const viewDir = this._game.camera.activeViewDir;
+
+    if (!Number.isFinite(usage.lastTransparentSortCameraPosX)) {
+      return true;
+    }
+
+    const deltaX = cameraPos.x - usage.lastTransparentSortCameraPosX;
+    const deltaY = cameraPos.y - usage.lastTransparentSortCameraPosY;
+    const deltaZ = cameraPos.z - usage.lastTransparentSortCameraPosZ;
+    const positionDeltaSq = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+    if (positionDeltaSq > TRANSPARENT_SORT_CAMERA_POSITION_DELTA_SQ_THRESHOLD) {
+      return true;
+    }
+
+    const viewAlignment =
+      usage.lastTransparentSortViewDirX * viewDir.x +
+      usage.lastTransparentSortViewDirY * viewDir.y +
+      usage.lastTransparentSortViewDirZ * viewDir.z;
+
+    return viewAlignment < TRANSPARENT_SORT_VIEW_ALIGNMENT_DOT_THRESHOLD;
+  }
+
+  private _storeTransparentSortView(usage: InstancedMeshUsageState): void {
+    const cameraPos = this._game.camera.activeCamera.position;
+    const viewDir = this._game.camera.activeViewDir;
+
+    usage.lastTransparentSortCameraPosX = cameraPos.x;
+    usage.lastTransparentSortCameraPosY = cameraPos.y;
+    usage.lastTransparentSortCameraPosZ = cameraPos.z;
+    usage.lastTransparentSortViewDirX = viewDir.x;
+    usage.lastTransparentSortViewDirY = viewDir.y;
+    usage.lastTransparentSortViewDirZ = viewDir.z;
+  }
+
   private _sortTransparentClonedMeshesByDepth(clonedMeshes: Mesh[]): void {
     const cameraPos = this._game.camera.activeCamera.position;
     const viewDir = this._game.camera.activeViewDir;
@@ -1693,12 +1769,25 @@ export default class GLTFManager {
           // Sort periodically by projected depth to improve overlapping transparency quality.
           const frameCount = this._game.performanceMetricsManager.frameCount;
           const sortInterval = this._getTransparentSortInterval(transparentClonedMeshes.length);
+          const shouldRefreshSortWindow =
+            usage.lastTransparentSortFrame < 0 ||
+            usage.lastTransparentSortCount !== transparentClonedMeshes.length;
+          if (
+            shouldRefreshSortWindow ||
+            (
+              frameCount - usage.lastTransparentSortFrame >= sortInterval &&
+              this._hasTransparentSortViewChanged(usage)
+            )
+          ) {
+            this._sortTransparentClonedMeshesByDepth(transparentClonedMeshes);
+            this._storeTransparentSortView(usage);
+          }
+
           if (
             usage.lastTransparentSortFrame < 0 ||
             usage.lastTransparentSortCount !== transparentClonedMeshes.length ||
             frameCount - usage.lastTransparentSortFrame >= sortInterval
           ) {
-            this._sortTransparentClonedMeshesByDepth(transparentClonedMeshes);
             usage.lastTransparentSortFrame = frameCount;
             usage.lastTransparentSortCount = transparentClonedMeshes.length;
           }

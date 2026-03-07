@@ -6,6 +6,7 @@ import {
   type NegotiatedConnectionFeatures,
 } from '@engine-shared/network/ConnectionFeatureFlags';
 import { SEQUENCED_MOVEMENT_INPUT_SET, UNSEQUENCED_UNRELIABLE_INPUT_SET } from '@gameplay-shared/InputContract';
+import { RendererEventType } from '../core/Renderer';
 import {
   dispatchInboundPacket,
   type InboundPacketRouterDependencies,
@@ -17,53 +18,28 @@ import { NetworkManagerEventType } from './NetworkEvents';
 import Servers from './Servers';
 
 import type {
-  DeserializedAudios,
-  DeserializedBlocks,
-  DeserializedBlockTypes,
-  DeserializedCamera,
-  DeserializedChatMessages,
-  DeserializedChunks,
   DeserializedConnection,
-  DeserializedEntities,
-  DeserializedParticleEmitters,
-  DeserializedPhysicsDebugRaycasts,
-  DeserializedPhysicsDebugRender,
-  DeserializedPlayers,
-  DeserializedSceneUIs,
   DeserializedSyncResponse,
-  DeserializedUI,
-  DeserializedUIDatas,
-  DeserializedWorld,
 } from './Deserializer';
 import type { InputSchema } from '@hytopia.com/server-protocol';
 
 const packr = new Packr({ useFloat32: FLOAT32_OPTIONS.ALWAYS });
 
 const HEARTBEAT_INTERVAL_MS = 5000;
+const INBOUND_APPLY_BASE_BUDGET_MS = 2;
+const INBOUND_APPLY_MEDIUM_BACKLOG_BUDGET_MS = 4;
+const INBOUND_APPLY_HIGH_BACKLOG_BUDGET_MS = 8;
+const INBOUND_APPLY_MEDIUM_BACKLOG_THRESHOLD = 8;
+const INBOUND_APPLY_HIGH_BACKLOG_THRESHOLD = 24;
 let heartbeatReported = false;
 
-export { NetworkManagerEventType } from './NetworkEvents';
+type QueuedInboundMessage = {
+  data: Uint8Array;
+  protocolName: 'wt' | 'ws';
+};
 
-export namespace NetworkManagerEventPayload {
-  export interface IAudiosPacket { deserializedAudios: DeserializedAudios; serverTick: number; }
-  export interface IBlocksPacket { deserializedBlocks: DeserializedBlocks; serverTick: number; }
-  export interface IBlockTypesPacket { deserializedBlockTypes: DeserializedBlockTypes; serverTick: number; }
-  export interface ICameraPacket { deserializedCamera: DeserializedCamera; serverTick: number; }
-  export interface IChatMessagesPacket { deserializedChatMessages: DeserializedChatMessages; serverTick: number; }
-  export interface IChunksPacket { deserializedChunks: DeserializedChunks; serverTick: number; }
-  export interface IConnectionPacket { deserializedConnection: DeserializedConnection; }
-  export interface IEntitiesPacket { deserializedEntities: DeserializedEntities; serverTick: number; }
-  export interface INotificationPermissionRequestPacket { serverTick: number; }
-  export interface IParticleEmittersPacket { deserializedParticleEmitters: DeserializedParticleEmitters; serverTick: number; }
-  export interface IPhysicsDebugRaycastsPacket { deserializedPhysicsDebugRaycasts: DeserializedPhysicsDebugRaycasts; serverTick: number; }
-  export interface IPhysicsDebugRenderPacket { deserializedPhysicsDebugRender: DeserializedPhysicsDebugRender; serverTick: number; }
-  export interface IPlayersPacket { deserializedPlayers: DeserializedPlayers; serverTick: number; }
-  export interface ISceneUIsPacket { deserializedSceneUIs: DeserializedSceneUIs; serverTick: number; }
-  export interface ISyncResponsePacket { deserializedSyncResponse: DeserializedSyncResponse; syncStartTimeS: number; roundTripTimeS: number; serverTick: number; }
-  export interface IUIPacket { deserializedUI: DeserializedUI; serverTick: number; }
-  export interface IUIDatasPacket { deserializedUIDatas: DeserializedUIDatas; serverTick: number; }
-  export interface IWorldPacket { deserializedWorld: DeserializedWorld; serverTick: number; }
-}
+export { NetworkManagerEventType } from './NetworkEvents';
+export type { NetworkManagerEventPayload } from './NetworkEventPayloads';
 
 export default class NetworkManager {
   private _ws: WebSocket | undefined;
@@ -89,6 +65,8 @@ export default class NetworkManager {
   private _syncStartTimeS: number = 0;
   private _networkConditionSimulator: NetworkConditionSimulator;
   private _inboundPacketRouterDependencies: InboundPacketRouterDependencies;
+  private _pendingIncomingMessages: QueuedInboundMessage[] = [];
+  private _nextPendingIncomingMessageIndex: number = 0;
 
   // Whether the World Packet has been received. This is intended to be used, for example,
   // as a reference point to determine whether game initialization has started.
@@ -105,6 +83,7 @@ export default class NetworkManager {
     };
 
     window.addEventListener('beforeunload', () => this._killConnection());
+    EventRouter.instance.on(RendererEventType.Animate, this._onAnimate);
 
     if (this._networkConditionSimulator.enabled) {
       console.info(
@@ -332,9 +311,35 @@ export default class NetworkManager {
     protocolName: 'wt' | 'ws',
   ): void {
     this._networkConditionSimulator.schedule('incoming', reliable, () => {
-      this._lastReceiveProtocol = protocolName;
-      this._onMessage(data);
+      this._pendingIncomingMessages.push({
+        data,
+        protocolName,
+      });
     });
+  }
+
+  private _onAnimate = (): void => {
+    if (this._pendingIncomingMessageCount() === 0) {
+      return;
+    }
+
+    const deadlineMs = performance.now() + this._getInboundApplyBudgetMs();
+    let processedMessageCount = 0;
+
+    while (true) {
+      const nextMessage = this._dequeuePendingIncomingMessage();
+      if (!nextMessage) {
+        break;
+      }
+
+      this._lastReceiveProtocol = nextMessage.protocolName;
+      this._onMessage(nextMessage.data);
+      processedMessageCount++;
+
+      if (processedMessageCount > 0 && performance.now() >= deadlineMs) {
+        break;
+      }
+    }
   }
 
   private _killConnection(): void {
@@ -370,6 +375,7 @@ export default class NetworkManager {
   }
 
   private _onMessage = (data: Uint8Array): void => {
+    const applyStartMs = performance.now();
     let dataUint8Array = data;
 
     // Handle encoding byte and decompression
@@ -404,6 +410,12 @@ export default class NetworkManager {
         console.warn(`Received unknown packet id: ${packet[0]}, packet data:`, packet[1]);
       }
     }
+
+    this._game.performanceBaselineManager.recordInboundMessage(
+      data.byteLength,
+      packets.length,
+      performance.now() - applyStartMs,
+    );
   }
 
   private _onFirstWorldPacket = (): void => {
@@ -414,6 +426,9 @@ export default class NetworkManager {
     performance.mark('NetworkManager:world-packet-received');
     performance.measure('NetworkManager:connected-to-first-packet-time', 'NetworkManager:connected', 'NetworkManager:world-packet-received');
     performance.measure('NetworkManager:game-ready-time', 'NetworkManager:connecting', 'NetworkManager:world-packet-received');
+    this._game.performanceBaselineManager.recordConnectedToFirstPacket(
+      this._readLatestPerformanceMeasureMs('NetworkManager:connected-to-first-packet-time'),
+    );
     this._game.bridgeManager.sendGameReady();
     this._worldPacketReceived = true;
   }
@@ -480,5 +495,49 @@ export default class NetworkManager {
   private _synchronize(): void {
     this._syncStartTimeS = performance.now() / 1000;
     this.sendPacket(protocol.createPacket(protocol.syncRequestPacketDefinition, null));
+  }
+
+  private _readLatestPerformanceMeasureMs(name: string): number {
+    const entries = performance.getEntriesByName(name, 'measure');
+    const latestDurationMs = entries.length > 0 ? entries[entries.length - 1].duration : 0;
+    performance.clearMeasures(name);
+    return latestDurationMs;
+  }
+
+  private _dequeuePendingIncomingMessage(): QueuedInboundMessage | undefined {
+    if (this._nextPendingIncomingMessageIndex >= this._pendingIncomingMessages.length) {
+      this._pendingIncomingMessages.length = 0;
+      this._nextPendingIncomingMessageIndex = 0;
+      return undefined;
+    }
+
+    const message = this._pendingIncomingMessages[this._nextPendingIncomingMessageIndex++];
+
+    if (
+      this._nextPendingIncomingMessageIndex >= 32 &&
+      this._nextPendingIncomingMessageIndex * 2 >= this._pendingIncomingMessages.length
+    ) {
+      this._pendingIncomingMessages = this._pendingIncomingMessages.slice(this._nextPendingIncomingMessageIndex);
+      this._nextPendingIncomingMessageIndex = 0;
+    }
+
+    return message;
+  }
+
+  private _getInboundApplyBudgetMs(): number {
+    const pendingMessageCount = this._pendingIncomingMessageCount();
+    if (!this._worldPacketReceived || pendingMessageCount >= INBOUND_APPLY_HIGH_BACKLOG_THRESHOLD) {
+      return INBOUND_APPLY_HIGH_BACKLOG_BUDGET_MS;
+    }
+
+    if (pendingMessageCount >= INBOUND_APPLY_MEDIUM_BACKLOG_THRESHOLD) {
+      return INBOUND_APPLY_MEDIUM_BACKLOG_BUDGET_MS;
+    }
+
+    return INBOUND_APPLY_BASE_BUDGET_MS;
+  }
+
+  private _pendingIncomingMessageCount(): number {
+    return this._pendingIncomingMessages.length - this._nextPendingIncomingMessageIndex;
   }
 }

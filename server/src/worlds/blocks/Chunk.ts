@@ -48,6 +48,9 @@ export default class Chunk implements protocol.Serializable {
   /** @internal */
   private _originCoordinate: Vector3Like;
 
+  /** @internal */
+  private _serialized: protocol.ChunkSchema | undefined;
+
   /**
    * Creates a new chunk instance.
    */
@@ -187,6 +190,7 @@ export default class Chunk implements protocol.Serializable {
     }
 
     const blockIndex = this._getIndex(localCoordinate);
+    this._serialized = undefined;
 
     this._blocks[blockIndex] = blockTypeId;
     this._blockRotations.delete(blockIndex);
@@ -198,7 +202,8 @@ export default class Chunk implements protocol.Serializable {
 
   /** @internal */
   public serialize(): protocol.ChunkSchema {
-    return Serializer.serializeChunk(this);
+    this._serialized ??= Serializer.serializeChunk(this);
+    return this._serialized;
   }
 
   /** @internal */

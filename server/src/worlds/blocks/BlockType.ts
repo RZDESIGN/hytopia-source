@@ -120,6 +120,9 @@ export default class BlockType extends EventRouter implements protocol.Serializa
 
   /** @internal */
   private _textureUri: string;
+
+  /** @internal */
+  private _serialized: protocol.BlockTypeSchema | undefined;
  
   /**
    * Creates a new block type instance.
@@ -274,7 +277,8 @@ export default class BlockType extends EventRouter implements protocol.Serializa
 
   /** @internal */
   public serialize(): protocol.BlockTypeSchema {
-    return Serializer.serializeBlockType(this);
+    this._serialized ??= Serializer.serializeBlockType(this);
+    return this._serialized;
   }
 
   /**

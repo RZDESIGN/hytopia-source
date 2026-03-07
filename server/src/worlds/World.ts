@@ -267,6 +267,9 @@ export default class World extends EventRouter implements protocol.Serializable 
   private _networkSynchronizer: NetworkSynchronizer;
 
   /** @internal */
+  private _serialized: protocol.WorldSchema | undefined;
+
+  /** @internal */
   private _particleEmitterManager: ParticleEmitterManager;
 
   /** @internal */
@@ -584,6 +587,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setAmbientLightColor(color: RgbColor) {
     this._ambientLightColor = color;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_AMBIENT_LIGHT_COLOR, {
       world: this,
@@ -602,6 +606,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setAmbientLightIntensity(intensity: number) {
     this._ambientLightIntensity = intensity;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_AMBIENT_LIGHT_INTENSITY, {
       world: this,
@@ -620,6 +625,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setDirectionalLightColor(color: RgbColor) {
     this._directionalLightColor = color;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_DIRECTIONAL_LIGHT_COLOR, {
       world: this,
@@ -638,6 +644,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setDirectionalLightIntensity(intensity: number) {
     this._directionalLightIntensity = intensity;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_DIRECTIONAL_LIGHT_INTENSITY, {
       world: this,
@@ -656,6 +663,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setDirectionalLightPosition(position: Vector3Like) {
     this._directionalLightPosition = position;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_DIRECTIONAL_LIGHT_POSITION, {
       world: this,
@@ -674,6 +682,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setFogColor(color: RgbColor | undefined) {
     this._fogColor = color;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_FOG_COLOR, {
       world: this,
@@ -692,6 +701,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setFogFar(far: number) {
     this._fogFar = far;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_FOG_FAR, {
       world: this,
@@ -710,6 +720,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setFogNear(near: number) {
     this._fogNear = near;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_FOG_NEAR, {
       world: this,
@@ -728,6 +739,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setSkyboxIntensity(intensity: number) {
     this._skyboxIntensity = intensity;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_SKYBOX_INTENSITY, {
       world: this,
@@ -746,6 +758,7 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public setSkyboxUri(skyboxUri: string) {
     this._skyboxUri = skyboxUri;
+    this._serialized = undefined;
 
     this.emit(WorldEvent.SET_SKYBOX_URI, {
       world: this,
@@ -797,6 +810,7 @@ export default class World extends EventRouter implements protocol.Serializable 
 
   /** @internal */
   public serialize(): protocol.WorldSchema {
-    return Serializer.serializeWorld(this);
+    this._serialized ??= Serializer.serializeWorld(this);
+    return this._serialized;
   }
 }

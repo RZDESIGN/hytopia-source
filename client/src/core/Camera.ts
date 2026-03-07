@@ -3,9 +3,9 @@ import Entity from "../entities/Entity";
 import EventRouter from '../events/EventRouter';
 import Game from "../Game";
 import MobileManager from '../mobile/MobileManager';
-import { NetworkManagerEventType } from '../network/NetworkManager';
+import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
+import { NetworkManagerEventType } from '../network/NetworkEvents';
 import type { Ray } from 'three';
-import type { NetworkManagerEventPayload } from '../network/NetworkManager';
 
 const BASE_ZOOM = 3.5;
 const MIN_ZOOM = 3.0;

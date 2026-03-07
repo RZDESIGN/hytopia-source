@@ -17,6 +17,7 @@ import InputManager from './input/InputManager';
 import MobileManager from './mobile/MobileManager';
 import NetworkManager from './network/NetworkManager';
 import ParticlesManager from './particles/ParticlesManager';
+import PerformanceBaselineManager from './core/PerformanceBaselineManager';
 import PerformanceMetricsManager from './core/PerformanceMetricsManager';
 import PlayerManager from './players/PlayerManager';
 import Renderer from './core/Renderer';
@@ -48,6 +49,7 @@ export default class Game {
   private _lightLevelManager: LightLevelManager;
   private _mobileManager: MobileManager;
   private _networkManager: NetworkManager;
+  private _performanceBaselineManager: PerformanceBaselineManager;
   private _performanceMetricsManager: PerformanceMetricsManager;
   private _particlesManager: ParticlesManager;
   private _playerManager: PlayerManager;
@@ -61,6 +63,7 @@ export default class Game {
     this._networkManager = new NetworkManager(this);
     this._settingsManager = new SettingsManager(this);
     this._performanceMetricsManager = new PerformanceMetricsManager();
+    this._performanceBaselineManager = new PerformanceBaselineManager(this);
     this._inputManager = new InputManager(this);
     this._camera = new Camera(this);
     this._renderer = new Renderer(this);
@@ -113,6 +116,7 @@ export default class Game {
   public get mobileManager(): MobileManager { return this._mobileManager; }
   public get networkManager(): NetworkManager { return this._networkManager; }
   public get particlesManager(): ParticlesManager { return this._particlesManager; }
+  public get performanceBaselineManager(): PerformanceBaselineManager { return this._performanceBaselineManager; }
   public get performanceMetricsManager(): PerformanceMetricsManager { return this._performanceMetricsManager; }
   public get playerManager(): PlayerManager { return this._playerManager; }
   public get renderer(): Renderer { return this._renderer; }

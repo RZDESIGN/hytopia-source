@@ -2880,17 +2880,15 @@ export default class Entity {
       }
     });
 
-    // Calculate bounding box and set model center.
-    // It seems that the center calculation sometimes may not be accurate for glTF models
-    // optimized with glTF-Transform. Setting the second argument "precise = true" in
-    // "setFromObject()", which enables high-precision mode, seems to resolve this issue.
-    // This increases computation cost, but since it only occurs when loading a glTF model,
-    // we don't think it's a concern for now.
-    // If a large number of glTF entities reference the same glTF model and this becomes a
-    // performance issue, we can move the center calculation to GLTFManager to compute it
-    // only once per glTF model.
-    // TODO: Allow static type checks
-    this._storeModelCenter(model, true);
+    const cachedModelBounds = this._game.gltfManager.getModelBounds(gltf);
+    if (cachedModelBounds) {
+      this._localBoundingBox = cachedModelBounds.localBoundingBox;
+      model.userData.modelCenter = cachedModelBounds.modelCenter;
+      this._worldBoundingBox = this._localBoundingBox.clone();
+      this._needsWorldBoundingBoxUpdate = true;
+    } else {
+      this._storeModelCenter(model, true);
+    }
 
     model.traverse((node) => {
       this._storeModelNodeOverrideBaseTransform(node);

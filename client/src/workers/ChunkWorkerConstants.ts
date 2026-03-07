@@ -42,6 +42,7 @@ export namespace WorkerEventPayload {
     chunkIds: ChunkId[];
     liquidGeometry?: BlocksBufferGeometryData;
     opaqueSolidGeometry?: BlocksBufferGeometryData;
+    requestVersion: number;
     transparentSolidGeometry?: BlocksBufferGeometryData;
     blockCount: number;
   }
@@ -95,6 +96,7 @@ export type ChunkWorkerChunkBatchBuildMessage = ToChunkWorkerMessageCore & {
   type: 'chunk_batch_build';
   batchId: BatchId;
   chunkIds: ChunkId[];
+  requestVersion: number;
 };
 
 export type ChunkWorkerChunkUpdateMessage = ToChunkWorkerMessageCore & {
@@ -158,6 +160,7 @@ export type ChunkWorkerChunkBatchBuiltMessage = FromChunkWorkerMessageCore & {
   chunkIds: ChunkId[];
   liquidGeometry?: BlocksBufferGeometryData;
   opaqueSolidGeometry?: BlocksBufferGeometryData;
+  requestVersion: number;
   transparentSolidGeometry?: BlocksBufferGeometryData;
   blockCount: number;
 };
