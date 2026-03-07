@@ -62,7 +62,7 @@ export interface ConnectionEventPayloads {
  * @internal
  */
 export default class Connection extends EventRouter {
-  private static _cachedPacketsSerializedBuffer: Map<AnyPacket[], Uint8Array<ArrayBuffer>> = new Map();
+  private static _cachedPacketsSerializedBuffer: Map<AnyPacket[], Uint8Array> = new Map();
 
   private _closeTimeout: NodeJS.Timeout | null = null;
   private _isDuplicate: boolean = false;
@@ -152,7 +152,13 @@ export default class Connection extends EventRouter {
    *
    * **Category:** Networking
    */
-  public static serializePackets(packets: AnyPacket[]): Uint8Array<ArrayBuffer> | void {
+  public static serializePackets(packets: AnyPacket[]): Uint8Array | void {
+    const cachedSerializedBuffer = Connection._cachedPacketsSerializedBuffer.get(packets);
+
+    if (cachedSerializedBuffer) {
+      return cachedSerializedBuffer;
+    }
+
     for (const packet of packets) {
       if (!protocol.isValidPacket(packet)) {
         return ErrorHandler.error(`Connection.serializePackets(): Invalid packet payload: ${JSON.stringify(packet)}`);
@@ -164,12 +170,6 @@ export default class Connection extends EventRouter {
     // This dramatically reduces CPU usage when multiple players are
     // connected, because without this we would encode the same packet
     // per player.
-    const cachedSerializedBuffer = Connection._cachedPacketsSerializedBuffer.get(packets);
-
-    if (cachedSerializedBuffer) {
-      return cachedSerializedBuffer;
-    }
-
     return Telemetry.startSpan({
       operation: TelemetrySpanOperation.SERIALIZE_PACKETS,
       attributes: {
@@ -177,10 +177,10 @@ export default class Connection extends EventRouter {
         'packetIds': packets.map(p => p[0]).join(','),
       },
     }, span => {
-      let outputBuffer = Uint8Array.from(msgpackr.pack(packets));
+      let outputBuffer = msgpackr.pack(packets) as unknown as Uint8Array;
       
       if (outputBuffer.byteLength > 64 * 1024) { // Compress packets larger than 64kb, mainly chunks.
-        outputBuffer = Uint8Array.from(gzipSync(outputBuffer, { level: 1 }));
+        outputBuffer = gzipSync(outputBuffer, { level: 1 }) as unknown as Uint8Array;
       }
 
       span?.setAttribute('serializedBytes', outputBuffer.byteLength);

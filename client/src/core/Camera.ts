@@ -1,4 +1,4 @@
-import { Euler, Object3D, PerspectiveCamera, Quaternion, Raycaster, Vector2, Vector3 } from "three";
+import { Euler, Intersection, Object3D, PerspectiveCamera, Quaternion, Raycaster, Vector2, Vector3 } from "three";
 import Entity from "../entities/Entity";
 import EventRouter from '../events/EventRouter';
 import Game from "../Game";
@@ -40,6 +40,7 @@ const positionQuat = new Quaternion();
 const shoulderRotationAxis = new Vector3(0, 1, 0);
 const spectatorForward = new Vector3();
 const spectatorRight = new Vector3();
+const cameraCollisionIntersections: Intersection<Object3D>[] = [];
 
 const normalizeAngle = (radians: number): number => Math.atan2(Math.sin(radians), Math.cos(radians));
 const smoothingAlpha = (deltaS: number, timeConstantS: number): number => 1 - Math.exp(-deltaS / Math.max(0.001, timeConstantS));
@@ -623,11 +624,13 @@ export default class Camera {
     this._raycaster.far = desiredDistance;
 
     let targetDistance = desiredDistance;
-    const intersects = this._raycaster.intersectObjects(this._game.chunkMeshManager.solidMeshesInScene, false);
-    if (intersects.length > 0) {
+    cameraCollisionIntersections.length = 0;
+    const nearbySolidMeshes = this._game.chunkMeshManager.getSolidMeshesNear(lookAtTarget, desiredDistance);
+    this._raycaster.intersectObjects(nearbySolidMeshes, false, cameraCollisionIntersections);
+    if (cameraCollisionIntersections.length > 0) {
       // Account for near plane so the camera frustum doesn't graze the block face.
       const nearPadding = this._gameCamera.near + 0.1;
-      targetDistance = Math.max(0.5, intersects[0].distance - nearPadding);
+      targetDistance = Math.max(0.5, cameraCollisionIntersections[0].distance - nearPadding);
     }
 
     this._gameCameraCollisionTargetDistance = targetDistance;

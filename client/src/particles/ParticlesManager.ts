@@ -44,6 +44,7 @@ export default class ParticleEmitterManager {
     }
 
     const viewDistance = this._game.renderer.viewDistance;
+    const viewDistanceSquared = viewDistance * viewDistance;
     const cameraPos = this._game.camera.activeCamera.position;
     fromVec2.set(cameraPos.x, cameraPos.z);
 
@@ -54,7 +55,7 @@ export default class ParticleEmitterManager {
     // due to the emitter's new position being outside the view distance.
     this._particleEmitters.forEach((particleEmitter) => {
       const pos = particleEmitter.mesh.position;
-      particleEmitter.setVisible(fromVec2.distanceTo(toVec2.set(pos.x, pos.z)) <= viewDistance);
+      particleEmitter.setVisible(fromVec2.distanceToSquared(toVec2.set(pos.x, pos.z)) <= viewDistanceSquared);
     });
   }
 

@@ -31,6 +31,12 @@ export default class EntityManager {
   private _entities: Map<number, Entity> = new Map();
 
   /** @internal */
+  private _playerEntities: Set<PlayerEntity> = new Set();
+
+  /** @internal */
+  private _playerEntitiesByPlayer: Map<Player, Set<PlayerEntity>> = new Map();
+
+  /** @internal */
   private _nextEntityId: number = 1;
 
   /** @internal */
@@ -58,6 +64,9 @@ export default class EntityManager {
   public get world(): World { return this._world; }
 
   /** @internal */
+  public get playerEntities(): ReadonlySet<PlayerEntity> { return this._playerEntities; }
+
+  /** @internal */
   public registerEntity(entity: Entity): number {
     if (entity.id !== undefined) {
       ErrorHandler.fatalError(`EntityManager.registerEntity(): Entity ${entity.name} is already assigned the id ${entity.id}!`);
@@ -69,6 +78,18 @@ export default class EntityManager {
 
     if (!entity.isEnvironmental) {
       this._activeEntities.add(entity);
+    }
+
+    if (entity instanceof PlayerEntity) {
+      this._playerEntities.add(entity);
+
+      let playerEntities = this._playerEntitiesByPlayer.get(entity.player);
+      if (!playerEntities) {
+        playerEntities = new Set<PlayerEntity>();
+        this._playerEntitiesByPlayer.set(entity.player, playerEntities);
+      }
+
+      playerEntities.add(entity);
     }
 
     return id;
@@ -84,6 +105,19 @@ export default class EntityManager {
 
     if (!entity.isEnvironmental) {
       this._activeEntities.delete(entity);
+    }
+
+    if (entity instanceof PlayerEntity) {
+      this._playerEntities.delete(entity);
+
+      const playerEntities = this._playerEntitiesByPlayer.get(entity.player);
+      if (playerEntities) {
+        playerEntities.delete(entity);
+
+        if (playerEntities.size === 0) {
+          this._playerEntitiesByPlayer.delete(entity.player);
+        }
+      }
     }
   }
 
@@ -106,15 +140,7 @@ export default class EntityManager {
    * **Category:** Entities
    */
   public getAllPlayerEntities(): PlayerEntity[] {
-    const playerEntities: PlayerEntity[] = [];
-
-    this._entities.forEach(entity => {
-      if (entity instanceof PlayerEntity) {
-        playerEntities.push(entity);
-      }
-    });
-
-    return playerEntities;
+    return Array.from(this._playerEntities);
   }
 
   /**
@@ -126,15 +152,8 @@ export default class EntityManager {
    * **Category:** Entities
    */
   public getPlayerEntitiesByPlayer(player: Player): PlayerEntity[] {
-    const playerEntities: PlayerEntity[] = [];
-    
-    this._entities.forEach(entity => {
-      if (entity instanceof PlayerEntity && entity.player === player) {
-        playerEntities.push(entity);
-      }
-    });
-
-    return playerEntities;
+    const playerEntities = this._playerEntitiesByPlayer.get(player);
+    return playerEntities ? Array.from(playerEntities) : [];
   }
 
   /**

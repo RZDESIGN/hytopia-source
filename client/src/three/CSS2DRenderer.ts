@@ -20,6 +20,7 @@ tmpEl.style.display = 'none';
 
 export class CSS2DObject extends Object3D {
   private _element: HTMLElement = document.createElement('div');
+  public distanceToCameraSquared: number = 0;
   public readonly center: Vector2 = new Vector2(0.5, 0.5); // ( 0, 0 ) is the lower left; ( 1, 1 ) is the top right
   public readonly isCSS2DObject: boolean = true;
 
@@ -75,7 +76,6 @@ export class CSS2DRenderer {
   private _viewMatrix = new Matrix4();
   private _viewProjectionMatrix = new Matrix4();
   private _visibleObjects: CSS2DObject[] = [];
-  private _distanceCache: Map<CSS2DObject, number> = new Map();
 
   public setSize(width: number, height: number): void {
     this._width = width;
@@ -100,14 +100,23 @@ export class CSS2DRenderer {
   public render(scene: Scene, camera: Camera): void {
     this._viewMatrix.copy(camera.matrixWorldInverse);
     this._viewProjectionMatrix.multiplyMatrices(camera.projectionMatrix, this._viewMatrix);
+    _a.setFromMatrixPosition(camera.matrixWorld);
 
     // Assumes all the children are CSS2DObjects that don't have children
-    scene.children.forEach(child => this._renderObject(child as CSS2DObject, camera));
+    for (let i = 0; i < scene.children.length; i++) {
+      this._renderObject(scene.children[i] as CSS2DObject);
+    }
 
-    this._zOrder();
+    if (this._visibleObjects.length > 1) {
+      this._zOrder();
+    } else if (this._visibleObjects.length === 1) {
+      const element = this._visibleObjects[0].element;
+      if (element.style.zIndex !== '1') {
+        element.style.zIndex = '1';
+      }
+    }
 
     this._visibleObjects.length = 0;
-    this._distanceCache.clear();
   }
 
   private _hideObject(object: CSS2DObject): void {
@@ -124,7 +133,7 @@ export class CSS2DRenderer {
     }
   }
 
-  private _renderObject(object: CSS2DObject, camera: Camera): void {
+  private _renderObject(object: CSS2DObject): void {
     if (!object.visible) {
       this._hideObject(object);
       return;
@@ -169,14 +178,13 @@ export class CSS2DRenderer {
       element.style.transform = tmpEl.style.transform;
     }
 
-    _a.setFromMatrixPosition(camera.matrixWorld);
     _b.setFromMatrixPosition(object.matrixWorld);
-    this._distanceCache.set(object, _a.distanceToSquared(_b));
+    object.distanceToCameraSquared = _a.distanceToSquared(_b);
   };
 
   private _zOrder(): void {
     this._visibleObjects.sort((a: CSS2DObject, b: CSS2DObject) => {
-      return this._distanceCache.get(a)! - this._distanceCache.get(b)!;
+      return a.distanceToCameraSquared - b.distanceToCameraSquared;
     });
 
     const zMax = this._visibleObjects.length;

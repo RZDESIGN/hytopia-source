@@ -26,6 +26,7 @@ export default class ChunkMeshManager {
   private _batchTransparentSolidMeshes: Map<BatchId, Mesh<BufferGeometry, MeshBasicMaterial>> = new Map();
   // Track all batch IDs for efficient iteration
   private _batchIds: Set<BatchId> = new Set();
+  private _nearbySolidMeshes: Mesh<BufferGeometry, MeshBasicMaterial>[] = [];
   private _solidMeshesInScene: Mesh<BufferGeometry, MeshBasicMaterial>[] = [];
   private _solidMeshesInSceneDirty: boolean = true;
 
@@ -289,6 +290,41 @@ export default class ChunkMeshManager {
       this._solidMeshesInSceneDirty = false;
     }
     return this._solidMeshesInScene;
+  }
+
+  public getSolidMeshesNear(worldPosition: { x: number, y: number, z: number }, maxDistance: number): Mesh<BufferGeometry, MeshBasicMaterial>[] {
+    const nearbySolidMeshes = this._nearbySolidMeshes;
+    nearbySolidMeshes.length = 0;
+
+    // Search one extra batch in each direction so short raycasts near a batch edge
+    // don't need to scan every visible mesh in the scene.
+    const searchPadding = BATCH_WORLD_SIZE;
+    const minX = Math.floor((worldPosition.x - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxX = Math.floor((worldPosition.x + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const minY = Math.floor((worldPosition.y - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxY = Math.floor((worldPosition.y + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const minZ = Math.floor((worldPosition.z - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxZ = Math.floor((worldPosition.z + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+
+    for (let x = minX; x <= maxX; x += BATCH_WORLD_SIZE) {
+      for (let y = minY; y <= maxY; y += BATCH_WORLD_SIZE) {
+        for (let z = minZ; z <= maxZ; z += BATCH_WORLD_SIZE) {
+          const batchId = `${x},${y},${z}` as BatchId;
+          const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
+          const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
+
+          if (opaqueSolidMesh?.parent) {
+            nearbySolidMeshes.push(opaqueSolidMesh);
+          }
+
+          if (transparentSolidMesh?.parent) {
+            nearbySolidMeshes.push(transparentSolidMesh);
+          }
+        }
+      }
+    }
+
+    return nearbySolidMeshes;
   }
 
   public get opaqueSolidMeshes(): IterableIterator<Mesh<BufferGeometry, MeshBasicMaterial>> {

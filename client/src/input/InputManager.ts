@@ -10,7 +10,11 @@ const INTERACT_TAP_MAX_DURATION_MS = 200;
 // Max distance squared in pixels for a drag (vs tap) - 30px radius
 const INTERACT_DRAG_CANCEL_MAX_DISTANCE_SQ = 900;
 const MOVEMENT_STATE_DIRTY_RESEND_TICKS = 3;
+const MOVEMENT_PACKET_MIN_DELTA_S = 1 / 240;
 const MOVEMENT_PACKET_MAX_DELTA_S = 1 / 10;
+const MOBILE_INPUT_UPDATE_HZ = 30;
+const DESKTOP_INPUT_UPDATE_HZ = 60;
+const MAX_FIRST_PERSON_INPUT_UPDATE_HZ = 120;
 const GAMEPAD_LEFT_STICK_DEADZONE = 0.18;
 const GAMEPAD_RIGHT_STICK_DEADZONE = 0.12;
 const GAMEPAD_RUN_THRESHOLD = 0.7;
@@ -211,6 +215,8 @@ export default class InputManager {
   private _preferredGamepadIndex: number | undefined;
   private _moveStickState: StickState = { x: 0, y: 0, magnitude: 0 };
   private _lookStickState: StickState = { x: 0, y: 0, magnitude: 0 };
+  private _movementPacketQueueAccumulatorS: number = 0;
+  private _movementPacketTickElapsedS: number = 0;
 
   // Interact tracking - Map by pointerId to support multitouch
   private _interactPointers: Map<number, { x: number; y: number; time: number }> = new Map();
@@ -220,7 +226,6 @@ export default class InputManager {
 
     this._setupEventListeners();
     this._setupInputListeners();
-    this._setupPacketQueue();
   }
 
   public get inputEnabled(): boolean { return this._inputEnabled; }
@@ -286,6 +291,7 @@ export default class InputManager {
 
   public update(frameDeltaS: number): void {
     this._updateGamepadInput(frameDeltaS);
+    this._updatePacketQueue(frameDeltaS);
   }
 
   public requestPointerLock(): void {
@@ -354,103 +360,127 @@ export default class InputManager {
     window.addEventListener('pointerleave', (event) => this._onPointerCancel(event));
   }
 
-  private _setupPacketQueue(): void {
-    // this could probably be just 30 in general...
-    // twitch-inputs on desktop if not 60 might feel bad though.
-    // we can change this to 30 when we have client prediction.
-    const inputUpdateHz = MobileManager.isMobile ? 30 : 60;
-    let previousQueueTickTimeS = performance.now() / 1000;
-    
-    setInterval(() => {
-      const nowS = performance.now() / 1000;
-      const queueDeltaS = Math.min(
-        Math.max(nowS - previousQueueTickTimeS, 1 / 240),
-        MOVEMENT_PACKET_MAX_DELTA_S,
-      );
-      previousQueueTickTimeS = nowS;
+  private _updatePacketQueue(frameDeltaS: number): void {
+    const clampedFrameDeltaS = Math.min(Math.max(frameDeltaS, 0), MOVEMENT_PACKET_MAX_DELTA_S);
+    this._movementPacketQueueAccumulatorS += clampedFrameDeltaS;
+    this._movementPacketTickElapsedS += clampedFrameDeltaS;
 
-      if (!this._networkedInputEnabled) {
-        this._continuousInputState = {};
-        this._movementStateDirtyResendTicks = 0;
-        this._wasMovementInputPressed = false;
-        return;
-      }
+    const packetIntervalS = 1 / this._getMovementPacketUpdateHz();
+    if (this._movementPacketQueueAccumulatorS < packetIntervalS) {
+      return;
+    }
 
-      const hasCameraOrientationChanges =
-        this._continuousInputState.cp !== undefined ||
-        this._continuousInputState.cy !== undefined;
+    this._movementPacketQueueAccumulatorS %= packetIntervalS;
 
-      const hasMovementInputPressed =
-        !!this._inputState.w ||
-        !!this._inputState.a ||
-        !!this._inputState.s ||
-        !!this._inputState.d ||
-        !!this._inputState.sp ||
-        !!this._inputState.sh ||
-        !!this._inputState.c ||
-        this._joystickDirection !== null;
+    const queueDeltaS = Math.min(
+      Math.max(this._movementPacketTickElapsedS, MOVEMENT_PACKET_MIN_DELTA_S),
+      MOVEMENT_PACKET_MAX_DELTA_S,
+    );
+    this._movementPacketTickElapsedS = 0;
 
-      const shouldResendMovementState = this._movementStateDirtyResendTicks > 0;
-      const shouldSendMovementState = hasMovementInputPressed || shouldResendMovementState;
-      const becameIdle = this._wasMovementInputPressed && !hasMovementInputPressed;
-
-      if (!hasCameraOrientationChanges && !shouldSendMovementState) {
-        this._wasMovementInputPressed = hasMovementInputPressed;
-        return;
-      }
-
-      const inputPacket: Record<string, any> = {};
-
-      if (shouldSendMovementState) {
-        inputPacket.w = !!this._inputState.w;
-        inputPacket.a = !!this._inputState.a;
-        inputPacket.s = !!this._inputState.s;
-        inputPacket.d = !!this._inputState.d;
-        inputPacket.sp = !!this._inputState.sp;
-        inputPacket.sh = !!this._inputState.sh;
-        inputPacket.c = !!this._inputState.c;
-
-        if (this._joystickDirection !== null || shouldResendMovementState) {
-          inputPacket.jd = this._joystickDirection;
-        }
-      }
-
-      if (this._continuousInputState.cp !== undefined) {
-        inputPacket.cp = this._continuousInputState.cp;
-      }
-
-      if (this._continuousInputState.cy !== undefined) {
-        inputPacket.cy = this._continuousInputState.cy;
-      }
-
-      const sequenceNumber = this._game.networkManager.sendInputPacket(
-        inputPacket,
-        becameIdle && shouldSendMovementState,
-      );
-
-      if (shouldSendMovementState && sequenceNumber !== undefined) {
-        EventRouter.instance.emit(InputManagerEventType.MovementPacketSent, {
-          sequenceNumber,
-          deltaTimeS: queueDeltaS,
-          yaw: this._game.camera.gameCameraYaw,
-          joystickDirection: this._joystickDirection,
-          w: !!this._inputState.w,
-          a: !!this._inputState.a,
-          s: !!this._inputState.s,
-          d: !!this._inputState.d,
-          sp: !!this._inputState.sp,
-          sh: !!this._inputState.sh,
-          c: !!this._inputState.c,
-        });
-      }
-
+    if (!this._networkedInputEnabled) {
       this._continuousInputState = {};
-      this._wasMovementInputPressed = hasMovementInputPressed;
+      this._movementPacketQueueAccumulatorS = 0;
+      this._movementPacketTickElapsedS = 0;
+      this._movementStateDirtyResendTicks = 0;
+      this._wasMovementInputPressed = false;
+      return;
+    }
 
-      if (this._movementStateDirtyResendTicks > 0) {
-        this._movementStateDirtyResendTicks--;
+    const hasCameraOrientationChanges =
+      this._continuousInputState.cp !== undefined ||
+      this._continuousInputState.cy !== undefined;
+
+    const hasMovementInputPressed =
+      !!this._inputState.w ||
+      !!this._inputState.a ||
+      !!this._inputState.s ||
+      !!this._inputState.d ||
+      !!this._inputState.sp ||
+      !!this._inputState.sh ||
+      !!this._inputState.c ||
+      this._joystickDirection !== null;
+
+    const shouldResendMovementState = this._movementStateDirtyResendTicks > 0;
+    const shouldSendMovementState = hasMovementInputPressed || shouldResendMovementState;
+    const becameIdle = this._wasMovementInputPressed && !hasMovementInputPressed;
+
+    if (!hasCameraOrientationChanges && !shouldSendMovementState) {
+      this._wasMovementInputPressed = hasMovementInputPressed;
+      return;
+    }
+
+    const inputPacket: Record<string, any> = {};
+
+    if (shouldSendMovementState) {
+      inputPacket.w = !!this._inputState.w;
+      inputPacket.a = !!this._inputState.a;
+      inputPacket.s = !!this._inputState.s;
+      inputPacket.d = !!this._inputState.d;
+      inputPacket.sp = !!this._inputState.sp;
+      inputPacket.sh = !!this._inputState.sh;
+      inputPacket.c = !!this._inputState.c;
+
+      if (this._joystickDirection !== null || shouldResendMovementState) {
+        inputPacket.jd = this._joystickDirection;
       }
-    }, 1000 / inputUpdateHz);
+    }
+
+    if (this._continuousInputState.cp !== undefined) {
+      inputPacket.cp = this._continuousInputState.cp;
+    }
+
+    if (this._continuousInputState.cy !== undefined) {
+      inputPacket.cy = this._continuousInputState.cy;
+    }
+
+    const sequenceNumber = this._game.networkManager.sendInputPacket(
+      inputPacket,
+      becameIdle && shouldSendMovementState,
+    );
+
+    if (shouldSendMovementState && sequenceNumber !== undefined) {
+      EventRouter.instance.emit(InputManagerEventType.MovementPacketSent, {
+        sequenceNumber,
+        deltaTimeS: queueDeltaS,
+        yaw: this._game.camera.gameCameraYaw,
+        joystickDirection: this._joystickDirection,
+        w: !!this._inputState.w,
+        a: !!this._inputState.a,
+        s: !!this._inputState.s,
+        d: !!this._inputState.d,
+        sp: !!this._inputState.sp,
+        sh: !!this._inputState.sh,
+        c: !!this._inputState.c,
+      });
+    }
+
+    this._continuousInputState = {};
+    this._wasMovementInputPressed = hasMovementInputPressed;
+
+    if (this._movementStateDirtyResendTicks > 0) {
+      this._movementStateDirtyResendTicks--;
+    }
+  }
+
+  private _getMovementPacketUpdateHz(): number {
+    if (MobileManager.isMobile) {
+      return MOBILE_INPUT_UPDATE_HZ;
+    }
+
+    if (!this._game.camera.isFirstPersonGameCameraActive) {
+      return DESKTOP_INPUT_UPDATE_HZ;
+    }
+
+    const refreshRate = this._game.performanceMetricsManager.refreshRate;
+    if (!refreshRate || !Number.isFinite(refreshRate)) {
+      return DESKTOP_INPUT_UPDATE_HZ;
+    }
+
+    return Math.min(
+      MAX_FIRST_PERSON_INPUT_UPDATE_HZ,
+      Math.max(DESKTOP_INPUT_UPDATE_HZ, refreshRate),
+    );
   }
 
   private _onGameCameraOrientationChange = (payload: CameraEventPayload.GameCameraOrientationChange): void => {

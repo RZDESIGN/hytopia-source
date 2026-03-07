@@ -1,4 +1,4 @@
-import { Ray, Raycaster, Vector2, Vector3, Vector3Like } from 'three';
+import { Intersection, Object3D, Ray, Raycaster, Vector2, Vector3, Vector3Like } from 'three';
 import Chunk from './Chunk';
 import { BATCH_WORLD_SIZE, BatchId, ChunkId } from './ChunkConstants';
 import ChunkRegistry from './ChunkRegistry';
@@ -19,6 +19,7 @@ import {
   type ChunkWorkerChunkBatchBuildMessage,
   type ChunkWorkerBlocksUpdateMessage,
   type ChunkWorkerChunkRemoveMessage,
+  type ChunkWorkerChunksUpdateMessage,
   type ChunkWorkerChunkUpdateMessage,
   type WorkerEventPayload,
   WorkerEventType,
@@ -32,6 +33,7 @@ const blockHitPointVec3 = new Vector3();
 const rayDirectionVec3 = new Vector3();
 const rayOriginVec3 = new Vector3();
 const raycaster = new Raycaster();
+const blockRaycastIntersections: Intersection<Object3D>[] = [];
 const vec1 = new Vector3();
 const vec2 = new Vector3();
 const BLOCK_PREDICTION_TIMEOUT_MS = 1500;
@@ -162,6 +164,7 @@ export default class ChunkManager {
   private _onChunksPacket = (payload: NetworkManagerEventPayload.IChunksPacket) => {
     const { deserializedChunks } = payload;
     const affectedBatches: Set<BatchId> = new Set();
+    const workerChunkUpdates: ChunkWorkerChunksUpdateMessage['updates'] = [];
 
     for (let i = 0; i < deserializedChunks.length; i++) {
       const deserializedChunk = deserializedChunks[i];
@@ -193,17 +196,11 @@ export default class ChunkManager {
 
       if (!removed && blocks) {
         this._registry.registerChunk(originCoordinate, blocks, blockRotations);
-
-        // Since blocks are also managed on the main thread, they are not transferred.
-        // However, if copying blocks becomes a performance or memory issue, this
-        // approach may need to be reconsidered.
-        const message: ChunkWorkerChunkUpdateMessage = {
-          type: 'chunk_update',
+        workerChunkUpdates.push({
           originCoordinate,
           blocks,
           blockRotations,
-        };
-        this._game.chunkWorkerClient.postMessage(message);
+        });
 
         const predictedChunkUpdates = this._getPredictedBlockUpdatesForChunk(chunkId);
         if (predictedChunkUpdates.length > 0) {
@@ -212,6 +209,25 @@ export default class ChunkManager {
 
         affectedBatches.add(batchId);
       }
+    }
+
+    if (workerChunkUpdates.length === 1) {
+      const [ update ] = workerChunkUpdates;
+      const message: ChunkWorkerChunkUpdateMessage = {
+        type: 'chunk_update',
+        originCoordinate: update.originCoordinate,
+        blocks: update.blocks,
+        blockRotations: update.blockRotations,
+      };
+      this._game.chunkWorkerClient.postMessage(message);
+    } else if (workerChunkUpdates.length > 1) {
+      // Keep the existing main-thread registry ownership, but batch worker ingress to
+      // cut postMessage overhead when many chunks stream in together.
+      const message: ChunkWorkerChunksUpdateMessage = {
+        type: 'chunks_update',
+        updates: workerChunkUpdates,
+      };
+      this._game.chunkWorkerClient.postMessage(message);
     }
 
     // Build affected batches in order of proximity to the player
@@ -381,7 +397,10 @@ export default class ChunkManager {
     raycaster.far = maxDistance;
     raycaster.set(rayOriginVec3, rayDirectionVec3);
 
-    const intersection = raycaster.intersectObjects(this._game.chunkMeshManager.solidMeshesInScene, false)[0];
+    blockRaycastIntersections.length = 0;
+    const nearbySolidMeshes = this._game.chunkMeshManager.getSolidMeshesNear(rayOriginVec3, maxDistance);
+    raycaster.intersectObjects(nearbySolidMeshes, false, blockRaycastIntersections);
+    const intersection = blockRaycastIntersections[0];
 
     if (!intersection?.face) {
       return undefined;

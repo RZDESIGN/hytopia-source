@@ -4,17 +4,16 @@
 
 ```ts
 
-import type { AnyPacket } from '@hytopia.com/server-protocol';
 import type { ErrorEvent as ErrorEvent_2 } from 'ws';
 import EventEmitter from 'eventemitter3';
 import http from 'http';
-import type { InputSchema } from '@hytopia.com/server-protocol';
+import { JSONSchemaType } from 'ajv';
 import type { LobbyMembershipDto } from '@hytopia.com/creative-lib/dist/impl/getSession';
-import protocol from '@hytopia.com/server-protocol';
 import RAPIER from '@dimforge/rapier3d-simd-compat';
 import { SdpMatrix3 } from '@dimforge/rapier3d-simd-compat';
 import * as Sentry from '@sentry/node';
 import type { Socket } from 'net';
+import type { ValidateFunction } from 'ajv';
 import { WebSocket as WebSocket_2 } from 'ws';
 import type { WebTransportSessionImpl } from '@fails-components/webtransport/dist/lib/types';
 
@@ -25,6 +24,8 @@ export class AssetsLibrary {
     syncAsset(assetPath: string): void;
 }
 
+// Warning: (ae-forgotten-export) The symbol "protocol" needs to be exported by the entry point index.d.ts
+//
 // @public @eventProperty
 export class Audio extends EventRouter implements protocol.Serializable {
     constructor(options: AudioOptions);
@@ -1232,6 +1233,8 @@ export class EntityManager {
     getEntity<T extends Entity>(id: number): T | undefined;
     getEntityChildren(entity: Entity): Entity[];
     getPlayerEntitiesByPlayer(player: Player): PlayerEntity[];
+    // @internal (undocumented)
+    get playerEntities(): ReadonlySet<PlayerEntity>;
     // @internal (undocumented)
     registerEntity(entity: Entity): number;
     // @internal (undocumented)
@@ -2590,6 +2593,8 @@ export interface PlayerEventPayloads {
     };
 }
 
+// Warning: (ae-forgotten-export) The symbol "InputSchema" needs to be exported by the entry point index.d.ts
+//
 // @public
 export type PlayerInput = InputSchema;
 
@@ -2598,6 +2603,8 @@ export class PlayerManager {
     getConnectedPlayerByUsername(username: string): Player | undefined;
     getConnectedPlayers(): Player[];
     getConnectedPlayersByWorld(world: World): Player[];
+    // @internal (undocumented)
+    getConnectedPlayersByWorldSet(world: World): ReadonlySet<Player>;
     static readonly instance: PlayerManager;
     get playerCount(): number;
     worldSelectionHandler?: (player: Player) => Promise<World | undefined>;

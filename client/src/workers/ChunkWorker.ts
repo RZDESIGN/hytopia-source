@@ -10,6 +10,7 @@ import {
 import type {
   ChunkWorkerBlocksUpdateMessage,
   ChunkWorkerBlockTypeMessage,
+  ChunkWorkerChunksUpdateMessage,
   ChunkWorkerChunkUpdateMessage,
   ChunkWorkerChunkRemoveMessage,
   ChunkWorkerChunkBatchBuildMessage,
@@ -227,6 +228,14 @@ class ChunkWorker {
         this._lastBlocksUpdateMessage.delete(Chunk.originCoordinateToChunkId(message.originCoordinate));
         break;
 
+      case 'chunks_update':
+        for (let i = 0; i < message.updates.length; i++) {
+          this._lastBlocksUpdateMessage.delete(
+            Chunk.originCoordinateToChunkId(message.updates[i].originCoordinate),
+          );
+        }
+        break;
+
       case 'chunk_remove':
         this._lastBlocksUpdateMessage.delete(message.chunkId);
         break;
@@ -364,6 +373,8 @@ class ChunkWorker {
         return this._onBlocksUpdate(message);
       case 'chunk_batch_build':
         return this._onChunkBatchBuild(message);
+      case 'chunks_update':
+        return this._onChunksUpdate(message);
       case 'chunk_update':
         return this._onChunkUpdate(message);
       case 'chunk_remove':
@@ -522,6 +533,16 @@ class ChunkWorker {
 
     const chunkId = Chunk.originCoordinateToChunkId(message.originCoordinate);
     this._clearNearbyLightSourceCache(chunkId);
+  };
+
+  private _onChunksUpdate = (message: ChunkWorkerChunksUpdateMessage): void => {
+    for (let i = 0; i < message.updates.length; i++) {
+      const update = message.updates[i];
+      this._chunkRegistry.registerChunk(update.originCoordinate, update.blocks, update.blockRotations);
+
+      const chunkId = Chunk.originCoordinateToChunkId(update.originCoordinate);
+      this._clearNearbyLightSourceCache(chunkId);
+    }
   };
 
   private _onChunkRemove = (message: ChunkWorkerChunkRemoveMessage): void => {

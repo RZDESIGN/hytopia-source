@@ -2,11 +2,13 @@ import { ConnectionEvent } from '@/networking/Connection';
 import EventRouter from '@/events/EventRouter';
 import ErrorHandler from '@/errors/ErrorHandler';
 import PersistenceManager from '@/persistence/PersistenceManager';
-import Player from '@/players/Player';
+import Player, { PlayerEvent } from '@/players/Player';
 import WorldManager from '@/worlds/WorldManager';
 import type Connection from '@/networking/Connection';
 import type { Session } from '@/networking/PlatformGateway';
 import type World from '@/worlds/World';
+
+const EMPTY_WORLD_PLAYERS: ReadonlySet<Player> = new Set<Player>();
 
 /**
  * Event types a PlayerManager can emit.
@@ -91,6 +93,9 @@ export default class PlayerManager {
   private _connectionPlayers: Map<Connection, Player> = new Map<Connection, Player>();
 
   /** @internal */
+  private _worldPlayers: Map<World, Set<Player>> = new Map<World, Set<Player>>();
+
+  /** @internal */
   private constructor() {
     EventRouter.globalInstance.on(ConnectionEvent.OPENED, ({ connection, session }) => {
       void this._onConnectionOpened(connection, session);
@@ -138,7 +143,13 @@ export default class PlayerManager {
    * **Category:** Players
    */
   public getConnectedPlayersByWorld(world: World): Player[] {
-    return this.getConnectedPlayers().filter(player => player.world === world);
+    const players = this._worldPlayers.get(world);
+    return players ? Array.from(players) : [];
+  }
+
+  /** @internal */
+  public getConnectedPlayersByWorldSet(world: World): ReadonlySet<Player> {
+    return this._worldPlayers.get(world) ?? EMPTY_WORLD_PLAYERS;
   }
 
   /**
@@ -158,6 +169,8 @@ export default class PlayerManager {
   /** @internal */
   private async _onConnectionOpened(connection: Connection, session: Session | undefined) {
     const player = new Player(connection, session);
+    player.on(PlayerEvent.JOINED_WORLD, this._onPlayerJoinedWorld);
+    player.on(PlayerEvent.LEFT_WORLD, this._onPlayerLeftWorld);
 
     await player.loadInitialPersistedData();
 
@@ -211,4 +224,31 @@ export default class PlayerManager {
       ErrorHandler.warning(`PlayerManager._onConnectionClosed(): Connection ${connection.id} not in the PlayerManager._connectionPlayers map.`);
     }
   }
+
+  /** @internal */
+  private _onPlayerJoinedWorld = ({ player, world }: { player: Player, world: World }) => {
+    let players = this._worldPlayers.get(world);
+
+    if (!players) {
+      players = new Set<Player>();
+      this._worldPlayers.set(world, players);
+    }
+
+    players.add(player);
+  };
+
+  /** @internal */
+  private _onPlayerLeftWorld = ({ player, world }: { player: Player, world: World }) => {
+    const players = this._worldPlayers.get(world);
+
+    if (!players) {
+      return;
+    }
+
+    players.delete(player);
+
+    if (players.size === 0) {
+      this._worldPlayers.delete(world);
+    }
+  };
 }

@@ -39,7 +39,9 @@ import type World from '@/worlds/World';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 
 const DEFAULT_NETWORK_SYNC_RATE = 30;
-const TICKS_PER_NETWORK_SYNC = Math.round(DEFAULT_TICK_RATE / DEFAULT_NETWORK_SYNC_RATE); // eg 60hz / 30hz = 2 tick syncs
+const HIGH_FREQUENCY_NETWORK_SYNC_RATE = DEFAULT_TICK_RATE;
+const HIGH_FREQUENCY_SYNC_MAX_PLAYERS = 8;
+const NETWORK_SYNC_RATE_OVERRIDE = Number(process.env.HYTOPIA_NETWORK_SYNC_RATE);
 const PROTOCOL_ENTITY_SCHEMA = (protocol as unknown as { entitySchema?: { properties?: Record<string, unknown> } }).entitySchema;
 const PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK = Object.prototype.hasOwnProperty.call(
   PROTOCOL_ENTITY_SCHEMA?.properties ?? {},
@@ -100,6 +102,7 @@ export default class NetworkSynchronizer {
   private _loadedSceneUIs: Set<number> = new Set();
   private _spawnedChunks: Set<string> = new Set();
   private _spawnedEntities: Set<number> = new Set();
+  private _syncAccumulator: number = 0;
 
   private _world: World;
   
@@ -131,9 +134,19 @@ export default class NetworkSynchronizer {
    * **Category:** Networking
    */
   public shouldSynchronize(): boolean {
-    // Only synchronize at the defined rate, less than physics step rate
-    // to balance performance & network i/o work.
-    return this._world.loop.currentTick % TICKS_PER_NETWORK_SYNC === 0;
+    // Keep the first world tick responsive so initial joins and world changes
+    // do not wait an extra frame for their first outbound sync.
+    if (this._world.loop.currentTick === 0) {
+      return true;
+    }
+
+    this._syncAccumulator += this._getTargetNetworkSyncRate();
+    if (this._syncAccumulator < DEFAULT_TICK_RATE) {
+      return false;
+    }
+
+    this._syncAccumulator -= DEFAULT_TICK_RATE;
+    return true;
   }
 
   /**
@@ -254,7 +267,7 @@ export default class NetworkSynchronizer {
      * Send packets to players
      */
     Telemetry.startSpan({ operation: TelemetrySpanOperation.SEND_ALL_PACKETS }, () => {
-      for (const player of PlayerManager.instance.getConnectedPlayersByWorld(this._world)) {
+      for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
         const reliablePackets = this._outboundPerPlayerReliablePackets.get(player) ?? this._outboundSharedReliablePackets;
 
         if (reliablePackets.length > 0) {
@@ -1632,7 +1645,7 @@ export default class NetworkSynchronizer {
       return;
     }
 
-    for (const playerEntity of this._world.entityManager.getAllPlayerEntities()) {
+    for (const playerEntity of this._world.entityManager.playerEntities) {
       if (!playerEntity.isSpawned || playerEntity.id === undefined) {
         continue;
       }
@@ -1660,5 +1673,16 @@ export default class NetworkSynchronizer {
       this._queuePlayerEntityOwnerPredictionState(playerEntity, entitySync);
       this._lastSentInputAcknowledgementByPlayer.set(playerEntity.player, acknowledgedInputSequence);
     }
+  }
+
+  private _getTargetNetworkSyncRate(): number {
+    if (Number.isFinite(NETWORK_SYNC_RATE_OVERRIDE) && NETWORK_SYNC_RATE_OVERRIDE > 0) {
+      return Math.min(DEFAULT_TICK_RATE, NETWORK_SYNC_RATE_OVERRIDE);
+    }
+
+    const playerCount = PlayerManager.instance.getConnectedPlayersByWorldSet(this._world).size;
+    return playerCount <= HIGH_FREQUENCY_SYNC_MAX_PLAYERS
+      ? HIGH_FREQUENCY_NETWORK_SYNC_RATE
+      : DEFAULT_NETWORK_SYNC_RATE;
   }
 }

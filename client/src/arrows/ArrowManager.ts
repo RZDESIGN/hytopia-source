@@ -10,6 +10,7 @@ export interface ArrowCreateData {
   sourcePosition?: Vector3Like;
   targetEntityId?: EntityId;
   targetPosition?: Vector3Like;
+  waypoints?: Vector3Like[];
   color?: { r: number, g: number, b: number };
   textureUri?: string;
 }

@@ -31,6 +31,7 @@ export default class SceneUI {
   private _state: object;
   private _templateId: string | undefined;
   private _viewDistance: number;
+  private _warnedMissingAttachedEntity: boolean = false;
 
   public constructor(game: Game, data: SceneUIData) {
     if (data.attachedToEntityId === undefined && data.position === undefined) {
@@ -66,13 +67,18 @@ export default class SceneUI {
     if (this._attachedToEntityId !== undefined) {
       const entity = this._game.entityManager.getEntity(this._attachedToEntityId);
       if (!entity) {
-        console.warn(`SceneUI.update(): Entity ${this._attachedToEntityId} not found.`);
+        if (!this._warnedMissingAttachedEntity) {
+          console.warn(`SceneUI.update(): Entity ${this._attachedToEntityId} not found.`);
+          this._warnedMissingAttachedEntity = true;
+        }
         // It is likely more natural to make the SceneUI invisible when Entity cannot be
         // found. Even if an entity was deleted but somehow the client did not receive
         // SceneUI delete message due to some issue, this approach should also reduce problems.
         this._object.visible = false;
         return;
       }
+
+      this._warnedMissingAttachedEntity = false;
 
       // Synchronize the visibility of the associated Entity's model with the Scene UI,
       // and perform an early return if it is invisible.
@@ -101,14 +107,15 @@ export default class SceneUI {
     
     if (activeCamera) {
       const maxDistance = this._viewDistance;
-      const distance = this._position.distanceTo(activeCamera.position);
+      const maxDistanceSquared = maxDistance * maxDistance;
+      const distanceSquared = this._position.distanceToSquared(activeCamera.position);
       
       // Skip scale and matrix calculation if beyond max distance
-      if (distance >= maxDistance) {
+      if (distanceSquared >= maxDistanceSquared) {
         this._object.visible = false;
         return;
       } else {
-        const scale = 1 - (distance * distance) / (maxDistance * maxDistance);
+        const scale = 1 - distanceSquared / maxDistanceSquared;
         // Use scale3d for GPU compositing instead of scale
         const scaleStr = `scale3d(${scale}, ${scale}, 1)`;
         // Since updating styles can sometimes cause side effects even if the value doesn't change,
@@ -145,6 +152,7 @@ export default class SceneUI {
 
   public setAttachedToEntityId(entityId: number) {
     this._attachedToEntityId = entityId;
+    this._warnedMissingAttachedEntity = false;
   }
 
   public setOffset(offset: Vector3Like) {

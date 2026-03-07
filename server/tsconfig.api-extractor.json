@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@hytopia.com/server-protocol": ["../protocol/dist/index.d.ts"],
+      "@hytopia.com/server-protocol/*": ["../protocol/dist/*"]
+    }
+  }
+}

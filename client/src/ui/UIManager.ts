@@ -34,6 +34,7 @@ export default class UIManager {
   private _game: Game;
   private _sceneUIs: Map<number, SceneUI> = new Map();
   private _pendingSceneUIs: Map<number, DeserializedSceneUI> = new Map();
+  private _sceneUIRefreshRequested: boolean = true;
   private _uiDiv: HTMLDivElement;
   private _uiLoadPromise: Promise<void>;
 
@@ -50,6 +51,16 @@ export default class UIManager {
 
   public get uiDiv(): HTMLDivElement {
     return this._uiDiv;
+  }
+
+  public get sceneUICount(): number {
+    return this._sceneUIs.size;
+  }
+
+  public consumeSceneUIRefreshRequest(): boolean {
+    const requested = this._sceneUIRefreshRequested;
+    this._sceneUIRefreshRequested = false;
+    return requested;
   }
 
   /** Check if any UI element in the event path (before canvas/body) has a click/pointer listener */
@@ -147,7 +158,7 @@ export default class UIManager {
     const { deserializedUI } = payload;
 
     if (deserializedUI.htmlUri) {
-      this._uiLoadPromise = fetch(Assets.toAssetUri(deserializedUI.htmlUri, true))
+      this._uiLoadPromise = fetch(Assets.toAssetUri(deserializedUI.htmlUri, import.meta.env.DEV))
         .then(response => response.text())
         .then(html => {
           // cleanup for any previously loaded UI.
@@ -178,7 +189,7 @@ export default class UIManager {
 
       this._uiLoadPromise = this._uiLoadPromise.then(async () => {
         for (const htmlUri of appendHtmlUris) {
-          const html = await fetch(Assets.toAssetUri(htmlUri, true)).then(response => response.text());
+          const html = await fetch(Assets.toAssetUri(htmlUri, import.meta.env.DEV)).then(response => response.text());
           const wrapper = document.createElement('div');
 
           wrapper.innerHTML = html.replace(/\{\{CDN_ASSETS_URL\}\}/g, Assets.getCdnBaseUrl());
@@ -224,6 +235,7 @@ export default class UIManager {
     if (!sceneUI) {
       if (deserializedSceneUI.removed) {
         this._pendingSceneUIs.delete(deserializedSceneUI.id);
+        this._sceneUIRefreshRequested = true;
         return;
       }
 
@@ -233,12 +245,14 @@ export default class UIManager {
         // we may want to alter Deserializer to check for key in object rather than a bunch of undefined properties
         // which in this case require us to filter them to prevent undefined overwrites.
         Object.assign(pending, Object.fromEntries(Object.entries(deserializedSceneUI).filter(([, v]) => v !== undefined)));
+        this._sceneUIRefreshRequested = true;
         return;
       }
 
       // Queue if template not available yet
       if (deserializedSceneUI.templateId && !hytopia.hasSceneUITemplateRenderer(deserializedSceneUI.templateId)) {
         this._pendingSceneUIs.set(deserializedSceneUI.id, { ...deserializedSceneUI });
+        this._sceneUIRefreshRequested = true;
         return;
       }
 
@@ -265,10 +279,12 @@ export default class UIManager {
       this._sceneUIs.set(sceneUI.id, sceneUI);
 
       sceneUI.addToScene();
+      this._sceneUIRefreshRequested = true;
     } else {
       if (deserializedSceneUI.removed) {
         sceneUI.removeFromScene();
         this._sceneUIs.delete(sceneUI.id);
+        this._sceneUIRefreshRequested = true;
         return;
       }
 
@@ -291,6 +307,8 @@ export default class UIManager {
       if (deserializedSceneUI.viewDistance) {
         sceneUI.setViewDistance(deserializedSceneUI.viewDistance);
       }
+
+      this._sceneUIRefreshRequested = true;
     }
   }
 
@@ -303,34 +321,58 @@ export default class UIManager {
         this._updateSceneUI(pending);
       }
     }
+
+    this._sceneUIRefreshRequested = true;
   }
 
   private async _executeScripts(scripts: HTMLScriptElement[]): Promise<void> {
-    for (const oldScript of scripts) {
-      const newScript = document.createElement('script');
+    const scriptPlans = await Promise.all(scripts.map(async oldScript => {
       const src = oldScript.getAttribute('src');
-      if (src) {
-        try {
-          const url = new URL(src, window.location.href).href;
-          const response = await fetch(url);
-          const text = await response.text();
-          const trimmed = text.trim();
-          if (!response.ok || trimmed.startsWith('<')) {
-            console.warn(`[UIManager] Skipping script (HTML or error response): ${url}`);
-            oldScript.remove();
-            continue;
-          }
-          newScript.textContent = `(function(){${text}})();`;
-        } catch (e) {
-          console.warn(`[UIManager] Failed to load script: ${src}`, e);
-          oldScript.remove();
-          continue;
-        }
-      } else {
-        Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
-        newScript.textContent = `(function(){${oldScript.textContent}})();`;
+
+      if (!src) {
+        return {
+          oldScript,
+          attributes: Array.from(oldScript.attributes).map(attr => [attr.name, attr.value] as const),
+          textContent: `(function(){${oldScript.textContent}})();`,
+          skip: false,
+        };
       }
-      oldScript.parentNode?.replaceChild(newScript, oldScript);
+
+      try {
+        const url = new URL(src, window.location.href).href;
+        const response = await fetch(url);
+        const text = await response.text();
+        const trimmed = text.trim();
+
+        if (!response.ok || trimmed.startsWith('<')) {
+          console.warn(`[UIManager] Skipping script (HTML or error response): ${url}`);
+          return { oldScript, attributes: [] as readonly (readonly [string, string])[], textContent: '', skip: true };
+        }
+
+        return {
+          oldScript,
+          attributes: [] as readonly (readonly [string, string])[],
+          textContent: `(function(){${text}})();`,
+          skip: false,
+        };
+      } catch (e) {
+        console.warn(`[UIManager] Failed to load script: ${src}`, e);
+        return { oldScript, attributes: [] as readonly (readonly [string, string])[], textContent: '', skip: true };
+      }
+    }));
+
+    for (const plan of scriptPlans) {
+      if (plan.skip) {
+        plan.oldScript.remove();
+        continue;
+      }
+
+      const newScript = document.createElement('script');
+      for (const [name, value] of plan.attributes) {
+        newScript.setAttribute(name, value);
+      }
+      newScript.textContent = plan.textContent;
+      plan.oldScript.parentNode?.replaceChild(newScript, plan.oldScript);
     }
   }
 }

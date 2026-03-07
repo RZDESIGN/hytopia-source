@@ -116,11 +116,15 @@ export class HytopiaUI {
    * Creates an arrow between two points or entities.
    * @param source - Source entity ID (number) or position (Vector3Like)
    * @param target - Target entity ID (number) or position (Vector3Like)
-   * @param options - Optional arrow properties (color, textureUrl)
+   * @param options - Optional arrow properties (color, textureUrl, explicit waypoints)
    * @returns The arrow ID
    * @public
    */
-  public connectArrow(source: number | THREE.Vector3Like, target: number | THREE.Vector3Like, options?: { color?: { r: number, g: number, b: number }, textureUri?: string }): number {
+  public connectArrow(
+    source: number | THREE.Vector3Like,
+    target: number | THREE.Vector3Like,
+    options?: { color?: { r: number, g: number, b: number }, textureUri?: string, waypoints?: THREE.Vector3Like[] },
+  ): number {
     const data: ArrowCreateData = {};
 
     if (typeof source === 'number') {
@@ -141,6 +145,10 @@ export class HytopiaUI {
 
     if (options?.textureUri) {
       data.textureUri = options.textureUri;
+    }
+
+    if (options?.waypoints) {
+      data.waypoints = options.waypoints;
     }
 
     return Game.instance.arrowManager.connectArrow(data);

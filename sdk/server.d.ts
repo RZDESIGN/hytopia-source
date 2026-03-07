@@ -1,16 +1,21 @@
-import type { AnyPacket } from '@hytopia.com/server-protocol';
 import type { ErrorEvent as ErrorEvent_2 } from 'ws';
 import EventEmitter from 'eventemitter3';
 import http from 'http';
-import type { InputSchema } from '@hytopia.com/server-protocol';
+import { JSONSchemaType } from 'ajv';
 import type { LobbyMembershipDto } from '@hytopia.com/creative-lib/dist/impl/getSession';
-import protocol from '@hytopia.com/server-protocol';
 import RAPIER from '@dimforge/rapier3d-simd-compat';
 import { SdpMatrix3 } from '@dimforge/rapier3d-simd-compat';
 import * as Sentry from '@sentry/node';
 import type { Socket } from 'net';
+import type { ValidateFunction } from 'ajv';
 import { WebSocket as WebSocket_2 } from 'ws';
 import type { WebTransportSessionImpl } from '@fails-components/webtransport/dist/lib/types';
+
+declare type AnyPacket = IPacket<PacketId, unknown>;
+
+declare type AnyPacketDefinition = IPacketDefinition<number, unknown>;
+
+declare type AnySchema = unknown;
 
 /**
  * Manages the assets library and synchronization of assets
@@ -477,6 +482,36 @@ export declare interface AudioOptions {
     volume?: number;
 }
 
+declare type AudioSchema = {
+    i: number;
+    a?: string;
+    cd?: number;
+    d?: number;
+    de?: number;
+    di?: number;
+    e?: number;
+    l?: boolean;
+    o?: number;
+    p?: VectorSchema;
+    pa?: boolean;
+    pl?: boolean;
+    pr?: number;
+    r?: boolean;
+    rd?: number;
+    s?: number;
+    v?: number;
+};
+
+declare const audioSchema: JSONSchemaType<AudioSchema>;
+
+declare type AudiosPacket = IPacket<typeof PacketId.AUDIOS, AudiosSchema> & [WorldTick];
+
+declare const audiosPacketDefinition: IPacketDefinition<PacketId.AUDIOS, AudiosSchema>;
+
+declare type AudiosSchema = AudioSchema[];
+
+declare const audiosSchema: JSONSchemaType<AudiosSchema>;
+
 /**
  * The options for a ball collider. @public
  *
@@ -862,6 +897,15 @@ export declare interface BaseRigidBodyOptions {
     simulation?: Simulation;
 }
 
+declare namespace bidirectionalPackets {
+    export {
+        ConnectionPacket,
+        connectionPacketDefinition,
+        HeartbeatPacket,
+        heartbeatPacketDefinition
+    }
+}
+
 /**
  * Represents a block in a world.
  *
@@ -1069,6 +1113,22 @@ declare type BlockPlacementEntry = {
  * @public
  */
 export declare type BlockRotation = typeof BLOCK_ROTATIONS[keyof typeof BLOCK_ROTATIONS];
+
+declare type BlockSchema = {
+    i: number;
+    c: VectorSchema;
+    r?: number;
+};
+
+declare const blockSchema: JSONSchemaType<BlockSchema>;
+
+declare type BlocksPacket = IPacket<typeof PacketId.BLOCKS, BlocksSchema> & [WorldTick];
+
+declare const blocksPacketDefinition: IPacketDefinition<PacketId.BLOCKS, BlocksSchema>;
+
+declare type BlocksSchema = BlockSchema[];
+
+declare const blocksSchema: JSONSchemaType<BlocksSchema>;
 
 /**
  * Block texture metadata including UVs and rendering hints.
@@ -1461,6 +1521,52 @@ export declare interface BlockTypeRegistryEventPayloads {
     };
 }
 
+declare type BlockTypeSchema = {
+    i: number;
+    l?: boolean;
+    ll?: number;
+    n?: string;
+    t?: string;
+    ti?: Uint32Array | number[];
+    tv?: Float32Array | number[];
+};
+
+declare const blockTypeSchema: JSONSchemaType<BlockTypeSchema>;
+
+declare type BlockTypesPacket = IPacket<typeof PacketId.BLOCK_TYPES, BlockTypesSchema> & [WorldTick];
+
+declare const blockTypesPacketDefinition: IPacketDefinition<PacketId.BLOCK_TYPES, BlockTypesSchema>;
+
+declare type BlockTypesSchema = BlockTypeSchema[];
+
+declare const blockTypesSchema: JSONSchemaType<BlockTypesSchema>;
+
+declare type CameraPacket = IPacket<typeof PacketId.CAMERA, CameraSchema> & [WorldTick];
+
+declare const cameraPacketDefinition: IPacketDefinition<PacketId.CAMERA, CameraSchema>;
+
+declare type CameraSchema = {
+    cb?: boolean;
+    m?: number;
+    e?: number;
+    et?: number;
+    fo?: number;
+    ffo?: number;
+    fv?: number;
+    h?: string[];
+    mp?: boolean;
+    my?: boolean;
+    o?: VectorSchema;
+    p?: VectorSchema;
+    pt?: VectorSchema;
+    pl?: VectorSchema;
+    s?: string[];
+    sa?: number;
+    z?: number;
+};
+
+declare const cameraSchema: JSONSchemaType<CameraSchema>;
+
 /**
  * The options for a capsule collider. @public
  *
@@ -1642,6 +1748,26 @@ export declare class ChatManager extends EventRouter {
 
 
 }
+
+declare type ChatMessageSchema = {
+    m: string;
+    c?: HexColorSchema;
+    p?: string;
+};
+
+declare const chatMessageSchema: JSONSchemaType<ChatMessageSchema>;
+
+declare type ChatMessageSendPacket = IPacket<typeof PacketId.CHAT_MESSAGE_SEND, ChatMessageSchema>;
+
+declare const chatMessageSendPacketDefinition: IPacketDefinition<PacketId.CHAT_MESSAGE_SEND, ChatMessageSchema>;
+
+declare type ChatMessagesPacket = IPacket<typeof PacketId.CHAT_MESSAGES, ChatMessagesSchema> & [WorldTick];
+
+declare const chatMessagesPacketDefinition: IPacketDefinition<PacketId.CHAT_MESSAGES, ChatMessagesSchema>;
+
+declare type ChatMessagesSchema = ChatMessageSchema[];
+
+declare const chatMessagesSchema: JSONSchemaType<ChatMessagesSchema>;
 
 /**
  * A 16^3 chunk of blocks representing a slice of world terrain.
@@ -1983,6 +2109,23 @@ export declare interface ChunkLatticeEventPayloads {
         blockRotation?: BlockRotation;
     };
 }
+
+declare type ChunkSchema = {
+    c: VectorSchema;
+    b?: Uint8Array | number[];
+    r?: number[];
+    rm?: boolean;
+};
+
+declare const chunkSchema: JSONSchemaType<ChunkSchema>;
+
+declare type ChunksPacket = IPacket<typeof PacketId.CHUNKS, ChunksSchema> & [WorldTick];
+
+declare const chunksPacketDefinition: IPacketDefinition<PacketId.CHUNKS, ChunksSchema>;
+
+declare type ChunksSchema = ChunkSchema[];
+
+declare const chunksSchema: JSONSchemaType<ChunksSchema>;
 
 /**
  * The coefficient for friction or bounciness combine rule. @public
@@ -2613,6 +2756,17 @@ export declare interface ConeColliderOptions extends BaseColliderOptions {
     radius?: number;
 }
 
+declare type ConnectionPacket = IPacket<typeof PacketId.CONNECTION, ConnectionSchema>;
+
+declare const connectionPacketDefinition: IPacketDefinition<PacketId.CONNECTION, ConnectionSchema>;
+
+declare type ConnectionSchema = {
+    i?: string;
+    k?: boolean;
+};
+
+declare const connectionSchema: JSONSchemaType<ConnectionSchema>;
+
 /**
  * Data for contact forces.
  *
@@ -2647,6 +2801,10 @@ export declare type ContactManifold = {
     normal: Vector3Like;
 };
 
+declare function createPacket<TId extends PacketId, TSchema>(packetDef: IPacketDefinition<TId, TSchema>, data: TSchema, worldTick?: WorldTick): IPacket<TId, TSchema>;
+
+declare function createPacketBufferUnframer(onMessage: (message: Uint8Array) => void): (chunk: Uint8Array) => void;
+
 /**
  * The options for a cylinder collider. @public
  *
@@ -2670,6 +2828,16 @@ export declare interface CylinderColliderOptions extends BaseColliderOptions {
      */
     radius?: number;
 }
+
+declare type DebugConfigPacket = IPacket<typeof PacketId.DEBUG_CONFIG, DebugConfigSchema>;
+
+declare const debugConfigPacketDefinition: IPacketDefinition<PacketId.DEBUG_CONFIG, DebugConfigSchema>;
+
+declare type DebugConfigSchema = {
+    pdr?: boolean;
+};
+
+declare const debugConfigSchema: JSONSchemaType<DebugConfigSchema>;
 
 /**
  * A decoded set of collision groups represented as their string equivalents.
@@ -3073,6 +3241,8 @@ export declare type DefaultPlayerEntityOptions = {
     cosmeticHiddenSlots?: PlayerCosmeticSlot[];
 } & PlayerEntityOptions;
 
+declare function definePacket<TId extends PacketId, TSchema>(id: TId, schema: JSONSchemaType<TSchema>): IPacketDefinition<TId, TSchema>;
+
 /**
  * The options for a dynamic rigid body, also the default type. @public
  *
@@ -3168,6 +3338,14 @@ export declare interface DynamicRigidBodyOptions extends BaseRigidBodyOptions {
      */
     softCcdPrediction?: number;
 }
+
+declare type EntitiesPacket = IPacket<typeof PacketId.ENTITIES, EntitiesSchema> & [WorldTick];
+
+declare const entitiesPacketDefinition: IPacketDefinition<PacketId.ENTITIES, EntitiesSchema>;
+
+declare type EntitiesSchema = EntitySchema[];
+
+declare const entitiesSchema: JSONSchemaType<EntitiesSchema>;
 
 /**
  * Represents a dynamic or static object in a world.
@@ -3971,6 +4149,8 @@ export declare class EntityManager {
 
 
 
+
+
     /**
      * The number of spawned entities in the world.
      *
@@ -3983,6 +4163,7 @@ export declare class EntityManager {
      * **Category:** Entities
      */
     get world(): World;
+
 
 
     /**
@@ -4765,6 +4946,39 @@ export declare interface EntityModelNodeOverrideOptions {
  */
 export declare type EntityOptions = BlockEntityOptions | ModelEntityOptions;
 
+declare type EntitySchema = {
+    aq?: number;
+    js?: number;
+    i: number;
+    bh?: VectorSchema;
+    bt?: string;
+    e?: boolean;
+    ec?: RgbColorSchema;
+    ei?: number;
+    m?: string;
+    ma?: ModelAnimationSchema[];
+    mo?: ModelNodeOverrideSchema[];
+    mv?: VectorSchema;
+    mt?: string;
+    n?: string;
+    o?: number;
+    ol?: OutlineSchema;
+    p?: VectorSchema;
+    pe?: number;
+    pf?: number;
+    pi?: number;
+    pn?: string;
+    r?: QuaternionSchema;
+    ri?: number;
+    rm?: boolean;
+    sc?: number;
+    si?: number;
+    sv?: VectorSchema;
+    t?: RgbColorSchema;
+};
+
+declare const entitySchema: JSONSchemaType<EntitySchema>;
+
 /**
  * Manages error and warning logging.
  *
@@ -5044,6 +5258,8 @@ export declare interface FixedRigidBodyOptions extends BaseRigidBodyOptions {
     type: RigidBodyType.FIXED;
 }
 
+declare function framePacketBuffer(buffer: Uint8Array): Uint8Array;
+
 /**
  * Global entry point for server systems (players, worlds, assets).
  *
@@ -5139,6 +5355,85 @@ export declare interface GameServerEventPayloads {
     };
 }
 
+declare type HeartbeatPacket = IPacket<typeof PacketId.HEARTBEAT, HeartbeatSchema>;
+
+declare const heartbeatPacketDefinition: IPacketDefinition<PacketId.HEARTBEAT, null>;
+
+declare type HeartbeatSchema = null;
+
+declare const heartbeatSchema: JSONSchemaType<HeartbeatSchema>;
+
+declare type HexColorSchema = string;
+
+declare const hexColorSchema: JSONSchemaType<HexColorSchema>;
+
+declare namespace inboundPackets {
+    export {
+        ChatMessageSendPacket,
+        chatMessageSendPacketDefinition,
+        DebugConfigPacket,
+        debugConfigPacketDefinition,
+        InputPacket,
+        inputPacketDefinition,
+        StateRequestPacket,
+        stateRequestPacketDefinition,
+        SyncRequestPacket,
+        syncRequestPacketDefinition,
+        UIDataSendPacket,
+        uiDataSendPacketDefinition
+    }
+}
+
+declare type InputPacket = IPacket<typeof PacketId.INPUT, InputSchema>;
+
+declare const inputPacketDefinition: IPacketDefinition<PacketId.INPUT, InputSchema>;
+
+declare type InputSchema = {
+    '1'?: boolean;
+    '2'?: boolean;
+    '3'?: boolean;
+    '4'?: boolean;
+    '5'?: boolean;
+    '6'?: boolean;
+    '7'?: boolean;
+    '8'?: boolean;
+    '9'?: boolean;
+    '0'?: boolean;
+    w?: boolean;
+    a?: boolean;
+    s?: boolean;
+    d?: boolean;
+    q?: boolean;
+    e?: boolean;
+    r?: boolean;
+    f?: boolean;
+    z?: boolean;
+    x?: boolean;
+    c?: boolean;
+    v?: boolean;
+    u?: boolean;
+    i?: boolean;
+    o?: boolean;
+    j?: boolean;
+    k?: boolean;
+    l?: boolean;
+    n?: boolean;
+    m?: boolean;
+    sp?: boolean;
+    sh?: boolean;
+    tb?: boolean;
+    ml?: boolean;
+    mr?: boolean;
+    cp?: number;
+    cy?: number;
+    ird?: VectorSchema;
+    iro?: VectorSchema;
+    jd?: number;
+    sq?: number;
+};
+
+declare const inputSchema: JSONSchemaType<InputSchema>;
+
 /**
  * An intersection result.
  *
@@ -5151,6 +5446,20 @@ export declare type IntersectionResult = {
     /** The entity that was intersected. */
     intersectedEntity?: Entity;
 };
+
+declare type IPacket<TId extends PacketId, TSchema> = [
+TId,
+TSchema,
+WorldTick?
+];
+
+declare interface IPacketDefinition<TId extends PacketId, TSchema> {
+    id: TId;
+    schema: JSONSchemaType<TSchema>;
+    validate: ValidateFunction<TSchema>;
+}
+
+declare function isValidPacket(packet: IPacket<PacketId, unknown>): packet is AnyPacket;
 
 /**
  * A high-performance Map-like data structure optimized for frequent iteration.
@@ -5328,6 +5637,32 @@ export declare interface KinematicVelocityRigidBodyOptions extends BaseRigidBody
      */
     linearVelocity?: Vector3Like;
 }
+
+declare type LightSchema = {
+    i: number;
+    a?: number;
+    e?: number;
+    c?: RgbColorSchema;
+    d?: number;
+    n?: number;
+    o?: VectorSchema;
+    p?: VectorSchema;
+    pe?: number;
+    rm?: boolean;
+    t?: number;
+    te?: number;
+    tp?: VectorSchema;
+};
+
+declare const lightSchema: JSONSchemaType<LightSchema>;
+
+declare type LightsPacket = IPacket<typeof PacketId.LIGHTS, LightsSchema> & [WorldTick];
+
+declare const lightsPacketDefinition: IPacketDefinition<PacketId.LIGHTS, LightsSchema>;
+
+declare type LightsSchema = LightSchema[];
+
+declare const lightsSchema: JSONSchemaType<LightsSchema>;
 
 /**
  * Represents a 2x2 matrix.
@@ -5930,6 +6265,23 @@ export declare class Matrix4 extends Float32Array {
     transpose(): Matrix4;
 }
 
+declare type ModelAnimationSchema = {
+    n: string;
+    b?: number;
+    c?: boolean;
+    fi?: boolean;
+    fo?: boolean;
+    l?: number;
+    p?: boolean;
+    pa?: boolean;
+    pr?: number;
+    r?: boolean;
+    s?: boolean;
+    w?: number;
+};
+
+declare const modelAnimationSchema: JSONSchemaType<ModelAnimationSchema>;
+
 /**
  * A bounding box for a model.
  *
@@ -5966,6 +6318,22 @@ export declare interface ModelEntityOptions extends BaseEntityOptions {
     /** The URI or path to the .gltf model asset to be used for the entity. */
     modelUri?: string;
 }
+
+declare type ModelNodeOverrideSchema = {
+    n: string;
+    ec?: RgbColorSchema;
+    ei?: number;
+    h?: boolean;
+    p?: VectorSchema;
+    pi?: number;
+    r?: QuaternionSchema;
+    ri?: number;
+    rm?: boolean;
+    s?: VectorSchema;
+    si?: number;
+};
+
+declare const modelNodeOverrideSchema: JSONSchemaType<ModelNodeOverrideSchema>;
 
 /**
  * Manages model data for all known models of the game.
@@ -6206,6 +6574,55 @@ export declare interface NoneColliderOptions extends BaseColliderOptions {
     shape: ColliderShape.NONE;
 }
 
+declare type NotificationPermissionRequestPacket = IPacket<typeof PacketId.NOTIFICATION_PERMISSION_REQUEST, NotificationPermissionRequestSchema> & [WorldTick];
+
+declare const notificationPermissionRequestPacketDefinition: IPacketDefinition<PacketId.NOTIFICATION_PERMISSION_REQUEST, null>;
+
+declare type NotificationPermissionRequestSchema = null;
+
+declare const notificationPermissionRequestSchema: JSONSchemaType<NotificationPermissionRequestSchema>;
+
+declare namespace outboundPackets {
+    export {
+        AudiosPacket,
+        audiosPacketDefinition,
+        BlocksPacket,
+        blocksPacketDefinition,
+        BlockTypesPacket,
+        blockTypesPacketDefinition,
+        CameraPacket,
+        cameraPacketDefinition,
+        ChatMessagesPacket,
+        chatMessagesPacketDefinition,
+        ChunksPacket,
+        chunksPacketDefinition,
+        EntitiesPacket,
+        entitiesPacketDefinition,
+        LightsPacket,
+        lightsPacketDefinition,
+        NotificationPermissionRequestPacket,
+        notificationPermissionRequestPacketDefinition,
+        ParticleEmittersPacket,
+        particleEmittersPacketDefinition,
+        PhysicsDebugRenderPacket,
+        physicsDebugRenderPacketDefinition,
+        PhysicsDebugRaycastsPacket,
+        physicsDebugRaycastsPacketDefinition,
+        PlayersPacket,
+        playersPacketDefinition,
+        SceneUIsPacket,
+        sceneUIsPacketDefinition,
+        SyncResponsePacket,
+        syncResponsePacketDefinition,
+        UIPacket,
+        uiPacketDefinition,
+        UIDatasPacket,
+        uiDatasPacketDefinition,
+        WorldPacket,
+        worldPacketDefinition
+    }
+}
+
 /**
  * The options for rendering an outline.
  *
@@ -6223,6 +6640,45 @@ export declare interface Outline {
     opacity?: number;
     /** Whether the outline should be hidden when the entity is occluded by other objects. If false, the outline is always visible (shows through walls). Defaults to true. */
     occluded?: boolean;
+}
+
+declare type OutlineSchema = {
+    c?: RgbColorSchema;
+    ci?: number;
+    th?: number;
+    o?: number;
+    oc?: boolean;
+};
+
+declare const outlineSchema: JSONSchemaType<OutlineSchema>;
+
+declare enum PacketId {
+    SYNC_REQUEST = 0,
+    INPUT = 1,
+    STATE_REQUEST = 2,
+    CHAT_MESSAGE_SEND = 3,
+    UI_DATA_SEND = 4,
+    SYNC_RESPONSE = 32,
+    AUDIOS = 33,
+    BLOCKS = 34,
+    BLOCK_TYPES = 35,
+    CHAT_MESSAGES = 36,
+    CHUNKS = 37,
+    ENTITIES = 38,
+    WORLD = 39,
+    CAMERA = 40,
+    UI = 41,
+    UI_DATAS = 42,
+    SCENE_UIS = 43,
+    LIGHTS = 44,
+    PLAYERS = 45,
+    PARTICLE_EMITTERS = 46,
+    NOTIFICATION_PERMISSION_REQUEST = 47,
+    CONNECTION = 116,
+    HEARTBEAT = 117,
+    DEBUG_CONFIG = 128,
+    PHYSICS_DEBUG_RENDER = 192,
+    PHYSICS_DEBUG_RAYCASTS = 193
 }
 
 /**
@@ -6997,6 +7453,58 @@ export declare interface ParticleEmitterOptions {
  */
 export declare type ParticleEmitterOrientation = 'billboard' | 'billboardY' | 'fixed' | 'velocity';
 
+declare type ParticleEmitterSchema = {
+    i: number;
+    at?: number;
+    b?: number;
+    ce?: RgbColorSchema;
+    cev?: RgbColorSchema;
+    cs?: RgbColorSchema;
+    csv?: RgbColorSchema;
+    cie?: number;
+    ciev?: number;
+    cis?: number;
+    cisv?: number;
+    e?: number;
+    en?: string;
+    g?: VectorSchema;
+    l?: number;
+    le?: boolean;
+    lv?: number;
+    mp?: number;
+    o?: VectorSchema;
+    oe?: number;
+    oev?: number;
+    or?: number;
+    ofr?: VectorSchema;
+    os?: number;
+    osv?: number;
+    p?: VectorSchema;
+    pa?: boolean;
+    pv?: VectorSchema;
+    r?: number;
+    rv?: number;
+    rm?: boolean;
+    se?: number;
+    sev?: number;
+    ss?: number;
+    ssv?: number;
+    t?: boolean;
+    tu?: string;
+    v?: VectorSchema;
+    vv?: VectorSchema;
+};
+
+declare const particleEmitterSchema: JSONSchemaType<ParticleEmitterSchema>;
+
+declare type ParticleEmittersPacket = IPacket<typeof PacketId.PARTICLE_EMITTERS, ParticleEmittersSchema> & [WorldTick];
+
+declare const particleEmittersPacketDefinition: IPacketDefinition<PacketId.PARTICLE_EMITTERS, ParticleEmittersSchema>;
+
+declare type ParticleEmittersSchema = ParticleEmitterSchema[];
+
+declare const particleEmittersSchema: JSONSchemaType<ParticleEmittersSchema>;
+
 /**
  * Callback invoked when pathfinding aborts.
  *
@@ -7270,6 +7778,34 @@ export declare class PersistenceManager {
 
 
 }
+
+declare type PhysicsDebugRaycastSchema = {
+    o: VectorSchema;
+    d: VectorSchema;
+    l: number;
+    h: boolean;
+};
+
+declare const physicsDebugRaycastSchema: JSONSchemaType<PhysicsDebugRaycastSchema>;
+
+declare type PhysicsDebugRaycastsPacket = IPacket<typeof PacketId.PHYSICS_DEBUG_RAYCASTS, PhysicsDebugRaycastsSchema> & [WorldTick];
+
+declare const physicsDebugRaycastsPacketDefinition: IPacketDefinition<PacketId.PHYSICS_DEBUG_RAYCASTS, PhysicsDebugRaycastsSchema>;
+
+declare type PhysicsDebugRaycastsSchema = PhysicsDebugRaycastSchema[];
+
+declare const physicsDebugRaycastsSchema: JSONSchemaType<PhysicsDebugRaycastsSchema>;
+
+declare type PhysicsDebugRenderPacket = IPacket<typeof PacketId.PHYSICS_DEBUG_RENDER, PhysicsDebugRenderSchema> & [WorldTick];
+
+declare const physicsDebugRenderPacketDefinition: IPacketDefinition<PacketId.PHYSICS_DEBUG_RENDER, PhysicsDebugRenderSchema>;
+
+declare type PhysicsDebugRenderSchema = {
+    v: number[];
+    c: number[];
+};
+
+declare const physicsDebugRenderSchema: JSONSchemaType<PhysicsDebugRenderSchema>;
 
 /**
  * A connected player in the game.
@@ -8387,6 +8923,7 @@ export declare class PlayerManager {
     worldSelectionHandler?: (player: Player) => Promise<World | undefined>;
 
 
+
     /**
      * The number of players currently connected to the server.
      *
@@ -8410,6 +8947,7 @@ export declare class PlayerManager {
      * **Category:** Players
      */
     getConnectedPlayersByWorld(world: World): Player[];
+
     /**
      * Get a connected player by their username (case-insensitive).
      *
@@ -8419,6 +8957,8 @@ export declare class PlayerManager {
      * **Category:** Players
      */
     getConnectedPlayerByUsername(username: string): Player | undefined;
+
+
 
 
 
@@ -8460,6 +9000,23 @@ export declare interface PlayerManagerEventPayloads {
         player: Player;
     };
 }
+
+declare type PlayerSchema = {
+    i: string;
+    p?: string;
+    rm?: boolean;
+    u?: string;
+};
+
+declare const playerSchema: JSONSchemaType<PlayerSchema>;
+
+declare type PlayersPacket = IPacket<typeof PacketId.PLAYERS, PlayersSchema> & [WorldTick];
+
+declare const playersPacketDefinition: IPacketDefinition<PacketId.PLAYERS, PlayersSchema>;
+
+declare type PlayersSchema = PlayerSchema[];
+
+declare const playersSchema: JSONSchemaType<PlayersSchema>;
 
 /**
  * The UI for a player.
@@ -8625,6 +9182,168 @@ export declare interface PlayerUIEventPayloads {
         playerUI: PlayerUI;
         data: Record<string, any>;
     };
+}
+
+declare namespace protocol {
+    export {
+        ConnectionPacket,
+        connectionPacketDefinition,
+        HeartbeatPacket,
+        heartbeatPacketDefinition,
+        ChatMessageSendPacket,
+        chatMessageSendPacketDefinition,
+        DebugConfigPacket,
+        debugConfigPacketDefinition,
+        InputPacket,
+        inputPacketDefinition,
+        StateRequestPacket,
+        stateRequestPacketDefinition,
+        SyncRequestPacket,
+        syncRequestPacketDefinition,
+        UIDataSendPacket,
+        uiDataSendPacketDefinition,
+        AudiosPacket,
+        audiosPacketDefinition,
+        BlocksPacket,
+        blocksPacketDefinition,
+        BlockTypesPacket,
+        blockTypesPacketDefinition,
+        CameraPacket,
+        cameraPacketDefinition,
+        ChatMessagesPacket,
+        chatMessagesPacketDefinition,
+        ChunksPacket,
+        chunksPacketDefinition,
+        EntitiesPacket,
+        entitiesPacketDefinition,
+        LightsPacket,
+        lightsPacketDefinition,
+        NotificationPermissionRequestPacket,
+        notificationPermissionRequestPacketDefinition,
+        ParticleEmittersPacket,
+        particleEmittersPacketDefinition,
+        PhysicsDebugRenderPacket,
+        physicsDebugRenderPacketDefinition,
+        PhysicsDebugRaycastsPacket,
+        physicsDebugRaycastsPacketDefinition,
+        PlayersPacket,
+        playersPacketDefinition,
+        SceneUIsPacket,
+        sceneUIsPacketDefinition,
+        SyncResponsePacket,
+        syncResponsePacketDefinition,
+        UIPacket,
+        uiPacketDefinition,
+        UIDatasPacket,
+        uiDatasPacketDefinition,
+        WorldPacket,
+        worldPacketDefinition,
+        createPacket,
+        createPacketBufferUnframer,
+        definePacket,
+        framePacketBuffer,
+        PacketId,
+        IPacketDefinition,
+        WorldTick,
+        IPacket,
+        AnyPacket,
+        AnyPacketDefinition,
+        AnySchema,
+        Serializable,
+        isValidPacket,
+        bidirectionalPackets,
+        inboundPackets,
+        outboundPackets,
+        registeredPackets,
+        AudioSchema,
+        audioSchema,
+        AudiosSchema,
+        audiosSchema,
+        BlockSchema,
+        blockSchema,
+        BlocksSchema,
+        blocksSchema,
+        BlockTypeSchema,
+        blockTypeSchema,
+        BlockTypesSchema,
+        blockTypesSchema,
+        CameraSchema,
+        cameraSchema,
+        ChatMessageSchema,
+        chatMessageSchema,
+        ChatMessagesSchema,
+        chatMessagesSchema,
+        ChunkSchema,
+        chunkSchema,
+        ChunksSchema,
+        chunksSchema,
+        ConnectionSchema,
+        connectionSchema,
+        DebugConfigSchema,
+        debugConfigSchema,
+        EntitySchema,
+        entitySchema,
+        EntitiesSchema,
+        entitiesSchema,
+        HeartbeatSchema,
+        heartbeatSchema,
+        HexColorSchema,
+        hexColorSchema,
+        InputSchema,
+        inputSchema,
+        LightSchema,
+        lightSchema,
+        LightsSchema,
+        lightsSchema,
+        ModelAnimationSchema,
+        modelAnimationSchema,
+        ModelNodeOverrideSchema,
+        modelNodeOverrideSchema,
+        NotificationPermissionRequestSchema,
+        notificationPermissionRequestSchema,
+        OutlineSchema,
+        outlineSchema,
+        ParticleEmitterSchema,
+        particleEmitterSchema,
+        ParticleEmittersSchema,
+        particleEmittersSchema,
+        PhysicsDebugRaycastSchema,
+        physicsDebugRaycastSchema,
+        PhysicsDebugRaycastsSchema,
+        physicsDebugRaycastsSchema,
+        PhysicsDebugRenderSchema,
+        physicsDebugRenderSchema,
+        PlayerSchema,
+        playerSchema,
+        PlayersSchema,
+        playersSchema,
+        QuaternionSchema,
+        quaternionSchema,
+        RgbColorSchema,
+        rgbColorSchema,
+        SceneUISchema,
+        sceneUISchema,
+        SceneUIsSchema,
+        sceneUIsSchema,
+        StateRequestSchema,
+        stateRequestSchema,
+        SyncRequestSchema,
+        syncRequestSchema,
+        SyncResponseSchema,
+        syncResponseSchema,
+        UISchema,
+        uiSchema,
+        UIDataSchema,
+        uiDataSchema,
+        UIDatasSchema,
+        uiDatasSchema,
+        VectorSchema,
+        vectorSchema,
+        VectorBooleanSchema,
+        vectorBooleanSchema,
+        WorldSchema,
+        worldSchema
+    }
 }
 
 /**
@@ -8858,6 +9577,15 @@ export declare interface QuaternionLike {
     w: number;
 }
 
+declare type QuaternionSchema = [
+number,
+number,
+number,
+number
+];
+
+declare const quaternionSchema: JSONSchemaType<QuaternionSchema>;
+
 /**
  * A raw collider object from the Rapier physics engine. @public
  *
@@ -8915,6 +9643,8 @@ export declare type RaycastOptions = {
     solidMode?: boolean;
 } & FilterOptions;
 
+declare const registeredPackets: Map<PacketId, AnyPacketDefinition>;
+
 /**
  * An RGB color. `r`, `g`, and `b` expect a value between 0 and 255.
  *
@@ -8926,6 +9656,14 @@ export declare interface RgbColor {
     g: number;
     b: number;
 }
+
+declare type RgbColorSchema = [
+number,
+number,
+number
+];
+
+declare const rgbColorSchema: JSONSchemaType<RgbColorSchema>;
 
 /**
  * Represents a rigid body in a world's physics simulation.
@@ -9928,6 +10666,31 @@ export declare interface SceneUIOptions {
     viewDistance?: number;
 }
 
+declare type SceneUISchema = {
+    i: number;
+    e?: number;
+    o?: VectorSchema;
+    p?: VectorSchema;
+    rm?: boolean;
+    s?: object;
+    t?: string;
+    v?: number;
+};
+
+declare const sceneUISchema: JSONSchemaType<SceneUISchema>;
+
+declare type SceneUIsPacket = IPacket<typeof PacketId.SCENE_UIS, SceneUIsSchema> & [WorldTick];
+
+declare const sceneUIsPacketDefinition: IPacketDefinition<PacketId.SCENE_UIS, SceneUIsSchema>;
+
+declare type SceneUIsSchema = SceneUISchema[];
+
+declare const sceneUIsSchema: JSONSchemaType<SceneUIsSchema>;
+
+declare interface Serializable {
+    serialize(): AnySchema;
+}
+
 /**
  * A simple entity controller with basic movement functions.
  *
@@ -10366,6 +11129,14 @@ export declare interface SpdMatrix3 extends SdpMatrix3 {
  */
 export declare function startServer(init: ((() => void | Promise<void>) | ((world: World) => void | Promise<void>))): void;
 
+declare type StateRequestPacket = IPacket<typeof PacketId.STATE_REQUEST, StateRequestSchema>;
+
+declare const stateRequestPacketDefinition: IPacketDefinition<PacketId.STATE_REQUEST, StateRequestSchema>;
+
+declare type StateRequestSchema = {};
+
+declare const stateRequestSchema: JSONSchemaType<StateRequestSchema>;
+
 /**
  * The inputs that are included in `PlayerInput`.
  *
@@ -10373,6 +11144,27 @@ export declare function startServer(init: ((() => void | Promise<void>) | ((worl
  * @public
  */
 export declare const SUPPORTED_INPUTS: readonly ["w", "a", "s", "d", "sp", "sh", "tb", "ml", "mr", "q", "e", "r", "f", "z", "x", "c", "v", "u", "i", "o", "j", "k", "l", "n", "m", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "cp", "cy", "iro", "ird", "jd"];
+
+declare type SyncRequestPacket = IPacket<typeof PacketId.SYNC_REQUEST, SyncRequestSchema>;
+
+declare const syncRequestPacketDefinition: IPacketDefinition<PacketId.SYNC_REQUEST, null>;
+
+declare type SyncRequestSchema = null;
+
+declare const syncRequestSchema: JSONSchemaType<SyncRequestSchema>;
+
+declare type SyncResponsePacket = IPacket<typeof PacketId.SYNC_RESPONSE, SyncResponseSchema> & [WorldTick];
+
+declare const syncResponsePacketDefinition: IPacketDefinition<PacketId.SYNC_RESPONSE, SyncResponseSchema>;
+
+declare type SyncResponseSchema = {
+    r: number;
+    s: number;
+    p: number;
+    n: number;
+};
+
+declare const syncResponseSchema: JSONSchemaType<SyncResponseSchema>;
 
 /**
  * Manages performance telemetry and error tracking through your Sentry account.
@@ -10548,6 +11340,37 @@ export declare interface TrimeshColliderOptions extends BaseColliderOptions {
      */
     vertices?: Float32Array;
 }
+
+declare type UIDataSchema = {
+    [key: string]: any;
+};
+
+declare const uiDataSchema: JSONSchemaType<UIDataSchema>;
+
+declare type UIDataSendPacket = IPacket<typeof PacketId.UI_DATA_SEND, UIDataSchema>;
+
+declare const uiDataSendPacketDefinition: IPacketDefinition<PacketId.UI_DATA_SEND, UIDataSchema>;
+
+declare type UIDatasPacket = IPacket<typeof PacketId.UI_DATAS, UIDatasSchema> & [WorldTick];
+
+declare const uiDatasPacketDefinition: IPacketDefinition<PacketId.UI_DATAS, UIDatasSchema>;
+
+declare type UIDatasSchema = UIDataSchema[];
+
+declare const uiDatasSchema: JSONSchemaType<UIDatasSchema>;
+
+declare type UIPacket = IPacket<typeof PacketId.UI, UISchema> & [WorldTick];
+
+declare const uiPacketDefinition: IPacketDefinition<PacketId.UI, UISchema>;
+
+declare type UISchema = {
+    p?: boolean;
+    pf?: boolean;
+    u?: string;
+    ua?: string[];
+};
+
+declare const uiSchema: JSONSchemaType<UISchema>;
 
 /**
  * Represents a 2D vector.
@@ -11096,6 +11919,22 @@ export declare interface Vector3Like {
     y: number;
     z: number;
 }
+
+declare type VectorBooleanSchema = [
+boolean,
+boolean,
+boolean
+];
+
+declare const vectorBooleanSchema: JSONSchemaType<VectorBooleanSchema>;
+
+declare type VectorSchema = [
+number,
+number,
+number
+];
+
+declare const vectorSchema: JSONSchemaType<VectorSchema>;
 
 /**
  * The options for a voxels collider. @public
@@ -11932,5 +12771,29 @@ export declare interface WorldOptions {
     /** The gravity vector for the world. */
     gravity?: Vector3Like;
 }
+
+declare type WorldPacket = IPacket<typeof PacketId.WORLD, WorldSchema> & [WorldTick];
+
+declare const worldPacketDefinition: IPacketDefinition<PacketId.WORLD, WorldSchema>;
+
+declare type WorldSchema = {
+    i: number;
+    ac?: RgbColorSchema;
+    ai?: number;
+    dc?: RgbColorSchema;
+    di?: number;
+    dp?: VectorSchema;
+    fc?: RgbColorSchema;
+    ff?: number;
+    fn?: number;
+    n?: string;
+    s?: string;
+    si?: number;
+    t?: number;
+};
+
+declare const worldSchema: JSONSchemaType<WorldSchema>;
+
+declare type WorldTick = number;
 
 export { }

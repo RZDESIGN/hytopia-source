@@ -64,6 +64,7 @@ export type ToChunkWorkerMessageCore = {
     'block_type_update' |
     'blocks_update' |
     'chunk_batch_build' |
+    'chunks_update' |
     'chunk_update' |
     'chunk_remove' |
     'init'
@@ -103,6 +104,15 @@ export type ChunkWorkerChunkUpdateMessage = ToChunkWorkerMessageCore & {
   blockRotations?: number[];
 };
 
+export type ChunkWorkerChunksUpdateMessage = ToChunkWorkerMessageCore & {
+  type: 'chunks_update';
+  updates: {
+    originCoordinate: Vector3Like;
+    blocks: Uint8Array;
+    blockRotations?: number[];
+  }[];
+};
+
 export type ChunkWorkerChunkRemoveMessage = ToChunkWorkerMessageCore & {
   type: 'chunk_remove';
   chunkId: ChunkId;
@@ -126,6 +136,7 @@ export type ToChunkWorkerMessage =
   ChunkWorkerBlockTypeUpdateMessage |
   ChunkWorkerBlocksUpdateMessage |
   ChunkWorkerChunkBatchBuildMessage |
+  ChunkWorkerChunksUpdateMessage |
   ChunkWorkerChunkUpdateMessage |
   ChunkWorkerChunkRemoveMessage |
   ChunkWorkerBlockEntityBuildMessage |

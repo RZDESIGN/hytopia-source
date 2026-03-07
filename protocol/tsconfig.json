@@ -4,11 +4,29 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "ajv": ["../server/node_modules/ajv"]
+    },
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./dist",
+    "rootDir": ".",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "types": ["node"],
     "strict": true,
     "noImplicitReturns": true,
     "noImplicitAny": true,
     "noImplicitThis": true,
     "strictNullChecks": true,
   },
-  "include": ["packets/**/*.ts", "schemas/**/*.json", "shared/**/*.ts"]
+  "include": [
+    "index.ts",
+    "exports.ts",
+    "packets/**/*.ts",
+    "schemas/**/*.ts",
+    "shared/**/*.ts"
+  ]
 }

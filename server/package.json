@@ -6,12 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon -q --watch src --ext ts,json --ignore src/playground.mjs -x \"npm run build:playground && node src/playground.mjs\"",
-    "build": "npm run build:server && npm run build:declaration && npm run build:api && npm run build:docs",
+    "build": "npm run build:server && npm run build:declaration && npm run build:protocol && npm run build:api && npm run build:docs",
     "build:playground": "bun build src/playground.ts --minify --legal-comments=inline --target=node --format=esm --sourcemap=none --outfile=./src/playground.mjs --env=disable --external=@fails-components/webtransport --external=@fails-components/webtransport-transport-http3-quiche",
     "build:server": "bun build src/index.ts --minify --legal-comments=inline --target=node --format=esm --sourcemap=none --outfile=../sdk/server.mjs --env=disable --external=@fails-components/webtransport --external=@fails-components/webtransport-transport-http3-quiche",
-    "build:declaration": "tsc --emitDeclarationOnly --project tsconfig.json || true && tsc-alias",
+    "build:declaration": "tsc --emitDeclarationOnly --project tsconfig.json && tsc-alias",
+    "build:protocol": "tsc --project ../protocol/tsconfig.json",
     "build:docs": "npx api-documenter markdown --input-folder=../sdk --output-folder ../sdk/docs",
-    "build:api": "npx api-extractor run --local || true",
+    "build:api": "npx api-extractor run --local",
     "format": "npx eslint --fix ./src"
   },
   "devDependencies": {

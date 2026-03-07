@@ -43,8 +43,16 @@ export default class AudioManager {
   }
 
   private _onAudiosPacket = (payload: NetworkManagerEventPayload.IAudiosPacket): void => {
+    if (payload.deserializedAudios.length > 0) {
+      this._cleanupIfNeeded();
+    }
+
     for (const deserializedAudio of payload.deserializedAudios) {
       this._updateAudio(deserializedAudio);
+    }
+
+    if (payload.deserializedAudios.length > 0) {
+      this._cleanupIfNeeded();
     }
   }
 
@@ -56,8 +64,6 @@ export default class AudioManager {
 
       return console.warn(`AudioManager._updateAudio(): Audio ${deserializedAudio.id} not updated, missing id field.`);
     }
-
-    this._cleanupIfNeeded();
 
     const audioId = deserializedAudio.id;
     let audio = this._audios.get(audioId);
@@ -76,27 +82,27 @@ export default class AudioManager {
       this._audios.set(audioId, audio);
     }
 
-    if (deserializedAudio.attachedToEntityId) {
+    if (deserializedAudio.attachedToEntityId !== undefined) {
       audio.setAttachedToEntityId(deserializedAudio.attachedToEntityId);
     }
 
-    if (deserializedAudio.position) {
+    if (deserializedAudio.position !== undefined) {
       audio.setPosition(deserializedAudio.position);
     }
 
-    if (deserializedAudio.volume) {
+    if (deserializedAudio.volume !== undefined) {
       audio.setVolume(deserializedAudio.volume);
     }
 
-    if (deserializedAudio.playbackRate) {
+    if (deserializedAudio.playbackRate !== undefined) {
       audio.setPlaybackRate(deserializedAudio.playbackRate);
     }
 
-    if (deserializedAudio.detune) {
+    if (deserializedAudio.detune !== undefined) {
       audio.setDetune(deserializedAudio.detune);
     }
 
-    if (deserializedAudio.offset) {
+    if (deserializedAudio.offset !== undefined) {
       audio.setOffset(deserializedAudio.offset);
     }
 
@@ -104,15 +110,15 @@ export default class AudioManager {
       audio.setDistortion(deserializedAudio.distortion);
     }
 
-    if (deserializedAudio.cutoffDistance) {
+    if (deserializedAudio.cutoffDistance !== undefined) {
       audio.setCutoffDistance(deserializedAudio.cutoffDistance);
     }
 
-    if (deserializedAudio.referenceDistance) {
+    if (deserializedAudio.referenceDistance !== undefined) {
       audio.setReferenceDistance(deserializedAudio.referenceDistance);
     }
 
-    if (deserializedAudio.startTick) {
+    if (deserializedAudio.startTick !== undefined) {
       audio.setStartTick(deserializedAudio.startTick);
     }
 

@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import protocol from '@hytopia.com/server-protocol';
 
+const toUint8Array = (value: Uint8Array | number[]): Uint8Array =>
+  value instanceof Uint8Array ? value : new Uint8Array(value);
+const toUint32Array = (value: Uint32Array | number[]): Uint32Array =>
+  value instanceof Uint32Array ? value : new Uint32Array(value);
+const toFloat32Array = (value: Float32Array | number[]): Float32Array =>
+  value instanceof Float32Array ? value : new Float32Array(value);
+
 export type DeserializedAudio = {
   id?: number;
   attachedToEntityId?: number;
@@ -334,8 +341,8 @@ export default class Deserializer {
       name: blockType.n,
       textureUri: blockType.t,
       lightLevel: blockType.ll,
-      trimeshIndices: blockType.ti ? new Uint32Array(blockType.ti) : undefined,
-      trimeshVertices: blockType.tv ? new Float32Array(blockType.tv) : undefined,
+      trimeshIndices: blockType.ti ? toUint32Array(blockType.ti) : undefined,
+      trimeshVertices: blockType.tv ? toFloat32Array(blockType.tv) : undefined,
     };
   }
 
@@ -392,7 +399,7 @@ export default class Deserializer {
   public static deserializeChunk(chunk: protocol.ChunkSchema): DeserializedChunk {
     return {
       originCoordinate: this.deserializeVector(chunk.c),
-      blocks: chunk.b ? new Uint8Array(chunk.b) : undefined,
+      blocks: chunk.b ? toUint8Array(chunk.b) : undefined,
       blockRotations: chunk.r,
       removed: chunk.rm,
     }
@@ -604,8 +611,8 @@ export default class Deserializer {
 
   public static deserializePhysicsDebugRender(physicsDebugRender: protocol.PhysicsDebugRenderSchema): DeserializedPhysicsDebugRender {
     return {
-      vertices: new Float32Array(physicsDebugRender.v),
-      colors: new Float32Array(physicsDebugRender.c),
+      vertices: toFloat32Array(physicsDebugRender.v),
+      colors: toFloat32Array(physicsDebugRender.c),
     }
   }
 

@@ -338,7 +338,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -5519,7 +5519,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -6412,7 +6412,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -7410,7 +7410,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -15046,7 +15046,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -19492,7 +19492,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -21672,7 +21672,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -32927,7 +32927,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -40686,7 +40686,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -41472,7 +41472,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -45572,7 +45572,7 @@
             {
               "kind": "Reference",
               "text": "InputSchema",
-              "canonicalReference": "@hytopia.com/server-protocol!InputSchema:type"
+              "canonicalReference": "server!~InputSchema:type"
             },
             {
               "kind": "Content",
@@ -52370,7 +52370,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",
@@ -60539,7 +60539,7 @@
             {
               "kind": "Reference",
               "text": "protocol.Serializable",
-              "canonicalReference": "@hytopia.com/server-protocol!Serializable:interface"
+              "canonicalReference": "server!~Serializable:interface"
             },
             {
               "kind": "Content",

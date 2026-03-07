@@ -232,9 +232,9 @@ export default class NetworkManager {
   }
 
   public sendPacket(packet: protocol.AnyPacket, reliable: boolean = true): void {
-    // Convert to a plain Uint8Array to avoid Buffer<ArrayBufferLike> type drift
-    // with newer TypeScript/lib-dom stream writer typings.
-    const serializedPacket = Uint8Array.from(packr.pack(packet));
+    // msgpackr already returns a Uint8Array-compatible buffer in the browser.
+    // Reuse it directly to avoid an extra copy on every send.
+    const serializedPacket = packr.pack(packet) as Uint8Array;
     this._networkConditionSimulator.schedule('outgoing', reliable, () => {
       this._sendSerializedPacket(serializedPacket, reliable);
     });
@@ -252,7 +252,7 @@ export default class NetworkManager {
           this._wtReliablePacketQueue.shift();
         }
 
-        this._wtReliablePacketQueue.push(Uint8Array.from(protocol.framePacketBuffer(serializedPacket)));
+        this._wtReliablePacketQueue.push(protocol.framePacketBuffer(serializedPacket));
 
         if (this._wtReliablePacketQueueProcessing) return;
 
@@ -414,7 +414,7 @@ export default class NetworkManager {
 
     // Handle encoding byte and decompression
     if (this._isGzip(dataUint8Array)) {
-      dataUint8Array = new Uint8Array(gunzipSync(dataUint8Array));
+      dataUint8Array = gunzipSync(dataUint8Array);
     }
 
     // Msgpackr Decode

@@ -46,6 +46,11 @@ const MISSING_SKYBOX_TEXTURE_PATH = '/textures/missing-skybox';
 // area is smaller and usually falls below this budget.
 const MAX_RENDER_TARGET_PIXELS = 2560 * 1440;
 const MIN_RENDER_PIXEL_RATIO = 0.5;
+const SCENE_UI_LIGHT_LOAD_MAX = 4;
+const SCENE_UI_MEDIUM_LOAD_MAX = 12;
+const SCENE_UI_LIGHT_RENDER_INTERVAL_S = 1 / 60;
+const SCENE_UI_MEDIUM_RENDER_INTERVAL_S = 1 / 30;
+const SCENE_UI_HEAVY_RENDER_INTERVAL_S = 1 / 20;
 
 // Working variables
 const color = new Color();
@@ -144,6 +149,7 @@ export default class Renderer {
   private _smaaPass: SMAAPass;
   private _bloomPass: WhiteCoreBloomPass;
   private _outputPass: OutputPass;
+  private _sceneUIRenderCooldownRemainingS: number = 0;
 
   public constructor(game: Game) {
     this._game = game;
@@ -308,6 +314,7 @@ export default class Renderer {
     this._game.settingsManager.update();
 
     const frameDeltaS = this._game.performanceMetricsManager.deltaTime;
+    this._game.inputManager.update(frameDeltaS);
 
     this._updateFog(frameDeltaS);
 
@@ -315,26 +322,24 @@ export default class Renderer {
 
     this._game.arrowManager.update(frameDeltaS);
     this._game.blockMaterialManager.update();
-    this._game.inputManager.update(frameDeltaS);
     this._game.camera.update(frameDeltaS);
     this._game.audioManager.update();
     this._updateSkybox(frameDeltaS);
 
     this._game.gltfManager.update();
-    this._game.uiManager.update();
+    this._updateSceneUI(frameDeltaS);
 
     this._applyUnderWaterEffect();
     this._syncFirstPersonViewModelEntity();
-
-    this._sceneUiRenderer.render(this._uiScene, this._game.camera.activeCamera);
 
     this._renderer.info.reset();
     const pp = this._game.settingsManager.qualityPerfTradeoff.postProcessing;
     if (pp?.outline || pp?.bloom || pp?.smaa) {
       const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
       this._renderPass.camera = this._game.camera.activeCamera;
-      this._viewModelRenderPass.camera = this._game.camera.activeCamera;
-      this._viewModelRenderPass.enabled = this._firstPersonViewModelEntity !== undefined;
+      // Keep the first-person view model out of the full-screen post stack so
+      // weapon/hand motion does not pay for bloom/SMAA passes every frame.
+      this._viewModelRenderPass.enabled = false;
       this._outlinePass.enabled = !!pp.outline;
       this._bloomPass.enabled = !!pp.bloom;
       this._smaaPass.enabled = !!pp.smaa;
@@ -349,6 +354,7 @@ export default class Renderer {
         this._game.entityManager.clearOutlineTargets();
         this._outlinePass.clearOutlineTargets();
       }
+      this._renderFirstPersonViewModel();
     } else {
       this._renderer.render(this._scene, this._game.camera.activeCamera);
       this._renderFirstPersonViewModel();
@@ -618,6 +624,40 @@ export default class Renderer {
     this._renderer.autoClear = false;
     this._renderer.render(this._overlayScene, this._game.camera.activeCamera);
     this._renderer.autoClear = autoClear;
+  }
+
+  private _updateSceneUI(frameDeltaS: number): void {
+    const uiManager = this._game.uiManager;
+    const sceneUICount = uiManager.sceneUICount;
+
+    if (sceneUICount === 0) {
+      this._sceneUIRenderCooldownRemainingS = 0;
+      return;
+    }
+
+    const forceRender = uiManager.consumeSceneUIRefreshRequest();
+    if (!forceRender) {
+      this._sceneUIRenderCooldownRemainingS = Math.max(0, this._sceneUIRenderCooldownRemainingS - frameDeltaS);
+      if (this._sceneUIRenderCooldownRemainingS > 0) {
+        return;
+      }
+    }
+
+    uiManager.update();
+    this._sceneUiRenderer.render(this._uiScene, this._game.camera.activeCamera);
+    this._sceneUIRenderCooldownRemainingS = this._getSceneUIRenderInterval(sceneUICount);
+  }
+
+  private _getSceneUIRenderInterval(sceneUICount: number): number {
+    if (sceneUICount <= SCENE_UI_LIGHT_LOAD_MAX) {
+      return SCENE_UI_LIGHT_RENDER_INTERVAL_S;
+    }
+
+    if (sceneUICount <= SCENE_UI_MEDIUM_LOAD_MAX) {
+      return SCENE_UI_MEDIUM_RENDER_INTERVAL_S;
+    }
+
+    return SCENE_UI_HEAVY_RENDER_INTERVAL_S;
   }
 
   private _setupRenderer(): void {

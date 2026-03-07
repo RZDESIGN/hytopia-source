@@ -8,6 +8,7 @@ const TRANSCODER_PATH = '/basis/';
 Cache.enabled = true;
 
 const ErrorCache: Map<string, Promise<boolean>> = new Map();
+const EffectiveGLTFUriCache: Map<string, Promise<string>> = new Map();
 
 export default class Assets {
   public static readonly audioLoader: AudioLoader = new AudioLoader();
@@ -66,33 +67,54 @@ export default class Assets {
   // that does not merge named Nodes and Meshes. Since this version is less optimized,
   // it should only be used when necessary.
   public static async getEffectiveGLTFlUri(uri: string, namedNodes?: boolean, noAnimations?: boolean): Promise<string> {
-    const suffix = namedNodes ? '-named-nodes' : 
-                   noAnimations ? '-no-animations' : '';
-    
-    // Check .optimized models in priority order.
-    // We check for .glb version first which is preferred optimized version.
-    // If it doesn't exist, such as for an old sdk, fallback to optimized .gltf version.
-    const candidateUris = [
-      uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.glb`), // Prefer target suffix type and .glb
-      uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.$2`),  // Fallback to target suffix type and original extension
-    ];
+    const suffix = namedNodes ? '-named-nodes' :
+      noAnimations ? '-no-animations' : '';
+    const cacheKey = `${uri}|${suffix}`;
+    let pendingEffectiveUri = EffectiveGLTFUriCache.get(cacheKey);
 
-    // We need these fallbacks below such as if a SDK doesn't support a specific suffix optimization
-    // or is missing it all together, we should fallback to the next most optimized model which
-    // is the base .optimized model.
-    if (suffix === '-no-animations') {
-      candidateUris.push(uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.glb`)); // Fallback to base model and .glb
-      candidateUris.push(uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.$2`)); // Fallback to base model and original extension
+    if (!pendingEffectiveUri) {
+      pendingEffectiveUri = (async () => {
+        // Check .optimized models in priority order.
+        // We check .glb first as the preferred optimized format, then fall back
+        // to the original extension if needed.
+        const candidateUris = [
+          uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.glb`),
+          uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.$2`),
+        ];
+
+        // Some SDKs may only have the base optimized model available.
+        if (suffix === '-no-animations') {
+          candidateUris.push(uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.glb`));
+          candidateUris.push(uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.$2`));
+        }
+
+        const candidateExists = await Promise.all(candidateUris.map(async candidateUri => {
+          try {
+            return await Assets.urlExists(candidateUri);
+          } catch {
+            return false;
+          }
+        }));
+
+        for (let i = 0; i < candidateUris.length; i++) {
+          if (candidateExists[i]) {
+            return candidateUris[i];
+          }
+        }
+
+        // Return unoptimized uri if no optimized candidate exists.
+        return uri;
+      })();
+
+      EffectiveGLTFUriCache.set(cacheKey, pendingEffectiveUri);
     }
 
-    for (const candidateUri of candidateUris) {
-      if (await Assets.urlExists(candidateUri)) {
-        return candidateUri;
-      }
+    try {
+      return await pendingEffectiveUri;
+    } catch (error) {
+      EffectiveGLTFUriCache.delete(cacheKey);
+      throw error;
     }
-
-    // Return unoptimized uri if no optimized candidate exists.
-    return uri;
   }
 
   public static async urlExists(url: string): Promise<boolean> {
@@ -100,14 +122,15 @@ export default class Assets {
       ErrorCache.set(url, new Promise(async (resolve, reject) => {
         try {
           // TODO: Is there a way to suppress the console error log?
-          const res = await fetch(url, { method: 'head' });
+          const res = await fetch(url, { method: 'HEAD' });
           if (res.ok) {
             resolve(true);
           } else {
             // We check 403 as well, since the cosmetics CDN returns a 403 for non-existent files
-            resolve(res.status !== 404 && res.status !== 403); 
+            resolve(res.status !== 404 && res.status !== 403);
           }
         } catch (e) {
+          ErrorCache.delete(url);
           reject(e);
         }
       }));
