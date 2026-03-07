@@ -1390,17 +1390,22 @@ export default class Entity extends RigidBody implements protocol.Serializable {
   }
 
   /**
-   * Stops all model animations for the entity, optionally excluding the provided animations from stopping.
+   * Stops all model animations for the entity, optionally excluding specific animations from stopping.
    *
-   * @param exclusionFilter - The filter to determine if a model animation should be excluded from being stopped.
+   * @param exclusionFilter - Either a filter function or a list of animation names to exclude.
    *
    * **Side effects:** May emit `EntityModelAnimationEvent.STOP` for each stopped animation.
    *
    * **Category:** Entities
    */
-  public stopAllModelAnimations(exclusionFilter?: (modelAnimation: Readonly<EntityModelAnimation>) => boolean) {
+  public stopAllModelAnimations(
+    exclusionFilter?: ((modelAnimation: Readonly<EntityModelAnimation>) => boolean) | readonly string[],
+  ) {
+    const exclusionNames = Array.isArray(exclusionFilter) ? new Set(exclusionFilter) : undefined;
+
     for (const modelAnimation of this._modelAnimations.values()) {
-      if (exclusionFilter?.(modelAnimation)) continue;
+      if (exclusionNames?.has(modelAnimation.name)) continue;
+      if (typeof exclusionFilter === 'function' && exclusionFilter(modelAnimation)) continue;
       modelAnimation.stop();
     }
   }

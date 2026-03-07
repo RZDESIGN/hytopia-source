@@ -196,7 +196,10 @@ export default class WorldLoop extends EventRouter {
 
   /** @internal */
   private _onTickError = (error: Error) => {
-    ErrorHandler.error(`WorldLoop._onTickError(): Error: ${error}`);
+    ErrorHandler.error(
+      `WorldLoop._onTickError(): Error: ${error}`,
+      error.stack,
+    );
 
     this.emitWithWorld(this._world, WorldLoopEvent.TICK_ERROR, {
       worldLoop: this,
