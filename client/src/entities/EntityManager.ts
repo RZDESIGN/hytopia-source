@@ -55,8 +55,9 @@ const LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY = 2;
 const LOCAL_PREDICTION_MIN_SPEED = 0.2;
 const LOCAL_PREDICTION_MAX_SPEED = 20;
 const LOCAL_PREDICTION_SPEED_REJECT_THRESHOLD = 30;
-const LOCAL_PREDICTION_SPEED_ADAPT_RATE = 0.2;
-const LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT = 0.6;
+const LOCAL_PREDICTION_SPEED_UPWARD_ADAPT_RATE = 0.2;
+const LOCAL_PREDICTION_SPEED_DOWNWARD_ADAPT_RATE = 0.05;
+const LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT = 0.85;
 const LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD = 1.5;
 const LOCAL_PREDICTION_MAX_FRAME_DELTA_S = 1 / 10;
 const LOCAL_PREDICTION_SUBSTEP_DELTA_S = 1 / 60;
@@ -65,11 +66,13 @@ const LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S = 1 / 8;
 const LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND = 12;
 const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.18 * 0.18;
 const LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.08 * 0.08;
+const LOCAL_PREDICTION_ACTIVE_INPUT_HORIZONTAL_RECONCILE_TOLERANCE_SQ = 0.55 * 0.55;
 const LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ = 2.5 * 2.5;
 const LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE = 10;
 const LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE = 16;
 const LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE = 0.03;
 const LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE = 0.01;
+const LOCAL_PREDICTION_ACTIVE_INPUT_VERTICAL_RECONCILE_TOLERANCE = 0.35;
 const LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE = 2.5;
 const LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE = 18;
 const LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE = 26;
@@ -77,6 +80,7 @@ const LOCAL_PREDICTION_VERTICAL_VELOCITY_ADAPT_RATE = 0.35;
 const LOCAL_PREDICTION_VERTICAL_VELOCITY_REJECT_THRESHOLD = 80;
 const LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE = 0.5;
 const LOCAL_PREDICTION_IDLE_ROTATION_ERROR_DEAD_ZONE = 0.05;
+const LOCAL_PREDICTION_ACTIVE_INPUT_ROTATION_RECONCILE_TOLERANCE = 0.9;
 const LOCAL_PREDICTION_ROTATION_SNAP_ANGLE = 1.2;
 const LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE = 4;
 const LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE = 12;
@@ -627,6 +631,8 @@ export default class EntityManager {
         !entity.attached &&
         entity.parentEntityId == null &&
         entity.parentNodeName == null;
+      let receivedAuthoritativePredictedTransformUpdate = false;
+      let acknowledgedLocalPredictionInput = false;
 
       if (shouldUseLocalPrediction && hasLocalPredictionSupport) {
         this._setLocalAuthoritativeControllerState(deserializedEntity);
@@ -635,6 +641,7 @@ export default class EntityManager {
       if (deserializedEntity.position) {
         if (shouldUseLocalPrediction) {
           this._setLocalAuthoritativePosition(deserializedEntity.position, serverTick);
+          receivedAuthoritativePredictedTransformUpdate = true;
         } else {
           // do not interpolate if we are also attaching or detaching to/from a parent
           entity.setPosition(
@@ -648,6 +655,7 @@ export default class EntityManager {
       if (deserializedEntity.rotation) {
         if (shouldUseLocalPrediction) {
           this._setLocalAuthoritativeRotation(deserializedEntity.rotation, serverTick);
+          receivedAuthoritativePredictedTransformUpdate = true;
         } else {
           // do not interpolate if we are also attaching or detaching to/from a parent
           entity.setRotation(
@@ -659,7 +667,24 @@ export default class EntityManager {
       }
 
       if (shouldUseLocalPrediction && deserializedEntity.acknowledgedInputSequenceNumber !== undefined) {
+        const previousAcknowledgedInputSequenceNumber = this._localPredictionState.lastAcknowledgedInputSequenceNumber;
+        const previousSupportsInputAcknowledgements = this._localPredictionState.supportsInputAcknowledgements;
         this._setLocalAcknowledgedInputSequenceNumber(deserializedEntity.acknowledgedInputSequenceNumber);
+        acknowledgedLocalPredictionInput =
+          this._localPredictionState.supportsInputAcknowledgements && (
+            !previousSupportsInputAcknowledgements ||
+            this._localPredictionState.lastAcknowledgedInputSequenceNumber !== previousAcknowledgedInputSequenceNumber
+          );
+      }
+
+      if (
+        shouldUseLocalPrediction &&
+        this._shouldRebuildPredictedStateAfterServerUpdate(
+          receivedAuthoritativePredictedTransformUpdate,
+          acknowledgedLocalPredictionInput,
+        )
+      ) {
+        this._rebuildPredictedStateFromAuthoritativeAndReplay();
       }
 
       if (deserializedEntity.scale) {
@@ -837,13 +862,6 @@ export default class EntityManager {
       this._localPredictionState.predictedPosition.copy(position);
       this._localPredictionState.hasPredictedTransform = true;
     }
-
-    if (
-      this._localPredictionState.supportsInputAcknowledgements &&
-      this._localPredictionState.commandBufferCount > 0
-    ) {
-      this._rebuildPredictedStateFromAuthoritativeAndReplay();
-    }
   }
 
   private _setLocalAuthoritativeRotation(rotation: { x: number; y: number; z: number; w: number }, serverTick: number): void {
@@ -858,13 +876,6 @@ export default class EntityManager {
     if (!this._localPredictionState.hasPredictedTransform) {
       this._localPredictionState.predictedRotation.copy(rotation);
       this._localPredictionState.hasPredictedTransform = true;
-    }
-
-    if (
-      this._localPredictionState.supportsInputAcknowledgements &&
-      this._localPredictionState.commandBufferCount > 0
-    ) {
-      this._rebuildPredictedStateFromAuthoritativeAndReplay();
     }
   }
 
@@ -897,7 +908,24 @@ export default class EntityManager {
       this._localPredictionState.lastAcknowledgedHadMovementInput && hasAcknowledgedMovementDirection
         ? acknowledgedInputSequenceNumber
         : undefined;
-    this._rebuildPredictedStateFromAuthoritativeAndReplay();
+  }
+
+  private _shouldRebuildPredictedStateAfterServerUpdate(
+    receivedAuthoritativeTransformUpdate: boolean,
+    acknowledgedInputUpdate: boolean,
+  ): boolean {
+    if (!receivedAuthoritativeTransformUpdate && !acknowledgedInputUpdate) {
+      return false;
+    }
+
+    if (acknowledgedInputUpdate) {
+      return this._localPredictionState.hasAuthoritativePosition || this._localPredictionState.hasAuthoritativeRotation;
+    }
+
+    return (
+      this._localPredictionState.supportsInputAcknowledgements &&
+      this._localPredictionState.commandBufferCount > 0
+    );
   }
 
   private _dropAcknowledgedPredictionCommands(acknowledgedInputSequenceNumber: number): LocalPredictionCommand | undefined {
@@ -1055,6 +1083,14 @@ export default class EntityManager {
 
     const clampedDeltaS = Math.min(deltaTimeS, LOCAL_PREDICTION_MAX_FRAME_DELTA_S);
     const inputState = this._game.inputManager.inputState;
+    const hasLocalMovementIntent =
+      !!inputState.w ||
+      !!inputState.a ||
+      !!inputState.s ||
+      !!inputState.d ||
+      !!inputState.sp ||
+      !!inputState.c ||
+      this._game.inputManager.joystickDirection !== null;
     let isActivelyMoving = false;
     let remainingDeltaS = clampedDeltaS;
     let substeps = 0;
@@ -1101,7 +1137,13 @@ export default class EntityManager {
         );
 
     if (shouldContinuouslyReconcile) {
-      this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
+      const shouldDeferActiveInputReconcile =
+        hasLocalMovementIntent &&
+        this._shouldDeferActiveInputReconcile();
+
+      if (!shouldDeferActiveInputReconcile) {
+        this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
+      }
     }
 
     entity.applyClientPredictedTransform(
@@ -1203,6 +1245,39 @@ export default class EntityManager {
     return isActivelyMoving || motionBasisVelocity.lengthSq() > 0 || Math.abs(predictedVerticalVelocity) > 0.001;
   }
 
+  private _shouldDeferActiveInputReconcile(): boolean {
+    if (this._localPredictionState.hasAuthoritativePosition) {
+      const predictedPosition = this._localPredictionState.predictedPosition;
+      const authoritativePosition = this._localPredictionState.authoritativePosition;
+      const dx = authoritativePosition.x - predictedPosition.x;
+      const dz = authoritativePosition.z - predictedPosition.z;
+      const horizontalErrorSq = (dx * dx) + (dz * dz);
+
+      if (horizontalErrorSq > LOCAL_PREDICTION_ACTIVE_INPUT_HORIZONTAL_RECONCILE_TOLERANCE_SQ) {
+        return false;
+      }
+
+      if (
+        Math.abs(authoritativePosition.y - predictedPosition.y)
+        > LOCAL_PREDICTION_ACTIVE_INPUT_VERTICAL_RECONCILE_TOLERANCE
+      ) {
+        return false;
+      }
+    }
+
+    if (this._localPredictionState.hasAuthoritativeRotation) {
+      const rotationError = this._localPredictionState.predictedRotation.angleTo(
+        this._localPredictionState.authoritativeRotation,
+      );
+
+      if (rotationError > LOCAL_PREDICTION_ACTIVE_INPUT_ROTATION_RECONCILE_TOLERANCE) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
   private _setLastAcknowledgedMovementDirection(command?: LocalPredictionCommand): void {
     this._localPredictionState.lastAcknowledgedMovementDirectionX = undefined;
     this._localPredictionState.lastAcknowledgedMovementDirectionZ = undefined;
@@ -1297,11 +1372,15 @@ export default class EntityManager {
     const shouldUpdateRunSpeed = !!this._localPredictionState.lastAcknowledgedMovementRunning;
 
     if (shouldUpdateRunSpeed) {
-      this._localPredictionState.estimatedRunSpeed +=
-        (clampedSampledSpeed - this._localPredictionState.estimatedRunSpeed) * LOCAL_PREDICTION_SPEED_ADAPT_RATE;
+      this._localPredictionState.estimatedRunSpeed = this._applySpeedEstimateSample(
+        this._localPredictionState.estimatedRunSpeed,
+        clampedSampledSpeed,
+      );
     } else {
-      this._localPredictionState.estimatedWalkSpeed +=
-        (clampedSampledSpeed - this._localPredictionState.estimatedWalkSpeed) * LOCAL_PREDICTION_SPEED_ADAPT_RATE;
+      this._localPredictionState.estimatedWalkSpeed = this._applySpeedEstimateSample(
+        this._localPredictionState.estimatedWalkSpeed,
+        clampedSampledSpeed,
+      );
     }
 
     this._localPredictionState.estimatedWalkSpeed = Math.min(
@@ -1316,6 +1395,14 @@ export default class EntityManager {
       this._localPredictionState.estimatedRunSpeed,
       this._localPredictionState.estimatedWalkSpeed,
     );
+  }
+
+  private _applySpeedEstimateSample(currentEstimate: number, sampledSpeed: number): number {
+    const adaptRate = sampledSpeed >= currentEstimate
+      ? LOCAL_PREDICTION_SPEED_UPWARD_ADAPT_RATE
+      : LOCAL_PREDICTION_SPEED_DOWNWARD_ADAPT_RATE;
+
+    return currentEstimate + ((sampledSpeed - currentEstimate) * adaptRate);
   }
 
   private _reconcileLocalPrediction(isActivelyMoving: boolean, deltaTimeS: number): void {

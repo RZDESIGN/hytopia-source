@@ -216,6 +216,8 @@ export default class InputManager {
   private _moveStickState: StickState = { x: 0, y: 0, magnitude: 0 };
   private _lookStickState: StickState = { x: 0, y: 0, magnitude: 0 };
   private _lastMovementPacketTickTimeS: number = 0;
+  private _movementPacketTimerId: number | undefined;
+  private _movementPacketImmediateFlushScheduled: boolean = false;
 
   // Interact tracking - Map by pointerId to support multitouch
   private _interactPointers: Map<number, { x: number; y: number; time: number }> = new Map();
@@ -361,20 +363,56 @@ export default class InputManager {
 
   private _setupPacketQueue(): void {
     this._lastMovementPacketTickTimeS = performance.now() / 1000;
+    this._scheduleNextMovementPacketTick();
+  }
 
-    const tick = (): void => {
-      const nowS = performance.now() / 1000;
-      const queueDeltaS = Math.min(
-        Math.max(nowS - this._lastMovementPacketTickTimeS, MOVEMENT_PACKET_MIN_DELTA_S),
-        MOVEMENT_PACKET_MAX_DELTA_S,
-      );
-      this._lastMovementPacketTickTimeS = nowS;
-      this._drainPacketQueue(queueDeltaS);
+  private _scheduleNextMovementPacketTick(): void {
+    this._movementPacketTimerId = window.setTimeout(
+      this._tickMovementPacketQueue,
+      1000 / this._getMovementPacketUpdateHz(),
+    );
+  }
 
-      window.setTimeout(tick, 1000 / this._getMovementPacketUpdateHz());
-    };
+  private _tickMovementPacketQueue = (): void => {
+    this._drainPacketQueue(this._consumeMovementPacketQueueDeltaS());
+    this._scheduleNextMovementPacketTick();
+  }
 
-    window.setTimeout(tick, 1000 / this._getMovementPacketUpdateHz());
+  private _consumeMovementPacketQueueDeltaS(): number {
+    const nowS = performance.now() / 1000;
+    const queueDeltaS = Math.min(
+      Math.max(nowS - this._lastMovementPacketTickTimeS, MOVEMENT_PACKET_MIN_DELTA_S),
+      MOVEMENT_PACKET_MAX_DELTA_S,
+    );
+    this._lastMovementPacketTickTimeS = nowS;
+
+    return queueDeltaS;
+  }
+
+  private _scheduleImmediateMovementPacketFlush(): void {
+    if (
+      this._movementPacketImmediateFlushScheduled ||
+      !this._networkedInputEnabled
+    ) {
+      return;
+    }
+
+    this._movementPacketImmediateFlushScheduled = true;
+    queueMicrotask(() => {
+      this._movementPacketImmediateFlushScheduled = false;
+
+      if (!this._networkedInputEnabled) {
+        return;
+      }
+
+      if (this._movementPacketTimerId !== undefined) {
+        window.clearTimeout(this._movementPacketTimerId);
+        this._movementPacketTimerId = undefined;
+      }
+
+      this._drainPacketQueue(this._consumeMovementPacketQueueDeltaS());
+      this._scheduleNextMovementPacketTick();
+    });
   }
 
   private _drainPacketQueue(queueDeltaS: number): void {
@@ -548,6 +586,7 @@ export default class InputManager {
     if (this._networkedInputEnabled) {
       if (NETWORKED_MOVEMENT_INPUT_KEY_SET.has(input)) {
         this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
+        this._scheduleImmediateMovementPacketFlush();
       } else {
         this._game.networkManager.sendInputPacket({ [input]: isPressed });
       }
@@ -582,6 +621,7 @@ export default class InputManager {
       this._joystickDirection = nextDirection;
       this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
       this._continuousInputState.jd = nextDirection;
+      this._scheduleImmediateMovementPacketFlush();
     }
   }
 
