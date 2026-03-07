@@ -204,7 +204,9 @@ export default class Player extends EventRouter implements protocol.Serializable
     this.profilePictureUrl = session?.user.profilePictureURL ?? undefined;
     this.camera = new PlayerCamera(this);
     this.connection = connection;
-    this.cosmetics = PlatformGateway.instance.getPlayerCosmetics(this.id);
+    this.cosmetics = session?.user.id
+      ? PlatformGateway.instance.getPlayerCosmetics(session.user.id)
+      : Promise.resolve(undefined);
     this.ui = new PlayerUI(this);
 
     connection.onPacket(protocol.PacketId.CHAT_MESSAGE_SEND, this._onChatMessageSendPacket);

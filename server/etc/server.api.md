@@ -910,8 +910,10 @@ export class DefaultPlayerEntityController extends BaseEntityController {
     jumpLandLightOneshotAnimations: string[];
     jumpOneshotAnimations: string[];
     jumpVelocity: number;
+    get localPredictionFastMovementByDefault(): boolean;
     get localPredictionJustSubmergedRemainingMs(): number;
     get localPredictionMotionBasisVelocity(): Vector3Like;
+    get localPredictionMovementReferenceYaw(): number | undefined;
     get localPredictionSwimUpwardCooldownRemainingMs(): number;
     get platform(): Entity | undefined;
     runLoopedAnimations: string[];

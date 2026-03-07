@@ -433,6 +433,27 @@ The upward velocity applied to the entity when it jumps.
 </td></tr>
 <tr><td>
 
+[localPredictionFastMovementByDefault](./server.defaultplayerentitycontroller.localpredictionfastmovementbydefault.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+boolean
+
+
+</td><td>
+
+Whether "fast" movement should be treated as the default owner intent.
+
+
+</td></tr>
+<tr><td>
+
 [localPredictionJustSubmergedRemainingMs](./server.defaultplayerentitycontroller.localpredictionjustsubmergedremainingms.md)
 
 
@@ -472,6 +493,27 @@ Remaining just-submerged sinking time for owner prediction, in milliseconds.
 </td><td>
 
 Owner-only motion basis velocity used by the client prediction path.
+
+
+</td></tr>
+<tr><td>
+
+[localPredictionMovementReferenceYaw](./server.defaultplayerentitycontroller.localpredictionmovementreferenceyaw.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+number \| undefined
+
+
+</td><td>
+
+Optional fixed yaw frame used by owner prediction instead of live camera yaw.
 
 
 </td></tr>

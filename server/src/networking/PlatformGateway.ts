@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { inspect } from 'util';
 import WebSocket from 'ws';
 import * as graphQLWS from 'graphql-ws';
 import { CreativeGateway } from '@hytopia.com/creative-lib';
@@ -250,6 +251,13 @@ export default class PlatformGateway {
                              `&eye_color=${cosmeticsUser.characterSettings?.eyeColor || '00FF00'}`;
 
       return { equippedItems, hairModelUri, hairTextureUri, skinTextureUri };
+    } catch (error) {
+      ErrorHandler.warning(
+        `PlatformGateway.getPlayerCosmetics(): Failed to fetch cosmetics for user id "${userId}". Falling back to default cosmetics.`,
+        inspect(error, { depth: 3 }),
+      );
+
+      return;
     } finally {
       await iterator.return?.();
     }
@@ -418,8 +426,16 @@ export default class PlatformGateway {
 
       const filePath = path.join(LOCAL_DATA_DIRECTORY, `${key}.json`);
 
+      if (!fs.existsSync(filePath)) {
+        return { error: { code: 'keyNotFound', message: `Data for key "${key}" not found.` } };
+      }
+
       return JSON.parse(fs.readFileSync(filePath, 'utf8')) as KVResult;
     } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { error: { code: 'keyNotFound', message: `Data for key "${key}" not found.` } };
+      }
+
       ErrorHandler.warning(`PlatformGateway._readDevGlobalDataLocally(): Failed to read data for key "${key}": ${error as Error}`);
       
       return { error: { code: 'gatewayError', message: 'Failed to read data for key.' } };

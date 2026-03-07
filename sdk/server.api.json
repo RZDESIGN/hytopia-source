@@ -13210,6 +13210,36 @@
             },
             {
               "kind": "Property",
+              "canonicalReference": "server!DefaultPlayerEntityController#localPredictionFastMovementByDefault:member",
+              "docComment": "/**\n * Whether \"fast\" movement should be treated as the default owner intent.\n *\n * @remarks\n *\n * Custom controllers sometimes expose `runByDefault` while still extending the stock controller. Treat that duck-typed flag as owner prediction input so the client can replay the same effective movement mode.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get localPredictionFastMovementByDefault(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "boolean"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "localPredictionFastMovementByDefault",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
               "canonicalReference": "server!DefaultPlayerEntityController#localPredictionJustSubmergedRemainingMs:member",
               "docComment": "/**\n * Remaining just-submerged sinking time for owner prediction, in milliseconds.\n *\n * **Category:** Controllers\n */\n",
               "excerptTokens": [
@@ -13261,6 +13291,36 @@
               "isOptional": false,
               "releaseTag": "Public",
               "name": "localPredictionMotionBasisVelocity",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!DefaultPlayerEntityController#localPredictionMovementReferenceYaw:member",
+              "docComment": "/**\n * Optional fixed yaw frame used by owner prediction instead of live camera yaw.\n *\n * @remarks\n *\n * Custom controllers may expose `movementRelativeToCamera` and `movementReferenceYawRad`. When present, use them for owner prediction so the client replays against the same directional frame as the server.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get localPredictionMovementReferenceYaw(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number | undefined"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "localPredictionMovementReferenceYaw",
               "propertyTypeTokenRange": {
                 "startIndex": 1,
                 "endIndex": 2

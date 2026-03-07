@@ -3090,6 +3090,28 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
      */
     get localPredictionJustSubmergedRemainingMs(): number;
     /**
+     * Whether "fast" movement should be treated as the default owner intent.
+     *
+     * @remarks
+     * Custom controllers sometimes expose `runByDefault` while still extending the
+     * stock controller. Treat that duck-typed flag as owner prediction input so the
+     * client can replay the same effective movement mode.
+     *
+     * **Category:** Controllers
+     */
+    get localPredictionFastMovementByDefault(): boolean;
+    /**
+     * Optional fixed yaw frame used by owner prediction instead of live camera yaw.
+     *
+     * @remarks
+     * Custom controllers may expose `movementRelativeToCamera` and
+     * `movementReferenceYawRad`. When present, use them for owner prediction so the
+     * client replays against the same directional frame as the server.
+     *
+     * **Category:** Controllers
+     */
+    get localPredictionMovementReferenceYaw(): number | undefined;
+    /**
      * Remaining swim-upward cooldown for owner prediction, in milliseconds.
      *
      * **Category:** Controllers
@@ -4951,6 +4973,7 @@ export declare type EntityOptions = BlockEntityOptions | ModelEntityOptions;
 
 declare type EntitySchema = {
     aq?: number;
+    fd?: boolean;
     js?: number;
     i: number;
     bh?: VectorSchema;
@@ -4970,6 +4993,7 @@ declare type EntitySchema = {
     pe?: number;
     pf?: number;
     pi?: number;
+    py?: number;
     pn?: string;
     r?: QuaternionSchema;
     ri?: number;

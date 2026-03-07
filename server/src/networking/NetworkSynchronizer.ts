@@ -43,10 +43,18 @@ const HIGH_FREQUENCY_NETWORK_SYNC_RATE = DEFAULT_TICK_RATE;
 const HIGH_FREQUENCY_SYNC_MAX_PLAYERS = 8;
 const NETWORK_SYNC_RATE_OVERRIDE = Number(process.env.HYTOPIA_NETWORK_SYNC_RATE);
 const PROTOCOL_ENTITY_SCHEMA = (protocol as unknown as { entitySchema?: { properties?: Record<string, unknown> } }).entitySchema;
+const PROTOCOL_ENTITY_PROPERTIES = PROTOCOL_ENTITY_SCHEMA?.properties ?? {};
 const PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK = Object.prototype.hasOwnProperty.call(
-  PROTOCOL_ENTITY_SCHEMA?.properties ?? {},
+  PROTOCOL_ENTITY_PROPERTIES,
   'aq',
 );
+const PROTOCOL_SUPPORTS_ENTITY_FAST_MOVEMENT_DEFAULT = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'fd');
+const PROTOCOL_SUPPORTS_ENTITY_JUST_SUBMERGED = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'js');
+const PROTOCOL_SUPPORTS_ENTITY_MOTION_BASIS_VELOCITY = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'mv');
+const PROTOCOL_SUPPORTS_ENTITY_PREDICTION_FLAGS = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'pf');
+const PROTOCOL_SUPPORTS_ENTITY_MOVEMENT_REFERENCE_YAW = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'py');
+const PROTOCOL_SUPPORTS_ENTITY_SWIM_UPWARD_COOLDOWN = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'sc');
+const PROTOCOL_ENTITY_KEYS = Object.keys(PROTOCOL_ENTITY_PROPERTIES);
 const ENTITY_LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
 
@@ -1601,6 +1609,7 @@ export default class NetworkSynchronizer {
       const unreliableUpdates: protocol.EntitySchema[] = [];
 
       for (const entitySync of this._queuedEntitySyncs.broadcast.valuesArray) {
+        this._sanitizeEntitySync(entitySync);
         let isReliableUpdate = false;
 
         for (const key in entitySync) {
@@ -1626,6 +1635,10 @@ export default class NetworkSynchronizer {
 
     if (this._queuedEntitySyncs.perPlayer.size > 0) {
       for (const [ player, entitySyncs ] of this._queuedEntitySyncs.perPlayer.entries()) {
+        for (const entitySync of entitySyncs.valuesArray) {
+          this._sanitizeEntitySync(entitySync);
+        }
+
         this._appendPerPlayerSlotPacket(
           slot,
           player,
@@ -1722,6 +1735,18 @@ export default class NetworkSynchronizer {
     });
   }
 
+  private _sanitizeEntitySync(entitySync: protocol.EntitySchema): void {
+    if (PROTOCOL_ENTITY_KEYS.length === 0) {
+      return;
+    }
+
+    for (const key in entitySync) {
+      if (!Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, key)) {
+        delete (entitySync as Record<string, unknown>)[key];
+      }
+    }
+  }
+
   private _syncPlayerCameraAttachedEntityModel(playerCamera: PlayerCamera): void {
     const entity = playerCamera.attachedToEntity;
     const modelUri = entity && (playerCamera.mode === PlayerCameraMode.FIRST_PERSON ? playerCamera.viewModelUri : entity.modelUri);
@@ -1757,20 +1782,37 @@ export default class NetworkSynchronizer {
       predictionFlags |= ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING;
     }
 
-    entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
-    entitySync.pf = predictionFlags;
-    entitySync.py = controller.localPredictionMovementReferenceYaw;
-    entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
-    entitySync.js = undefined;
-    entitySync.sc = undefined;
+    if (PROTOCOL_SUPPORTS_ENTITY_FAST_MOVEMENT_DEFAULT) {
+      entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
+    }
+
+    if (PROTOCOL_SUPPORTS_ENTITY_PREDICTION_FLAGS) {
+      entitySync.pf = predictionFlags;
+    }
+
+    if (PROTOCOL_SUPPORTS_ENTITY_MOVEMENT_REFERENCE_YAW) {
+      entitySync.py = controller.localPredictionMovementReferenceYaw;
+    }
+
+    if (PROTOCOL_SUPPORTS_ENTITY_MOTION_BASIS_VELOCITY) {
+      entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
+    }
+
+    if (PROTOCOL_SUPPORTS_ENTITY_JUST_SUBMERGED) {
+      entitySync.js = undefined;
+    }
+
+    if (PROTOCOL_SUPPORTS_ENTITY_SWIM_UPWARD_COOLDOWN) {
+      entitySync.sc = undefined;
+    }
 
     const justSubmergedRemainingMs = controller.localPredictionJustSubmergedRemainingMs;
-    if (justSubmergedRemainingMs > 0) {
+    if (PROTOCOL_SUPPORTS_ENTITY_JUST_SUBMERGED && justSubmergedRemainingMs > 0) {
       entitySync.js = justSubmergedRemainingMs;
     }
 
     const swimUpwardCooldownRemainingMs = controller.localPredictionSwimUpwardCooldownRemainingMs;
-    if (swimUpwardCooldownRemainingMs > 0) {
+    if (PROTOCOL_SUPPORTS_ENTITY_SWIM_UPWARD_COOLDOWN && swimUpwardCooldownRemainingMs > 0) {
       entitySync.sc = swimUpwardCooldownRemainingMs;
     }
   }
