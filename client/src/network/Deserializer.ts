@@ -111,10 +111,12 @@ export type DeserializedEntity = {
   name?: string;
   opacity?: number;
   outline?: DeserializedOutlineOptions | null;
+  localPredictionFastMovementByDefault?: boolean;
   parentEntityId?: number | null;
   parentNodeName?: string | null;
   localPredictionFlags?: number;
   localPredictionJustSubmergedRemainingMs?: number;
+  localPredictionMovementReferenceYaw?: number;
   localPredictionMotionBasisVelocity?: THREE.Vector3Like;
   localPredictionSwimUpwardCooldownRemainingMs?: number;
   position?: THREE.Vector3Like;
@@ -431,9 +433,11 @@ export default class Deserializer {
   public static deserializeEntity(entity: protocol.EntitySchema): DeserializedEntity {
     const entityWithInputAck = entity as protocol.EntitySchema & {
       aq?: number;
+      fd?: boolean;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
+      py?: number;
       sc?: number;
     };
 
@@ -452,10 +456,12 @@ export default class Deserializer {
       name: entity.n,
       opacity: entity.o,
       outline: 'ol' in entity ? (entity.ol ? this.deserializeOutlineOptions(entity.ol) : null) : undefined,
+      localPredictionFastMovementByDefault: entityWithInputAck.fd,
       parentEntityId: 'pe' in entity ? (entity.pe ?? null) : undefined,
       parentNodeName: 'pn' in entity ? (entity.pn ?? null) : undefined,
       localPredictionFlags: entityWithInputAck.pf,
       localPredictionJustSubmergedRemainingMs: entityWithInputAck.js,
+      localPredictionMovementReferenceYaw: entityWithInputAck.py,
       localPredictionMotionBasisVelocity: entityWithInputAck.mv ? this.deserializeVector(entityWithInputAck.mv) : undefined,
       localPredictionSwimUpwardCooldownRemainingMs: entityWithInputAck.sc,
       position: entity.p ? this.deserializeVector(entity.p) : undefined,

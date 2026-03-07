@@ -132,6 +132,7 @@ const ORIGINAL_MATERIAL_DATA = 'originalData';
 // Sometimes we want to find an Entity from an Object3D associated
 // with it, so the entityID is stored in Object3D.userData.
 const USER_DATA_ENTITY_ID = 'entityId';
+const USER_DATA_ENTITY_REF = 'entityRef';
 
 // In the Three.js SceneGraph, setting Object3D.visible = false propagates
 // to child nodes. To quickly determine the effective visibility of a given
@@ -316,6 +317,7 @@ export default class Entity {
     this._lightLevelUniformData = this._createSharedUniformData();
 
     this._entityRoot.userData[USER_DATA_ENTITY_ID] = this._id;
+    this._entityRoot.userData[USER_DATA_ENTITY_REF] = this;
     this._entityRoot.userData[USER_DATA_EFFECTIVELY_VISIBLE] = true;
 
     // Local matrix is manually updated only when needed, so its auto-update flag is disabled.
@@ -1337,6 +1339,11 @@ export default class Entity {
   // userData should not be written in external classes.
   // To hide this dependency, static methods are used/exposed instead.
   private static _getAssociatedEntity(game: Game, obj: Object3D): Entity | null {
+    const cachedEntity = obj.userData[USER_DATA_ENTITY_REF] as Entity | undefined;
+    if (cachedEntity && cachedEntity.id === obj.userData[USER_DATA_ENTITY_ID]) {
+      return cachedEntity;
+    }
+
     const entityId = obj.userData[USER_DATA_ENTITY_ID];
 
     // userData makes it hard for type checking to work properly, so bugs
@@ -1498,7 +1505,13 @@ export default class Entity {
           material.alphaTest = opacityFactor === 0.0 && originalData.alphaTest > 0 ? 0.0001 : opacityFactor * originalData.alphaTest;
 
           if (this._isGLTFEntity) {
-            this._game.gltfManager.onMeshOpacityChanged(child, oldOpacity, material.opacity);
+            this._game.gltfManager.onMeshOpacityChanged(
+              child,
+              oldOpacity,
+              material.opacity,
+              oldTransparent,
+              material.transparent,
+            );
           }
         });
       }
@@ -2252,10 +2265,8 @@ export default class Entity {
   }
 
   private _adjustModelOffset(model: Object3D): void {
-    if (this._attached || this._isActiveFirstPersonViewModel()) {
+    if (this._attached) {
       // Reset root position to 0,0,0 so that when attached to parent, the pivot point is correct.
-      // First-person view models also need to preserve their authored origin instead of
-      // being re-centered by bounds, otherwise arm/hand anchors shift in camera space.
       model.position.set(0, 0, 0);
     } else {
       // TODO: Allow static type checking
@@ -2264,11 +2275,6 @@ export default class Entity {
       model.position.set(-modelCenter.x, -modelCenter.y, -modelCenter.z);
     }
     this._needsMatrixUpdate.add(model);
-  }
-
-  private _isActiveFirstPersonViewModel(): boolean {
-    return this._game.camera.isFirstPersonGameCameraActive
-      && this._game.camera.gameCameraAttachedEntity?.id === this.id;
   }
 
   private _parentModelReadyCallback = (parentEntity: Entity): void => {
@@ -2366,6 +2372,10 @@ export default class Entity {
     this._interpolate(deltaTimeS);
   }
 
+  public accumulateAnimationTime(deltaTimeS: number): void {
+    this._pendingAnimationTimeS += deltaTimeS;
+  }
+
   // Second update pass: Apply ViewDistance with updated local position
   public applyViewDistance(viewDistanceSquared: number, fromVec2: Vector2): boolean {
     if (this.attached) {
@@ -2446,9 +2456,6 @@ export default class Entity {
 
   // Fourth update pass: Update Local matrix and animation
   public updateAnimationAndLocalMatrix(deltaTimeS: number, frameCount: number): void {
-    // Even when invisible, the animation elapsed time should continue, so record it.
-    this._pendingAnimationTimeS += deltaTimeS;
-
     // Do not update since it will not be visible anyway.
     // TODO: Also Skip updates when the entity is invisible due to the influence of its parent entity.
     if (!this.visible) {
@@ -2833,6 +2840,7 @@ export default class Entity {
       obj.matrixAutoUpdate = false;
       obj.frustumCulled = false;
       obj.userData[USER_DATA_ENTITY_ID] = this._id;
+      obj.userData[USER_DATA_ENTITY_REF] = this;
       obj.userData[USER_DATA_EFFECTIVELY_VISIBLE] = true;
     });
 
@@ -2909,6 +2917,7 @@ export default class Entity {
     model.traverse((node) => {
       this._storeModelNodeOverrideBaseTransform(node);
       node.userData[USER_DATA_ENTITY_ID] = this._id;
+      node.userData[USER_DATA_ENTITY_REF] = this;
       node.userData[USER_DATA_EFFECTIVELY_VISIBLE] = true;
       if (node instanceof Mesh && node.material) {
         const material = node.material as EmissiveMeshBasicMaterial;

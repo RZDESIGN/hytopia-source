@@ -14,6 +14,7 @@ import type { VectorSchema } from './Vector';
 
 export type EntitySchema = {
   aq?: number;                    // last applied input sequence number (owner-only)
+  fd?: boolean;                  // whether fast movement is the default intent (owner-only)
   js?: number;                    // local prediction just-submerged remaining ms (owner-only)
   i: number;                      // entity id
   bh?: VectorSchema;              // block half extents
@@ -33,6 +34,7 @@ export type EntitySchema = {
   pe?: number;                    // parent entity id
   pf?: number;                    // local prediction flags bitmask (owner-only)
   pi?: number;                    // position interpolation time in milliseconds
+  py?: number;                    // local prediction movement reference yaw in radians (owner-only)
   pn?: string;                    // parent node name
   r?: QuaternionSchema;           // rotation
   ri?: number;                    // rotation interpolation time in milliseconds
@@ -47,6 +49,7 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
   type: 'object',
   properties: {
     aq: { type: 'number', nullable: true },
+    fd: { type: 'boolean', nullable: true },
     js: { type: 'number', nullable: true },
     i: { type: 'number' },
     bh: { ...vectorSchema, nullable: true },
@@ -66,6 +69,7 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
     pi: { type: 'number', nullable: true },
     pe: { type: 'number', nullable: true },
     pf: { type: 'number', nullable: true },
+    py: { type: 'number', nullable: true },
     pn: { type: 'string', nullable: true },
     r: { ...quaternionSchema, nullable: true },
     ri: { type: 'number', nullable: true },

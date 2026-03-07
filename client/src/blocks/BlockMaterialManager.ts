@@ -112,6 +112,7 @@ const UNIFORM_TEXTURE_ATLAS = 'textureAtlas';
 const UNIFORM_AMBIENT_LIGHT_COLOR = 'ambientLightColor';
 const ATTRIBUTE_FOAM_LEVEL = 'foamLevel';
 const ATTRIBUTE_FOAM_LEVEL_DIAG = 'foamLevelDiag';
+const ATTRIBUTE_SURFACE_FLAG = 'surfaceFlag';
 
 class MeshLiquidMaterial extends ShaderMaterial {
   constructor() {
@@ -127,6 +128,7 @@ class MeshLiquidMaterial extends ShaderMaterial {
 
         attribute vec4 ${ATTRIBUTE_FOAM_LEVEL};
         attribute vec4 ${ATTRIBUTE_FOAM_LEVEL_DIAG};
+        attribute float ${ATTRIBUTE_SURFACE_FLAG};
 
         varying vec3 vNormal;
         varying vec3 vViewVector;
@@ -134,10 +136,12 @@ class MeshLiquidMaterial extends ShaderMaterial {
         varying vec3 vWorldPos;
         varying vec4 vFoamLevel;
         varying vec4 vFoamLevelDiag;
+        varying float vSurfaceFlag;
 
         void main() {
           vFoamLevel = ${ATTRIBUTE_FOAM_LEVEL};
           vFoamLevelDiag = ${ATTRIBUTE_FOAM_LEVEL_DIAG};
+          vSurfaceFlag = ${ATTRIBUTE_SURFACE_FLAG};
           vNormal = normalize(normal);
           vUv = uv;
 
@@ -157,7 +161,7 @@ class MeshLiquidMaterial extends ShaderMaterial {
           float absNormalZ = abs(normal.z);
 
           // Apply vertical offset to all faces that need it
-          if (normalY > 0.5 || absNormalX > 0.5 || absNormalZ > 0.5) {
+          if (vSurfaceFlag > 0.5 && (normalY > 0.5 || absNormalX > 0.5 || absNormalZ > 0.5)) {
             pos.y += yOffset;
           }
 
@@ -166,18 +170,21 @@ class MeshLiquidMaterial extends ShaderMaterial {
           if (absNormalZ > 0.5) pos.z += sign(normal.z) * 0.001;
 
           // Simplified wave calculation
-          vec2 corner = floor(worldPos.xz + 0.5);
-          float wave = sin(dot(corner, vec2(0.5)) + slowTime) * cos(dot(corner, vec2(0.5)) + slowTime) * 0.04 +
-                       sin(dot(corner, vec2(0.8)) + slowTime * 1.2) * cos(dot(corner, vec2(0.8)) + slowTime * 0.8) * 0.02;
+          float wave = 0.0;
+          if (vSurfaceFlag > 0.5) {
+            vec2 corner = floor(worldPos.xz + 0.5);
+            wave = sin(dot(corner, vec2(0.5)) + slowTime) * cos(dot(corner, vec2(0.5)) + slowTime) * 0.04 +
+                   sin(dot(corner, vec2(0.8)) + slowTime * 1.2) * cos(dot(corner, vec2(0.8)) + slowTime * 0.8) * 0.02;
 
-          // Only apply negative waves
-          wave = min(0.0, wave);
-          pos.y += wave;
+            // Only apply negative waves
+            wave = min(0.0, wave);
+            pos.y += wave;
 
-          // Apply inward depression
-          float depression = abs(wave) * 0.05;
-          if (absNormalX > 0.5) pos.x -= sign(normal.x) * depression;
-          if (absNormalZ > 0.5) pos.z -= sign(normal.z) * depression;
+            // Apply inward depression only to the actual liquid surface block.
+            float depression = abs(wave) * 0.05;
+            if (absNormalX > 0.5) pos.x -= sign(normal.x) * depression;
+            if (absNormalZ > 0.5) pos.z -= sign(normal.z) * depression;
+          }
 
           gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
         }
@@ -193,6 +200,7 @@ class MeshLiquidMaterial extends ShaderMaterial {
         varying vec3 vWorldPos;
         varying vec4 vFoamLevel;
         varying vec4 vFoamLevelDiag;
+        varying float vSurfaceFlag;
 
         float hash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -220,13 +228,14 @@ class MeshLiquidMaterial extends ShaderMaterial {
           }
 
           vec3 color = texColor.rgb;
+          vec3 surfaceNormal = gl_FrontFacing ? normalize(vNormal) : normalize(-vNormal);
 
           // Apply ambient light
           color *= ${UNIFORM_AMBIENT_LIGHT_COLOR};
 
-          // Apply Fresnel and wave effects for top faces (no directional light needed)
-          if (vNormal.y > 0.5) {
-              float fresnel = pow(1.0 - dot(vNormal, vViewVector), 4.0);
+          // Only the top block in a liquid column should look like a surface.
+          if (vSurfaceFlag > 0.5 && vNormal.y > 0.5) {
+              float fresnel = pow(1.0 - clamp(abs(dot(surfaceNormal, normalize(vViewVector))), 0.0, 1.0), 4.0);
               float waveLighting = sin(dot(vWorldPos.xz, vec2(2.0)) + ${UNIFORM_TIME} * 0.5) * 0.1;
 
               // Combine lighting effects

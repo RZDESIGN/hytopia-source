@@ -405,6 +405,44 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
   }
 
   /**
+   * Whether "fast" movement should be treated as the default owner intent.
+   *
+   * @remarks
+   * Custom controllers sometimes expose `runByDefault` while still extending the
+   * stock controller. Treat that duck-typed flag as owner prediction input so the
+   * client can replay the same effective movement mode.
+   *
+   * **Category:** Controllers
+   */
+  public get localPredictionFastMovementByDefault(): boolean {
+    return (this as unknown as { runByDefault?: boolean }).runByDefault === true;
+  }
+
+  /**
+   * Optional fixed yaw frame used by owner prediction instead of live camera yaw.
+   *
+   * @remarks
+   * Custom controllers may expose `movementRelativeToCamera` and
+   * `movementReferenceYawRad`. When present, use them for owner prediction so the
+   * client replays against the same directional frame as the server.
+   *
+   * **Category:** Controllers
+   */
+  public get localPredictionMovementReferenceYaw(): number | undefined {
+    const controller = this as unknown as {
+      movementRelativeToCamera?: boolean;
+      movementReferenceYawRad?: number;
+    };
+    const referenceYaw = controller.movementReferenceYawRad;
+
+    if (controller.movementRelativeToCamera !== false || !Number.isFinite(referenceYaw)) {
+      return undefined;
+    }
+
+    return Number(referenceYaw);
+  }
+
+  /**
    * Remaining swim-upward cooldown for owner prediction, in milliseconds.
    *
    * **Category:** Controllers

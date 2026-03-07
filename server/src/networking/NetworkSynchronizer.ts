@@ -506,6 +506,9 @@ export default class NetworkSynchronizer {
   private _onEntitySpawn = (payload: EventPayloads[EntityEvent.SPAWN]) => {
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     Object.assign(entitySync, payload.entity.serialize());
+    if (payload.entity instanceof PlayerEntity) {
+      this._queueOwnerPlayerEntityPredictionSync(payload.entity);
+    }
     this._spawnedEntities.add(entitySync.i);
   };
 
@@ -596,6 +599,10 @@ export default class NetworkSynchronizer {
     } else {
       entitySync.p = [ payload.position.x, payload.position.y, payload.position.z ];
     }
+
+    if (payload.entity instanceof PlayerEntity) {
+      this._queueOwnerPlayerEntityPredictionSync(payload.entity, true);
+    }
   };
 
   private _onEntityUpdateRotation = (payload: EventPayloads[EntityEvent.UPDATE_ROTATION]) => {
@@ -608,6 +615,10 @@ export default class NetworkSynchronizer {
       r[3] = payload.rotation.w;
     } else {
       entitySync.r = [ payload.rotation.x, payload.rotation.y, payload.rotation.z, payload.rotation.w ];
+    }
+
+    if (payload.entity instanceof PlayerEntity) {
+      this._queueOwnerPlayerEntityPredictionSync(payload.entity, true);
     }
   };
 
@@ -1058,6 +1069,10 @@ export default class NetworkSynchronizer {
 
       const playerEntitySync = this._createOrGetQueuedEntitySync(entity, player);
       this._assignUndefined(playerEntitySync, entity.serialize());
+
+      if (entity instanceof PlayerEntity && entity.player === player) {
+        this._queuePlayerEntityOwnerPredictionState(playerEntitySync, entity);
+      }
     }
 
     this._syncPlayerCameraAttachedEntityModel(player.camera);
@@ -1717,14 +1732,16 @@ export default class NetworkSynchronizer {
   }
 
   private _queuePlayerEntityOwnerPredictionState(
-    playerEntity: PlayerEntity,
     entitySync: protocol.EntitySchema & {
       aq?: number;
+      fd?: boolean;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
+      py?: number;
       sc?: number;
     },
+    playerEntity: PlayerEntity,
   ): void {
     const controller = playerEntity.controller;
 
@@ -1740,7 +1757,9 @@ export default class NetworkSynchronizer {
       predictionFlags |= ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING;
     }
 
+    entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
     entitySync.pf = predictionFlags;
+    entitySync.py = controller.localPredictionMovementReferenceYaw;
     entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
     entitySync.js = undefined;
     entitySync.sc = undefined;
@@ -1753,6 +1772,33 @@ export default class NetworkSynchronizer {
     const swimUpwardCooldownRemainingMs = controller.localPredictionSwimUpwardCooldownRemainingMs;
     if (swimUpwardCooldownRemainingMs > 0) {
       entitySync.sc = swimUpwardCooldownRemainingMs;
+    }
+  }
+
+  private _queueOwnerPlayerEntityPredictionSync(
+    playerEntity: PlayerEntity,
+    includeTransform: boolean = false,
+  ): void {
+    const entitySync = this._createOrGetQueuedEntitySync(playerEntity, playerEntity.player) as protocol.EntitySchema & {
+      aq?: number;
+      fd?: boolean;
+      js?: number;
+      mv?: protocol.VectorSchema;
+      pf?: number;
+      py?: number;
+      sc?: number;
+    };
+
+    if (includeTransform) {
+      entitySync.p ??= Serializer.serializeVector(playerEntity.position);
+      entitySync.r ??= Serializer.serializeQuaternion(playerEntity.rotation);
+    }
+
+    this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
+
+    const acknowledgedInputSequence = playerEntity.player.lastAppliedInputSequenceNumber;
+    if (acknowledgedInputSequence !== undefined) {
+      entitySync.aq = acknowledgedInputSequence;
     }
   }
 
@@ -1786,7 +1832,7 @@ export default class NetworkSynchronizer {
       entitySync.aq = acknowledgedInputSequence;
       entitySync.p ??= Serializer.serializeVector(playerEntity.position);
       entitySync.r ??= Serializer.serializeQuaternion(playerEntity.rotation);
-      this._queuePlayerEntityOwnerPredictionState(playerEntity, entitySync);
+      this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
       this._lastSentInputAcknowledgementByPlayer.set(playerEntity.player, acknowledgedInputSequence);
     }
   }

@@ -92,6 +92,7 @@ export default class Camera {
   private _gameCameraTrackedEntity: Entity | undefined;
   private _gameCameraTrackedPosition: Vector3 | undefined;
   private _gameCameraTrackedPositionTarget: Vector3 | undefined;
+  private _gameCameraViewModelBaseCameraOffsets: Map<string, Vector3> = new Map();
   private _gameCameraPitch: number = 0.2;
   private _gameCameraShoulderRotationOffset: Quaternion = new Quaternion();
   private _gameCameraSkipNextFilmOffsetInterpolation: boolean = false;
@@ -418,6 +419,7 @@ export default class Camera {
         // First-person view model anchor depends on first-person camera offset.
         if (firstPersonOffsetChanged) {
           delete this._gameCameraAttachedEntity?.model?.userData.cameraViewModelBaseCameraOffset;
+          this._gameCameraViewModelBaseCameraOffsets.clear();
         }
       } else {
         this._gameCameraThirdPersonOffset.copy(nextOffset);
@@ -915,7 +917,11 @@ export default class Camera {
 
         if (this._gameCameraMode === CameraMode.FIRST_PERSON) {
           const modelAnchorPosition = this._gameCamera.position;
-          let resolvedBaseCameraOffset = baseCameraOffset;
+          const modelBaseCameraOffsetCacheKey = entity.modelUri ? `${entity.id}:${entity.modelUri}` : undefined;
+          const cachedBaseCameraOffset = modelBaseCameraOffsetCacheKey
+            ? this._gameCameraViewModelBaseCameraOffsets.get(modelBaseCameraOffsetCacheKey)
+            : undefined;
+          let resolvedBaseCameraOffset = baseCameraOffset ?? cachedBaseCameraOffset;
           if (!resolvedBaseCameraOffset) {
             model.getWorldPosition(vec3b).sub(modelAnchorPosition);
             tempQuat.copy(this._gameCamera.quaternion).invert();
@@ -925,6 +931,10 @@ export default class Camera {
 
           if (!baseCameraOffset) {
             model.userData.cameraViewModelBaseCameraOffset = resolvedBaseCameraOffset.clone();
+          }
+
+          if (modelBaseCameraOffsetCacheKey && !cachedBaseCameraOffset) {
+            this._gameCameraViewModelBaseCameraOffsets.set(modelBaseCameraOffsetCacheKey, resolvedBaseCameraOffset.clone());
           }
 
           // Use full camera orientation for first-person anchoring so the model

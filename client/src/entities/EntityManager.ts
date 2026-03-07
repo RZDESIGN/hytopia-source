@@ -125,8 +125,12 @@ type MovementPacketSentPayload = {
 type LocalPredictionControllerState = {
   authoritativeMotionBasisVelocity: Vector3;
   predictedMotionBasisVelocity: Vector3;
+  authoritativeFastMovementByDefault: boolean;
+  predictedFastMovementByDefault: boolean;
   authoritativeGrounded: boolean;
   predictedGrounded: boolean;
+  authoritativeMovementReferenceYaw?: number;
+  predictedMovementReferenceYaw?: number;
   authoritativeSwimming: boolean;
   predictedSwimming: boolean;
   authoritativeJustSubmergedRemainingS: number;
@@ -172,6 +176,7 @@ export default class EntityManager {
   private _dynamicEntities: Set<Entity> = new Set();
   private _dynamicEntityList: Entity[] = [];
   private _dynamicEntityListDirty: boolean = false;
+  private _inViewDistanceDynamicEntityList: Entity[] = [];
   private _visibleDynamicEntityList: Entity[] = [];
   private _outlines: Map<EntityId, OutlineOptions> = new Map();
   private _outlineTargets: OutlineTarget[] = new Array(MAX_OUTLINES).fill(undefined).map(() => { return { object3d: null, options: null }; });
@@ -187,8 +192,12 @@ export default class EntityManager {
     controllerState: {
       authoritativeMotionBasisVelocity: new Vector3(),
       predictedMotionBasisVelocity: new Vector3(),
+      authoritativeFastMovementByDefault: false,
+      predictedFastMovementByDefault: false,
       authoritativeGrounded: false,
       predictedGrounded: false,
+      authoritativeMovementReferenceYaw: undefined,
+      predictedMovementReferenceYaw: undefined,
       authoritativeSwimming: false,
       predictedSwimming: false,
       authoritativeJustSubmergedRemainingS: 0,
@@ -367,7 +376,9 @@ export default class EntityManager {
     EntityStats.count = this._entities.size;
     this._updateLocalPredictionEntityBinding();
     const dynamicEntities = this._getDynamicEntityList();
+    const inViewDistanceDynamicEntities = this._inViewDistanceDynamicEntityList;
     const visibleDynamicEntities = this._visibleDynamicEntityList;
+    inViewDistanceDynamicEntities.length = 0;
     visibleDynamicEntities.length = 0;
 
     // Entities are updated using a multi-pass approach.
@@ -376,15 +387,12 @@ export default class EntityManager {
     for (let i = 0; i < dynamicEntities.length; i++) {
       const entity = dynamicEntities[i];
       entity.update(payload.frameDeltaS);
+      entity.accumulateAnimationTime(payload.frameDeltaS);
 
       if (this._localPredictionState.entityId === entity.id) {
         this._applyLocalPrediction(entity, payload.frameDeltaS);
       }
     }
-
-    // Update the camera after entity transforms/prediction so culling and visibility
-    // use the freshest camera state available for this frame.
-    this._game.camera.update(payload.frameDeltaS);
 
     // Second pass: Apply view distance. 
     // To avoid subsequent updates for invisible entities, perform an early check
@@ -397,20 +405,26 @@ export default class EntityManager {
 
       fromVec2.set(cameraPos.x, cameraPos.z);
       for (let i = 0; i < dynamicEntities.length; i++) {
-        dynamicEntities[i].applyViewDistance(viewDistanceSquared, fromVec2);
+        const entity = dynamicEntities[i];
+        if (entity.applyViewDistance(viewDistanceSquared, fromVec2)) {
+          inViewDistanceDynamicEntities.push(entity);
+        }
       }
     } else {
       // If ViewDistance can be toggled dynamically in the future, we need to
       // make everything visible at the moment it switches to enabled.
       EntityStats.inViewDistanceCount = this._entities.size;
+      for (let i = 0; i < dynamicEntities.length; i++) {
+        inViewDistanceDynamicEntities.push(dynamicEntities[i]);
+      }
     }
 
     // Third pass: Apply frustum culling
     const camera = this._game.camera.activeCamera;
     frustum.setFromProjectionMatrix(projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
 
-    for (let i = 0; i < dynamicEntities.length; i++) {
-      const entity = dynamicEntities[i];
+    for (let i = 0; i < inViewDistanceDynamicEntities.length; i++) {
+      const entity = inViewDistanceDynamicEntities[i];
       if (entity.applyFrustumCulling(frustum)) {
         visibleDynamicEntities.push(entity);
       }
@@ -418,8 +432,8 @@ export default class EntityManager {
 
     // Forth pass: Update Animation and Local matrix
     const frameCount = this._game.performanceMetricsManager.frameCount;
-    for (let i = 0; i < dynamicEntities.length; i++) {
-      dynamicEntities[i].updateAnimationAndLocalMatrix(payload.frameDeltaS, frameCount);
+    for (let i = 0; i < visibleDynamicEntities.length; i++) {
+      visibleDynamicEntities[i].updateAnimationAndLocalMatrix(payload.frameDeltaS, frameCount);
     }
 
     // Fifth pass: World matrices update.
@@ -756,8 +770,12 @@ export default class EntityManager {
     this._localPredictionState.lastAuthoritativeRotationServerTick = 0;
     this._localPredictionState.controllerState.authoritativeMotionBasisVelocity.set(0, 0, 0);
     this._localPredictionState.controllerState.predictedMotionBasisVelocity.set(0, 0, 0);
+    this._localPredictionState.controllerState.authoritativeFastMovementByDefault = false;
+    this._localPredictionState.controllerState.predictedFastMovementByDefault = false;
     this._localPredictionState.controllerState.authoritativeGrounded = false;
     this._localPredictionState.controllerState.predictedGrounded = false;
+    this._localPredictionState.controllerState.authoritativeMovementReferenceYaw = undefined;
+    this._localPredictionState.controllerState.predictedMovementReferenceYaw = undefined;
     this._localPredictionState.controllerState.authoritativeSwimming = false;
     this._localPredictionState.controllerState.predictedSwimming = false;
     this._localPredictionState.controllerState.authoritativeJustSubmergedRemainingS = 0;
@@ -801,9 +819,11 @@ export default class EntityManager {
 
   private _hasLocalPredictionSupport(deserializedEntity: DeserializedEntity): boolean {
     return (
+      deserializedEntity.localPredictionFastMovementByDefault !== undefined ||
       deserializedEntity.localPredictionFlags !== undefined ||
       deserializedEntity.localPredictionMotionBasisVelocity !== undefined ||
       deserializedEntity.localPredictionJustSubmergedRemainingMs !== undefined ||
+      deserializedEntity.localPredictionMovementReferenceYaw !== undefined ||
       deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs !== undefined
     );
   }
@@ -811,7 +831,12 @@ export default class EntityManager {
   private _setLocalAuthoritativeControllerState(deserializedEntity: DeserializedEntity): void {
     const controllerState = this._localPredictionState.controllerState;
     const predictionFlags = deserializedEntity.localPredictionFlags ?? 0;
+    controllerState.authoritativeFastMovementByDefault = !!deserializedEntity.localPredictionFastMovementByDefault;
     controllerState.authoritativeGrounded = (predictionFlags & LOCAL_PREDICTION_FLAG_GROUNDED) !== 0;
+    controllerState.authoritativeMovementReferenceYaw =
+      Number.isFinite(deserializedEntity.localPredictionMovementReferenceYaw)
+        ? Number(deserializedEntity.localPredictionMovementReferenceYaw)
+        : undefined;
     controllerState.authoritativeSwimming = (predictionFlags & LOCAL_PREDICTION_FLAG_SWIMMING) !== 0;
     controllerState.authoritativeMotionBasisVelocity.set(
       deserializedEntity.localPredictionMotionBasisVelocity?.x ?? 0,
@@ -975,8 +1000,12 @@ export default class EntityManager {
     this._localPredictionState.controllerState.predictedMotionBasisVelocity.copy(
       this._localPredictionState.controllerState.authoritativeMotionBasisVelocity,
     );
+    this._localPredictionState.controllerState.predictedFastMovementByDefault =
+      this._localPredictionState.controllerState.authoritativeFastMovementByDefault;
     this._localPredictionState.controllerState.predictedGrounded =
       this._localPredictionState.controllerState.authoritativeGrounded;
+    this._localPredictionState.controllerState.predictedMovementReferenceYaw =
+      this._localPredictionState.controllerState.authoritativeMovementReferenceYaw;
     this._localPredictionState.controllerState.predictedSwimming =
       this._localPredictionState.controllerState.authoritativeSwimming;
     this._localPredictionState.controllerState.predictedJustSubmergedRemainingS =
@@ -1187,8 +1216,9 @@ export default class EntityManager {
       controllerState.predictedSwimUpwardCooldownRemainingS - deltaTimeS,
     );
 
+    const effectiveYaw = controllerState.predictedMovementReferenceYaw ?? yaw;
     const movementDirection = resolveDeterministicMovementDirection({
-      yaw,
+      yaw: effectiveYaw,
       joystickDirection,
       w,
       a,
@@ -1197,10 +1227,11 @@ export default class EntityManager {
     });
     const isActivelyMoving = movementDirection.lengthSq > 0;
     const motionBasisVelocity = controllerState.predictedMotionBasisVelocity;
+    const isFastMovement = sh || controllerState.predictedFastMovementByDefault;
     const movementSpeed = controllerState.predictedSwimming
-      ? (sh ? LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED : LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED)
+      ? (isFastMovement ? LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED : LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED)
       : (
-        sh
+        isFastMovement
           ? Math.max(
             Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed),
             this._localPredictionState.estimatedRunSpeed,
@@ -1299,8 +1330,9 @@ export default class EntityManager {
       return;
     }
 
+    const effectiveYaw = this._localPredictionState.controllerState.authoritativeMovementReferenceYaw ?? command.yaw;
     const movementDirection = resolveDeterministicMovementDirection({
-      yaw: command.yaw,
+      yaw: effectiveYaw,
       joystickDirection: command.joystickDirection,
       w: command.w,
       a: command.a,
@@ -1382,7 +1414,9 @@ export default class EntityManager {
     }
 
     const clampedSampledSpeed = Math.min(sampledHorizontalSpeed, LOCAL_PREDICTION_MAX_SPEED);
-    const shouldUpdateRunSpeed = !!this._localPredictionState.lastAcknowledgedMovementRunning;
+    const shouldUpdateRunSpeed =
+      !!this._localPredictionState.lastAcknowledgedMovementRunning ||
+      this._localPredictionState.controllerState.authoritativeFastMovementByDefault;
 
     if (shouldUpdateRunSpeed) {
       this._localPredictionState.estimatedRunSpeed = this._applySpeedEstimateSample(

@@ -8,6 +8,7 @@ import {
   CHUNK_BUFFER_GEOMETRY_NUM_COLOR_COMPONENTS,
   CHUNK_BUFFER_GEOMETRY_NUM_LIGHT_LEVEL_COMPONENTS,
   CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS,
+  CHUNK_BUFFER_GEOMETRY_NUM_SURFACE_FLAG_COMPONENTS,
   type BatchId,
 } from './ChunkConstants';
 import ChunkStats from './ChunkStats';
@@ -47,7 +48,7 @@ export default class ChunkMeshManager {
   }
 
   private _createOrUpdateMesh(id: BatchId, data: BlocksBufferGeometryData, cache: Map<BatchId, Mesh>, material: Material): Mesh {
-    const { positions, normals, uvs, indices, colors, lightLevels, foamLevels, foamLevelsDiag } = data;
+    const { positions, normals, uvs, indices, colors, lightLevels, foamLevels, foamLevelsDiag, surfaceFlags } = data;
 
     let mesh = cache.get(id);
 
@@ -66,6 +67,7 @@ export default class ChunkMeshManager {
       this._swapOptionalAttribute(geometry, 'lightLevel', lightLevels, CHUNK_BUFFER_GEOMETRY_NUM_LIGHT_LEVEL_COMPONENTS);
       this._swapOptionalAttribute(geometry, 'foamLevel', foamLevels, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS);
       this._swapOptionalAttribute(geometry, 'foamLevelDiag', foamLevelsDiag, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS);
+      this._swapOptionalAttribute(geometry, 'surfaceFlag', surfaceFlags, CHUNK_BUFFER_GEOMETRY_NUM_SURFACE_FLAG_COMPONENTS);
 
       // Index may switch between Uint16 and Uint32 depending on vertex count
       const indexAttr = geometry.getIndex();
@@ -98,6 +100,9 @@ export default class ChunkMeshManager {
       }
       if (foamLevelsDiag) {
         geometry.setAttribute('foamLevelDiag', new BufferAttribute(foamLevelsDiag, CHUNK_BUFFER_GEOMETRY_NUM_FOAM_LEVEL_COMPONENTS));
+      }
+      if (surfaceFlags) {
+        geometry.setAttribute('surfaceFlag', new BufferAttribute(surfaceFlags, CHUNK_BUFFER_GEOMETRY_NUM_SURFACE_FLAG_COMPONENTS));
       }
 
       geometry.setIndex(new BufferAttribute(indices, 1));

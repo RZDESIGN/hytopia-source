@@ -46,6 +46,14 @@ const MISSING_SKYBOX_TEXTURE_PATH = '/textures/missing-skybox';
 // area is smaller and usually falls below this budget.
 const MAX_RENDER_TARGET_PIXELS = 2560 * 1440;
 const MIN_RENDER_PIXEL_RATIO = 0.5;
+const MIN_ADAPTIVE_RESOLUTION_SCALE = 0.67;
+const MAX_ADAPTIVE_RESOLUTION_SCALE = 1.0;
+const ADAPTIVE_RESOLUTION_DOWN_STEP = 0.08;
+const ADAPTIVE_RESOLUTION_UP_STEP = 0.04;
+const ADAPTIVE_RESOLUTION_DOWN_THRESHOLD_RATIO = 1.08;
+const ADAPTIVE_RESOLUTION_UP_THRESHOLD_RATIO = 0.92;
+const ADAPTIVE_RESOLUTION_DOWN_HOLD_S = 0.2;
+const ADAPTIVE_RESOLUTION_UP_HOLD_S = 1.5;
 const SCENE_UI_LIGHT_LOAD_MAX = 4;
 const SCENE_UI_MEDIUM_LOAD_MAX = 12;
 const SCENE_UI_LIGHT_RENDER_INTERVAL_S = 1 / 60;
@@ -150,6 +158,13 @@ export default class Renderer {
   private _bloomPass: WhiteCoreBloomPass;
   private _outputPass: OutputPass;
   private _sceneUIRenderCooldownRemainingS: number = 0;
+  private _adaptiveResolutionScale: number = 1;
+  private _adaptiveResolutionDownHoldS: number = 0;
+  private _adaptiveResolutionUpHoldS: number = 0;
+  private _smoothedFrameDeltaS: number = 1 / 60;
+  private _lastAppliedPixelRatio: number = 0;
+  private _lastAppliedViewportWidth: number = 0;
+  private _lastAppliedViewportHeight: number = 0;
 
   public constructor(game: Game) {
     this._game = game;
@@ -223,7 +238,7 @@ export default class Renderer {
 
   private _calculateEffectivePixelRatio(): number {
     const resolutionMultiplier = this._game.settingsManager.qualityPerfTradeoff.resolution.multiplier;
-    const requestedPixelRatio = window.devicePixelRatio * resolutionMultiplier;
+    const requestedPixelRatio = window.devicePixelRatio * resolutionMultiplier * this._adaptiveResolutionScale;
     const { width, height } = this._getViewportSize();
     const viewportPixelCount = width * height;
     const maxPixelRatioForBudget = Math.sqrt(MAX_RENDER_TARGET_PIXELS / viewportPixelCount);
@@ -236,10 +251,20 @@ export default class Renderer {
 
   private _applyRenderResolution(): void {
     const { width, height } = this._getViewportSize();
-    this._renderer.setPixelRatio(this._calculateEffectivePixelRatio());
+    const pixelRatio = this._calculateEffectivePixelRatio();
+    const viewportChanged = width !== this._lastAppliedViewportWidth || height !== this._lastAppliedViewportHeight;
+
+    if (!viewportChanged && Math.abs(pixelRatio - this._lastAppliedPixelRatio) < 0.001) {
+      return;
+    }
+
+    this._renderer.setPixelRatio(pixelRatio);
     this._renderer.setSize(width, height);
     this._sceneUiRenderer.setSize(width, height);
     this._resizePostProcessing();
+    this._lastAppliedPixelRatio = pixelRatio;
+    this._lastAppliedViewportWidth = width;
+    this._lastAppliedViewportHeight = height;
   }
 
   private _setupPostProcessing(): void {
@@ -314,6 +339,7 @@ export default class Renderer {
     this._game.settingsManager.update();
 
     const frameDeltaS = this._game.performanceMetricsManager.deltaTime;
+    this._updateAdaptiveResolution(frameDeltaS);
     this._game.performanceBaselineManager.recordFrame(frameDeltaS * 1000);
     this._game.inputManager.update(frameDeltaS);
 
@@ -326,6 +352,9 @@ export default class Renderer {
     const gltfUpdateStartMs = performance.now();
     this._game.gltfManager.update();
     this._game.performanceBaselineManager.recordGLTFUpdate(performance.now() - gltfUpdateStartMs);
+    // Update the camera as late as possible so rendering uses the freshest
+    // entity transforms and latest look input for this frame.
+    this._game.camera.update(frameDeltaS);
     this._updateSkybox(frameDeltaS);
     this._game.audioManager.update();
     this._updateSceneUI(frameDeltaS);
@@ -533,6 +562,9 @@ export default class Renderer {
   }
 
   private _onClientSettingsUpdate = (_payload: ClientSettingsEventPayload.IUpdate): void => {
+    this._adaptiveResolutionScale = 1;
+    this._adaptiveResolutionDownHoldS = 0;
+    this._adaptiveResolutionUpHoldS = 0;
     this._applyRenderResolution();
     this._clampTargetFogNearAndFar();
     this._setupFog();
@@ -659,6 +691,61 @@ export default class Renderer {
     }
 
     return SCENE_UI_HEAVY_RENDER_INTERVAL_S;
+  }
+
+  private _updateAdaptiveResolution(frameDeltaS: number): void {
+    if (document.visibilityState !== 'visible') {
+      this._adaptiveResolutionDownHoldS = 0;
+      this._adaptiveResolutionUpHoldS = 0;
+      return;
+    }
+
+    const fpsCap = this._game.settingsManager.qualityPerfTradeoff.fpsCap;
+    const measuredRefreshRate = this._game.performanceMetricsManager.refreshRate;
+    const targetFps = fpsCap ?? measuredRefreshRate ?? 60;
+    const targetFrameDeltaS = 1 / targetFps;
+    const smoothingAlpha = Math.min(1, frameDeltaS * 5);
+    this._smoothedFrameDeltaS = this._lerpNumber(this._smoothedFrameDeltaS, frameDeltaS, smoothingAlpha);
+
+    const overloaded = this._smoothedFrameDeltaS > targetFrameDeltaS * ADAPTIVE_RESOLUTION_DOWN_THRESHOLD_RATIO;
+    const headroom = this._smoothedFrameDeltaS < targetFrameDeltaS * ADAPTIVE_RESOLUTION_UP_THRESHOLD_RATIO;
+
+    if (overloaded) {
+      this._adaptiveResolutionDownHoldS += frameDeltaS;
+      this._adaptiveResolutionUpHoldS = 0;
+      if (this._adaptiveResolutionDownHoldS >= ADAPTIVE_RESOLUTION_DOWN_HOLD_S) {
+        this._setAdaptiveResolutionScale(this._adaptiveResolutionScale - ADAPTIVE_RESOLUTION_DOWN_STEP);
+        this._adaptiveResolutionDownHoldS = 0;
+      }
+      return;
+    }
+
+    this._adaptiveResolutionDownHoldS = 0;
+
+    if (headroom) {
+      this._adaptiveResolutionUpHoldS += frameDeltaS;
+      if (this._adaptiveResolutionUpHoldS >= ADAPTIVE_RESOLUTION_UP_HOLD_S) {
+        this._setAdaptiveResolutionScale(this._adaptiveResolutionScale + ADAPTIVE_RESOLUTION_UP_STEP);
+        this._adaptiveResolutionUpHoldS = 0;
+      }
+      return;
+    }
+
+    this._adaptiveResolutionUpHoldS = 0;
+  }
+
+  private _setAdaptiveResolutionScale(scale: number): void {
+    const nextScale = Math.max(
+      MIN_ADAPTIVE_RESOLUTION_SCALE,
+      Math.min(MAX_ADAPTIVE_RESOLUTION_SCALE, Number(scale.toFixed(2))),
+    );
+
+    if (Math.abs(nextScale - this._adaptiveResolutionScale) < 0.001) {
+      return;
+    }
+
+    this._adaptiveResolutionScale = nextScale;
+    this._applyRenderResolution();
   }
 
   private _setupRenderer(): void {

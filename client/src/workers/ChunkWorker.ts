@@ -542,6 +542,9 @@ class ChunkWorker {
       if (data.foamLevelsDiag) {
         transferables.push(data.foamLevelsDiag.buffer);
       }
+      if (data.surfaceFlags) {
+        transferables.push(data.surfaceFlags.buffer);
+      }
     }
     return transferables;
   }
@@ -777,6 +780,7 @@ class ChunkWorker {
     const liquidMeshLightLevels: number[] = [];
     const liquidMeshFoamLevels: number[] = [];
     const liquidMeshFoamLevelsDiag: number[] = [];
+    const liquidMeshSurfaceFlags: number[] = [];
     let liquidMeshHasLightLevel = false;
 
     const opaqueSolidMeshColors: number[] = [];
@@ -842,6 +846,15 @@ class ChunkWorker {
 
             if (!blockType) {
               continue;
+            }
+
+            let liquidSurfaceFlag = 0;
+            if (blockType.isLiquid) {
+              neighborCoord.x = globalX;
+              neighborCoord.y = globalY + 1;
+              neighborCoord.z = globalZ;
+              const liquidAbove = this._getGlobalBlockType(neighborCoord);
+              liquidSurfaceFlag = Number(!liquidAbove || !liquidAbove.isLiquid || liquidAbove.id !== blockType.id);
             }
 
             totalBlockCount++;
@@ -1206,6 +1219,7 @@ class ChunkWorker {
                     liquidMeshFoamLevels.push(0, 0, 0, 0);
                     liquidMeshFoamLevelsDiag.push(0, 0, 0, 0);
                   }
+                  liquidMeshSurfaceFlags.push(liquidSurfaceFlag);
                 }
               }
 
@@ -1239,6 +1253,7 @@ class ChunkWorker {
         lightLevels: liquidMeshHasLightLevel ? new Float32Array(liquidMeshLightLevels) : undefined,
         foamLevels: new Float32Array(liquidMeshFoamLevels),
         foamLevelsDiag: new Float32Array(liquidMeshFoamLevelsDiag),
+        surfaceFlags: new Float32Array(liquidMeshSurfaceFlags),
       } : undefined,
       opaqueSolidGeometry: opaqueSolidMeshPositions.length > 0 ? {
         colors: new Float32Array(opaqueSolidMeshColors),
