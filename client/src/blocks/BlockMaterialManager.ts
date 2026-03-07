@@ -90,6 +90,21 @@ class MeshBlockMaterial extends MeshBasicMaterial {
         `,
       );
   }
+
+  public override clone(): this {
+    return new (this.constructor as typeof MeshBlockMaterial)(
+      this._game,
+      this.transparent,
+      Boolean(this.defines?.[DEFINE_HAS_LIGHT_LEVEL]),
+    ).copy(this) as this;
+  }
+
+  public override copy(source: MeshBlockMaterial): this {
+    super.copy(source);
+    this._game = source._game;
+    this.defines = { ...(source.defines ?? {}) };
+    return this;
+  }
 }
 
 const UNIFORM_TIME = 'time';

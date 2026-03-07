@@ -310,9 +310,13 @@ export default class NetworkManager {
     reliable: boolean,
     protocolName: 'wt' | 'ws',
   ): void {
+    // Queued inbound messages must own their bytes because WebTransport can hand us
+    // transient views that are only valid for the current callback tick.
+    const ownedData = data.slice();
+
     this._networkConditionSimulator.schedule('incoming', reliable, () => {
       this._pendingIncomingMessages.push({
-        data,
+        data: ownedData,
         protocolName,
       });
     });

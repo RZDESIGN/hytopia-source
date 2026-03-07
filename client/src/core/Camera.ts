@@ -92,7 +92,6 @@ export default class Camera {
   private _gameCameraTrackedEntity: Entity | undefined;
   private _gameCameraTrackedPosition: Vector3 | undefined;
   private _gameCameraTrackedPositionTarget: Vector3 | undefined;
-  private _gameCameraViewModelBaseCameraOffsets: Map<string, Vector3> = new Map();
   private _gameCameraPitch: number = 0.2;
   private _gameCameraShoulderRotationOffset: Quaternion = new Quaternion();
   private _gameCameraSkipNextFilmOffsetInterpolation: boolean = false;
@@ -300,6 +299,7 @@ export default class Camera {
 
   private _onCameraPacket = (payload: NetworkManagerEventPayload.ICameraPacket): void => {
     const { deserializedCamera } = payload;
+    const previousAttachedEntity = this._gameCameraAttachedEntity;
 
     if (typeof deserializedCamera.mode === 'number') {
       this._gameCameraMode = deserializedCamera.mode;
@@ -418,7 +418,6 @@ export default class Camera {
         // First-person view model anchor depends on first-person camera offset.
         if (firstPersonOffsetChanged) {
           delete this._gameCameraAttachedEntity?.model?.userData.cameraViewModelBaseCameraOffset;
-          this._gameCameraViewModelBaseCameraOffsets.clear();
         }
       } else {
         this._gameCameraThirdPersonOffset.copy(nextOffset);
@@ -469,6 +468,29 @@ export default class Camera {
     if (deserializedCamera.zoom !== undefined) {
       this._gameCameraTargetZoom = deserializedCamera.zoom;
     }
+
+    if (
+      deserializedCamera.mode !== undefined ||
+      deserializedCamera.attachedToEntityId !== undefined ||
+      deserializedCamera.attachedToPosition !== undefined
+    ) {
+      this._refreshAttachedEntityViewModelState(previousAttachedEntity);
+      if (this._gameCameraAttachedEntity !== previousAttachedEntity) {
+        this._refreshAttachedEntityViewModelState(this._gameCameraAttachedEntity);
+      }
+    }
+  }
+
+  private _refreshAttachedEntityViewModelState(entity: Entity | undefined): void {
+    const model = entity?.model;
+    if (!model) {
+      return;
+    }
+
+    delete model.userData.cameraViewModelBasePosition;
+    delete model.userData.cameraViewModelBaseQuaternion;
+    delete model.userData.cameraViewModelBaseCameraOffset;
+    entity.refreshModelOffset();
   }
 
   private _onMouseMove = (event: MouseEvent): void => {
@@ -865,6 +887,10 @@ export default class Camera {
     // Rotate around the camera pivot so the model stays fixed on screen
     if (this._gameCameraAttachedEntity) {
       const entity = this._gameCameraAttachedEntity;
+      // First-person view models derive their local camera anchor from the entity root.
+      // After the recent update-pass reordering, that matrix can still be stale here
+      // unless we refresh it before converting world space back into entity-local space.
+      entity.ensureEntityRootMatrixWorldUpdated();
       const model = entity.model;
 
       const basePosition = model?.userData.cameraViewModelBasePosition as Vector3 | undefined;
@@ -889,11 +915,7 @@ export default class Camera {
 
         if (this._gameCameraMode === CameraMode.FIRST_PERSON) {
           const modelAnchorPosition = this._gameCamera.position;
-          const modelBaseCameraOffsetCacheKey = entity.modelUri ? `${entity.id}:${entity.modelUri}` : undefined;
-          const cachedBaseCameraOffset = modelBaseCameraOffsetCacheKey
-            ? this._gameCameraViewModelBaseCameraOffsets.get(modelBaseCameraOffsetCacheKey)
-            : undefined;
-          let resolvedBaseCameraOffset = baseCameraOffset ?? cachedBaseCameraOffset;
+          let resolvedBaseCameraOffset = baseCameraOffset;
           if (!resolvedBaseCameraOffset) {
             model.getWorldPosition(vec3b).sub(modelAnchorPosition);
             tempQuat.copy(this._gameCamera.quaternion).invert();
@@ -903,10 +925,6 @@ export default class Camera {
 
           if (!baseCameraOffset) {
             model.userData.cameraViewModelBaseCameraOffset = resolvedBaseCameraOffset.clone();
-          }
-
-          if (modelBaseCameraOffsetCacheKey && !cachedBaseCameraOffset) {
-            this._gameCameraViewModelBaseCameraOffsets.set(modelBaseCameraOffsetCacheKey, resolvedBaseCameraOffset.clone());
           }
 
           // Use full camera orientation for first-person anchoring so the model

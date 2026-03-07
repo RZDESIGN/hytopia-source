@@ -462,6 +462,10 @@ export default class Entity {
     return target.setFromMatrixPosition(this._entityRoot.matrixWorld);
   }
 
+  public ensureEntityRootMatrixWorldUpdated(): void {
+    this._ensureMatrixWorldUpdated(this._entityRoot);
+  }
+
   // TODO: Optimize if possible
   private _ensureMatrixWorldUpdated(obj: Object3D): void {
     // Update because the LocalMatrix may not be up to date.
@@ -1584,6 +1588,16 @@ export default class Entity {
   public setRotationInterpolationMs(interpolationMs: number | null): void {
     this._rotationInterpolationTimeS = this._resolveInterpolationTimeS(interpolationMs);
   }
+
+  public refreshModelOffset(): void {
+    if (!this._model) {
+      return;
+    }
+
+    this._adjustModelOffset(this._model);
+    this._forceAnimationAndLocalMatrixUpdate = true;
+    this._needsWorldBoundingBoxUpdate = true;
+  }
   
   public setScale(scale: Vector3Like, interpolate: boolean = true) {
     this._targetScale.set(scale.x, scale.y, scale.z);
@@ -2238,8 +2252,10 @@ export default class Entity {
   }
 
   private _adjustModelOffset(model: Object3D): void {
-    if (this._attached) {
+    if (this._attached || this._isActiveFirstPersonViewModel()) {
       // Reset root position to 0,0,0 so that when attached to parent, the pivot point is correct.
+      // First-person view models also need to preserve their authored origin instead of
+      // being re-centered by bounds, otherwise arm/hand anchors shift in camera space.
       model.position.set(0, 0, 0);
     } else {
       // TODO: Allow static type checking
@@ -2248,6 +2264,11 @@ export default class Entity {
       model.position.set(-modelCenter.x, -modelCenter.y, -modelCenter.z);
     }
     this._needsMatrixUpdate.add(model);
+  }
+
+  private _isActiveFirstPersonViewModel(): boolean {
+    return this._game.camera.isFirstPersonGameCameraActive
+      && this._game.camera.gameCameraAttachedEntity?.id === this.id;
   }
 
   private _parentModelReadyCallback = (parentEntity: Entity): void => {
@@ -2880,15 +2901,10 @@ export default class Entity {
       }
     });
 
-    const cachedModelBounds = this._game.gltfManager.getModelBounds(gltf);
-    if (cachedModelBounds) {
-      this._localBoundingBox = cachedModelBounds.localBoundingBox;
-      model.userData.modelCenter = cachedModelBounds.modelCenter;
-      this._worldBoundingBox = this._localBoundingBox.clone();
-      this._needsWorldBoundingBoxUpdate = true;
-    } else {
-      this._storeModelCenter(model, true);
-    }
+    // Per-entity bounds are used for both vertical centering and frustum decisions.
+    // Recompute them on the cloned model to avoid sharing stale/source-scene bounds
+    // across animated player models and other entities with runtime differences.
+    this._storeModelCenter(model, true);
 
     model.traverse((node) => {
       this._storeModelNodeOverrideBaseTransform(node);
