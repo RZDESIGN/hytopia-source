@@ -32,7 +32,6 @@ import {
   GLTFParser,
 } from 'three/addons/loaders/GLTFLoader.js';
 import EmissiveMeshBasicMaterial, { type ShaderProcessor } from './EmissiveMeshBasicMaterial';
-import { FACE_SHADE_BOTTOM, FACE_SHADE_SIDE, FACE_SHADE_TOP, LIGHT_LEVEL_STRENGTH_MULTIPLIER } from '../blocks/BlockConstants';
 // TODO: Honestly I don't want to have dependency with Entity from GLTFManager...
 import Entity from '../entities/Entity';
 import { updateAABB } from '../three/utils';
@@ -109,9 +108,8 @@ const tmpCanvas = document.createElement('canvas');
 // Need error check?
 const tmp2DContext = tmpCanvas.getContext('2d', { willReadFrequently: true })!;
 
-// We need to make some minor changes to the material for the InstancedMesh.
-// Using MeshBasicMaterial instead of MeshStandardMaterial for better GPU performance.
-// MeshBasicMaterial doesn't calculate lighting, making it the cheapest option.
+// We need to make some minor changes to the material for the InstancedMesh while
+// keeping it on Three.js's lighting and shadow path.
 class InstancedMeshBasicMaterial extends EmissiveMeshBasicMaterial {
   private _game: Game;
   private _instancedTextureEnabled: boolean = false;
@@ -303,35 +301,9 @@ class InstancedMeshBasicMaterial extends EmissiveMeshBasicMaterial {
           #endif
         `,
       )
-      // For MeshBasicMaterial, apply ambient lighting and block light levels manually
-      // since there's no lighting system.
       .replace(
         '#include <opaque_fragment>',
         `
-          // Base ambient lighting (replaces Three.js AmbientLight which doesn't affect MeshBasicMaterial)
-          vec3 ambientLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
-
-          #ifdef ${USE_INSTANCED_LIGHT_LEVEL_DEFINE}
-            // Block light contribution from emissive blocks
-            vec3 blockLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${INSTANCE_LIGHT_LEVEL_VARYING} * float(${LIGHT_LEVEL_STRENGTH_MULTIPLIER});
-            // Take the brighter of ambient or block light
-            outgoingLight *= max(ambientLight, blockLight);
-          #else
-            // No instance light level, use ambient light only
-            outgoingLight *= ambientLight;
-          #endif
-
-          // Face-based shading using polynomial approximation of Block values
-          // Polynomial coefficients derived from the three shading values
-          // Solves: f(1) = TOP, f(0) = SIDE, f(-1) = BOTTOM
-          float normalY = gl_FrontFacing ? ${WORLD_NORMAL_Y_VARYING} : -${WORLD_NORMAL_Y_VARYING};
-          float faceShade = ${FACE_SHADE_SIDE.toFixed(2)}
-                + (${FACE_SHADE_TOP.toFixed(2)} - ${FACE_SHADE_BOTTOM.toFixed(2)}) * 0.5 * normalY
-                + ((${FACE_SHADE_TOP.toFixed(2)} + ${FACE_SHADE_BOTTOM.toFixed(2)}) * 0.5 - ${FACE_SHADE_SIDE.toFixed(2)}) * normalY * normalY;
-
-          // Apply sky light (multiply like in chunks)
-          outgoingLight *= ${INSTANCE_SKY_LIGHT_VARYING} * faceShade;
-
           #include <opaque_fragment>
         `,
       );
@@ -344,12 +316,12 @@ class InstancedMeshBasicMaterial extends EmissiveMeshBasicMaterial {
       // This runs after EmissiveMeshBasicMaterial's processor, so we can replace its code.
       params.fragmentShader = params.fragmentShader
         .replace(
-          'vec3 emissiveColor = customEmissive * customEmissiveIntensity;',
+          'vec3 totalEmissiveRadiance = emissive;',
           `
             #ifdef ${USE_INSTANCED_EMISSIVE_DEFINE}
-              vec3 emissiveColor = ${INSTANCE_EMISSIVE_VARYING}.rgb * ${INSTANCE_EMISSIVE_VARYING}.a;
+              vec3 totalEmissiveRadiance = ${INSTANCE_EMISSIVE_VARYING}.rgb * ${INSTANCE_EMISSIVE_VARYING}.a;
             #else
-              vec3 emissiveColor = customEmissive * customEmissiveIntensity;
+              vec3 totalEmissiveRadiance = emissive;
             #endif
           `,
         );
@@ -370,6 +342,8 @@ class InstancedMeshEx extends InstancedMesh {
     // Performs frustum culling on a per‑original‑mesh basis in Entity, so no additional frustum culling is needed
     // for InstancedMesh. When there is nothing to render, sets it to invisible.
     this.frustumCulled = false;
+    this.castShadow = true;
+    this.receiveShadow = true;
 
     // Since InstancedMesh is placed at (0, 0, 0), matrix updates are unnecessary.
     this.matrixAutoUpdate = false;
@@ -418,8 +392,8 @@ class InstancedMeshEx extends InstancedMesh {
 // 3D artists seem to expect to use both. To address this, Hytopia allows their
 // combination under specific conditions. This plugin enables that behavior.
 // 
-// This plugin also converts PBR materials (MeshStandardMaterial) to basic materials
-// (MeshBasicMaterial) for better GPU performance.
+// This plugin normalizes loaded glTF materials onto the engine's lit material wrapper
+// so imported assets can participate in real lighting and shadow maps.
 class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
   private _parser: GLTFParser;
   public name = 'HYTOPIA_ALPHA_BLENDING_AND_CLIPPING';
@@ -431,21 +405,30 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
   async loadMaterial(index: number): Promise<EmissiveMeshBasicMaterial> {
     // material can be MeshBasicMaterial if the glTF material is with unlit extension.
     const pbrMaterial = await this._parser.loadMaterial(index) as MeshStandardMaterial | MeshBasicMaterial;
-    
-    // Convert PBR material to basic material for better performance.
-    // MeshBasicMaterial doesn't calculate lighting, making it the cheapest GPU option.
+    const isPBRMaterial = pbrMaterial instanceof MeshStandardMaterial;
+    const roughness = isPBRMaterial ? pbrMaterial.roughness : 0.85;
+    const metalness = isPBRMaterial ? pbrMaterial.metalness : 0;
+
     const material = new EmissiveMeshBasicMaterial({
       alphaMap: pbrMaterial.alphaMap,
       alphaTest: pbrMaterial.alphaTest,
+      aoMap: isPBRMaterial ? pbrMaterial.aoMap : null,
+      aoMapIntensity: isPBRMaterial ? pbrMaterial.aoMapIntensity : 1,
       color: pbrMaterial.color,
       depthWrite: pbrMaterial.depthWrite,
-      emissive: (pbrMaterial as MeshStandardMaterial).emissive,
-      emissiveIntensity: (pbrMaterial as MeshStandardMaterial).emissiveIntensity,
-      emissiveMap: (pbrMaterial as MeshStandardMaterial).emissiveMap,
+      emissive: isPBRMaterial ? pbrMaterial.emissive : new Color(0x000000),
+      emissiveIntensity: isPBRMaterial ? pbrMaterial.emissiveIntensity : 1,
+      emissiveMap: isPBRMaterial ? pbrMaterial.emissiveMap : null,
+      lightMap: isPBRMaterial ? pbrMaterial.lightMap : null,
+      lightMapIntensity: isPBRMaterial ? pbrMaterial.lightMapIntensity : 1,
       map: pbrMaterial.map,
       name: pbrMaterial.name,
+      normalMap: isPBRMaterial ? pbrMaterial.normalMap : null,
+      normalScale: isPBRMaterial ? pbrMaterial.normalScale : undefined,
       opacity: pbrMaterial.opacity,
+      shininess: Math.max(4, (1 - roughness) * 48),
       side: pbrMaterial.side,
+      specular: new Color().setScalar(0.08 + metalness * 0.2),
       transparent: Boolean(pbrMaterial.transparent),
       userData: pbrMaterial.userData,
       visible: pbrMaterial.visible,
@@ -481,7 +464,7 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
       material.transparent = true;
     }
 
-    // Dispose the original PBR material since we're using the basic one
+    // Dispose the original source material since we're using the lit engine wrapper instead.
     pbrMaterial.dispose();
 
     return material;

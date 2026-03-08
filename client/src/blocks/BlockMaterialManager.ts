@@ -2,109 +2,30 @@ import {
   Color,
   DoubleSide,
   FrontSide,
-  MeshBasicMaterial,
+  MeshPhongMaterial,
   ShaderMaterial,
   Vector3,
-  WebGLProgramParametersWithUniforms,
 } from 'three';
-import { ALPHA_TEST_THRESHOLD, BlockTextureAtlasEventType, LIGHT_LEVEL_STRENGTH_MULTIPLIER, WATER_SURFACE_Y_OFFSET } from './BlockConstants';
+import { ALPHA_TEST_THRESHOLD, BlockTextureAtlasEventType, WATER_SURFACE_Y_OFFSET } from './BlockConstants';
 import Game from '../Game';
 import EventRouter from '../events/EventRouter';
 
 const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
 const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
-const DEFINE_HAS_LIGHT_LEVEL = 'HAS_LIGHT_LEVEL';
 
-// Using MeshBasicMaterial instead of MeshPhongMaterial for better GPU performance.
-// MeshBasicMaterial doesn't calculate lighting, making it the cheapest option.
-// Ambient lighting and block light levels are applied by multiplying the output color directly.
-class MeshBlockMaterial extends MeshBasicMaterial {
-  private _game: Game;
-
-  constructor(game: Game, transparent: boolean, hasLightLevel: boolean = true) {
+class MeshBlockMaterial extends MeshPhongMaterial {
+  constructor(_game: Game, transparent: boolean, hasLightLevel: boolean = true) {
     super({
       map: null, // set later,
       side: FrontSide,
       vertexColors: true,
       transparent,
       alphaTest: ALPHA_TEST_THRESHOLD,
+      shininess: hasLightLevel ? 18 : 12,
+      specular: hasLightLevel ? new Color(0.08, 0.08, 0.08) : new Color(0.04, 0.04, 0.04),
     });
 
-    this._game = game;
-
-    // For program cache key in WebGLRenderer to prevent unintended cases where programs are
-    // treated as identical between the presence or absence of lightLevel.
-    this.defines = this.defines || {};
-    this.defines[DEFINE_HAS_LIGHT_LEVEL] = hasLightLevel;
-  }
-
-  public onBeforeCompile(params: WebGLProgramParametersWithUniforms): void {
-    const ambientLight = this._game.renderer.ambientLight;
-    const hasLightLevel = this.defines![DEFINE_HAS_LIGHT_LEVEL];
-
-    // Use getter pattern so ambient light changes are immediately reflected
-    params.uniforms[UNIFORM_RAW_AMBIENT_LIGHT_COLOR] = { value: ambientLight.color };
-    params.uniforms[UNIFORM_AMBIENT_LIGHT_INTENSITY] = {
-      get value() { return ambientLight.intensity; }
-    };
-
-    // Add lightLevel attribute/varying to vertex shader if needed
-    if (hasLightLevel) {
-      params.vertexShader = params.vertexShader.replace(
-        'void main() {',
-        `
-          attribute float lightLevel;
-          varying float vLightLevel;
-          void main() {
-            vLightLevel = lightLevel;
-        `,
-      );
-    }
-
-    // Build fragment shader: add uniforms and apply ambient/block lighting
-    // MeshBasicMaterial has no lighting system, so we manually multiply outgoingLight
-    const varyingDecl = hasLightLevel ? 'varying float vLightLevel;' : '';
-    const lightingCalc = hasLightLevel
-      ? `
-          vec3 ambientLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
-          // Force multiplier to float for strict mobile GLSL compilers (avoid vec3/float * int-literal issues).
-          vec3 blockLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * vLightLevel * float(${LIGHT_LEVEL_STRENGTH_MULTIPLIER});
-          outgoingLight *= max(ambientLight, blockLight);
-        `
-      : `outgoingLight *= ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${UNIFORM_AMBIENT_LIGHT_INTENSITY};`;
-
-    params.fragmentShader = params.fragmentShader
-      .replace(
-        'void main() {',
-        `
-          ${varyingDecl}
-          uniform vec3 ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR};
-          uniform float ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
-          void main() {
-        `,
-      )
-      .replace(
-        '#include <opaque_fragment>',
-        `
-          ${lightingCalc}
-          #include <opaque_fragment>
-        `,
-      );
-  }
-
-  public override clone(): this {
-    return new (this.constructor as typeof MeshBlockMaterial)(
-      this._game,
-      this.transparent,
-      Boolean(this.defines?.[DEFINE_HAS_LIGHT_LEVEL]),
-    ).copy(this) as this;
-  }
-
-  public override copy(source: MeshBlockMaterial): this {
-    super.copy(source);
-    this._game = source._game;
-    this.defines = { ...(source.defines ?? {}) };
-    return this;
+    this.name = hasLightLevel ? 'MeshBlockMaterial' : 'MeshBlockMaterialNonLit';
   }
 }
 
@@ -373,8 +294,7 @@ class MeshFoliageMaterial extends ShaderMaterial {
           }
 
           vec3 ambientLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
-          vec3 blockLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * vLightLevel * float(${LIGHT_LEVEL_STRENGTH_MULTIPLIER});
-          vec3 litColor = texColor.rgb * vColor.rgb * max(ambientLight, blockLight);
+          vec3 litColor = texColor.rgb * vColor.rgb * ambientLight;
 
           gl_FragColor = vec4(litColor, texColor.a * vColor.a);
         }

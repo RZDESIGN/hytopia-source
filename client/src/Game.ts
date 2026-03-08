@@ -14,6 +14,7 @@ import DebugRenderer from './core/DebugRenderer';
 import EntityManager from './entities/EntityManager';
 import GLTFManager from './gltf/GLTFManager';
 import InputManager from './input/InputManager';
+import LightManager from './lights/LightManager';
 import MobileManager from './mobile/MobileManager';
 import NetworkManager from './network/NetworkManager';
 import ParticlesManager from './particles/ParticlesManager';
@@ -47,6 +48,7 @@ export default class Game {
   private _gltfManager: GLTFManager;
   private _inputManager: InputManager;
   private _lightLevelManager: LightLevelManager;
+  private _lightManager: LightManager;
   private _mobileManager: MobileManager;
   private _networkManager: NetworkManager;
   private _performanceBaselineManager: PerformanceBaselineManager;
@@ -80,6 +82,7 @@ export default class Game {
     this._customTextureManager = new CustomTextureManager();
     this._debugRenderer = new DebugRenderer(this);
     this._entityManager = new EntityManager(this);    
+    this._lightManager = new LightManager(this);
     this._gltfManager = new GLTFManager(this);
     this._lightLevelManager = new LightLevelManager();
     this._mobileManager = new MobileManager(this);
@@ -113,6 +116,7 @@ export default class Game {
   public get gltfManager(): GLTFManager { return this._gltfManager; }
   public get inputManager(): InputManager { return this._inputManager; }
   public get lightLevelManager(): LightLevelManager { return this._lightLevelManager; }
+  public get lightManager(): LightManager { return this._lightManager; }
   public get mobileManager(): MobileManager { return this._mobileManager; }
   public get networkManager(): NetworkManager { return this._networkManager; }
   public get particlesManager(): ParticlesManager { return this._particlesManager; }

@@ -31,9 +31,6 @@ import {
   type BlockId,
   type BlockTextureUri,
   BLOCK_ROTATION_MATRICES,
-  FACE_SHADE_BOTTOM,
-  FACE_SHADE_SIDE,
-  FACE_SHADE_TOP,
   DEFAULT_BLOCK_COLOR,
   DEFAULT_BLOCK_FACE_GEOMETRIES,
   DEFAULT_BLOCK_FACES,
@@ -84,7 +81,6 @@ type TrimeshOcclusionProfile = {
 };
 
 // working variables
-const aoNeighborCoord = { x: 0, y: 0, z: 0 };
 const globalToLocalResult = { x: 0, y: 0, z: 0 };
 const globalToOriginResult = { x: 0, y: 0, z: 0 };
 const localCoord = { x: 0, y: 0, z: 0 };
@@ -170,6 +166,8 @@ class ChunkWorker {
 
   private constructor(textureAtlasManager: BlockTextureAtlasManagerBase) {
     this._textureAtlasManager = textureAtlasManager;
+    void this._calculateSkyLight;
+    void this._sampleAOOpacity;
   }
 
   public static run(): void {
@@ -1594,45 +1592,20 @@ class ChunkWorker {
     skyBoundaryVolume: BoundaryVolume,
     faceContactAOOpacity: number,
   ): [number, number, number, number] {
+    void vertexCoordinate;
+    void blockX;
+    void blockY;
+    void blockZ;
+    void blockFaceAO;
+    void faceNormal;
+    void chunk;
+    void skyDistanceVolume;
+    void skyBoundaryVolume;
+    void faceContactAOOpacity;
     const baseColor = blockType.color;
-    const vx = vertexCoordinate.x;
-    const vy = vertexCoordinate.y;
-    const vz = vertexCoordinate.z;
-
-    // Face-based shading: determine brightness based on face direction
-    const ny = faceNormal[1];
-    const faceShade = ny > 0 ? FACE_SHADE_TOP : ny < 0 ? FACE_SHADE_BOTTOM : FACE_SHADE_SIDE;
-
-    // Sky light: darken areas that are covered/indoors
-    // Pass face normal so we check from the air in front of the face
-    const skyLight = this._calculateSkyLight(vx, vy, vz, blockX, blockY, blockZ, faceNormal, chunk, skyDistanceVolume, skyBoundaryVolume);
-
-    // Calculate AO - check 3 neighbor directions (corner, side1, side2)
-    let aoIntensityLevel = faceContactAOOpacity;
-
-    aoNeighborCoord.x = Math.floor(vx + blockFaceAO.corner[0]);
-    aoNeighborCoord.y = Math.floor(vy + blockFaceAO.corner[1]);
-    aoNeighborCoord.z = Math.floor(vz + blockFaceAO.corner[2]);
-    aoIntensityLevel += this._sampleAOOpacity(aoNeighborCoord.x, aoNeighborCoord.y, aoNeighborCoord.z);
-
-    aoNeighborCoord.x = Math.floor(vx + blockFaceAO.side1[0]);
-    aoNeighborCoord.y = Math.floor(vy + blockFaceAO.side1[1]);
-    aoNeighborCoord.z = Math.floor(vz + blockFaceAO.side1[2]);
-    aoIntensityLevel += this._sampleAOOpacity(aoNeighborCoord.x, aoNeighborCoord.y, aoNeighborCoord.z);
-
-    aoNeighborCoord.x = Math.floor(vx + blockFaceAO.side2[0]);
-    aoNeighborCoord.y = Math.floor(vy + blockFaceAO.side2[1]);
-    aoNeighborCoord.z = Math.floor(vz + blockFaceAO.side2[2]);
-    aoIntensityLevel += this._sampleAOOpacity(aoNeighborCoord.x, aoNeighborCoord.y, aoNeighborCoord.z);
-
-    const clampedAo = Math.min(3, aoIntensityLevel);
-    const aoFloor = Math.floor(clampedAo);
-    const ao = blockType.aoIntensity[aoFloor] + (blockType.aoIntensity[Math.min(3, aoFloor + 1)] - blockType.aoIntensity[aoFloor]) * (clampedAo - aoFloor);
-
-    // Combine: base color - AO darkening, then apply face shade and sky light
-    vertexColorResult[0] = (baseColor[0] - ao) * faceShade * skyLight;
-    vertexColorResult[1] = (baseColor[1] - ao) * faceShade * skyLight;
-    vertexColorResult[2] = (baseColor[2] - ao) * faceShade * skyLight;
+    vertexColorResult[0] = baseColor[0];
+    vertexColorResult[1] = baseColor[1];
+    vertexColorResult[2] = baseColor[2];
     vertexColorResult[3] = baseColor[3];
 
     return vertexColorResult;

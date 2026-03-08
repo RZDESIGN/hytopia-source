@@ -16,6 +16,7 @@ import {
   LoopRepeat,
   Mesh,
   MeshBasicMaterial,
+  MeshPhongMaterial,
   NormalAnimationBlendMode,
   Object3D,
   PropertyMixer,
@@ -315,6 +316,8 @@ export default class Entity {
       this._mergeModelNodeOverridesPatch(data.modelNodeOverrides, false);
     }
     this._lightLevelUniformData = this._createSharedUniformData();
+    void this._lightLevelUniformData;
+    void this._createLightingProcessor;
 
     this._entityRoot.userData[USER_DATA_ENTITY_ID] = this._id;
     this._entityRoot.userData[USER_DATA_ENTITY_REF] = this;
@@ -2678,7 +2681,7 @@ export default class Entity {
     this._needsWorldBoundingBoxUpdate = true;
   }
 
-  private _storeOriginalMaterialData(material: MeshBasicMaterial | EmissiveMeshBasicMaterial): void {
+  private _storeOriginalMaterialData(material: MeshBasicMaterial | MeshPhongMaterial | EmissiveMeshBasicMaterial): void {
     // Materials may be shared across multiple meshes, and the original data might already
     // be stored at this point.
     if (!(ORIGINAL_MATERIAL_DATA in material.userData)) {
@@ -2695,7 +2698,7 @@ export default class Entity {
     }
   }
 
-  private _getOriginalMaterialData(material: MeshBasicMaterial): OriginalMaterialData {
+  private _getOriginalMaterialData(material: MeshBasicMaterial | MeshPhongMaterial | EmissiveMeshBasicMaterial): OriginalMaterialData {
     if (!(ORIGINAL_MATERIAL_DATA in material.userData)) {
       throw new Error(`Missing original material data in Material: ${material.uuid}`);
     }
@@ -2810,12 +2813,12 @@ export default class Entity {
     // However, this approach increases complexity in resource management.
     const mesh = new Mesh(geometry, this._game.blockMaterialManager.cloneTransparentNonLitMaterial());
     mesh.material.transparent = transparent;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     model.add(mesh);
 
     this._storeModelCenter(model, false);
     this._storeOriginalMaterialData(mesh.material);
-    mesh.material.onBeforeCompile = this._createLightingProcessor();
-
     model.scale.set(
       this._blockHalfExtents.x * 2 / dimensions.x,
       this._blockHalfExtents.y * 2 / dimensions.y,
@@ -2925,9 +2928,10 @@ export default class Entity {
         // For performance reasons, two-pass rendering is disabled for DoubleSide materials.
         // It might be worth allowing this to be enabled via a quality-performance tradeoff setting.
         material.forceSinglePass = true;
+        node.castShadow = true;
+        node.receiveShadow = true;
 
         this._storeOriginalMaterialData(material);
-        material.addShaderProcessor(this._createLightingProcessor());
       }
     });
 

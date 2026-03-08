@@ -7,6 +7,7 @@ import type {
   DeserializedChunks,
   DeserializedConnection,
   DeserializedEntities,
+  DeserializedLights,
   DeserializedParticleEmitters,
   DeserializedPhysicsDebugRaycasts,
   DeserializedPhysicsDebugRender,
@@ -27,6 +28,7 @@ export namespace NetworkManagerEventPayload {
   export interface IChunksPacket { deserializedChunks: DeserializedChunks; serverTick: number; }
   export interface IConnectionPacket { deserializedConnection: DeserializedConnection; }
   export interface IEntitiesPacket { deserializedEntities: DeserializedEntities; serverTick: number; }
+  export interface ILightsPacket { deserializedLights: DeserializedLights; serverTick: number; }
   export interface INotificationPermissionRequestPacket { serverTick: number; }
   export interface IParticleEmittersPacket { deserializedParticleEmitters: DeserializedParticleEmitters; serverTick: number; }
   export interface IPhysicsDebugRaycastsPacket { deserializedPhysicsDebugRaycasts: DeserializedPhysicsDebugRaycasts; serverTick: number; }

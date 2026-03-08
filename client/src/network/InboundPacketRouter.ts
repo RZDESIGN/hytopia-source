@@ -138,8 +138,11 @@ inboundPacketHandlers[protocol.PacketId.NOTIFICATION_PERMISSION_REQUEST] = (_dat
   });
 };
 
-inboundPacketHandlers[protocol.PacketId.LIGHTS] = () => {
-  // NOOP - PointLight/SpotLight not supported with switch to MeshBasicMaterial, Reimplement later.
+inboundPacketHandlers[protocol.PacketId.LIGHTS] = (data, serverTick) => {
+  EventRouter.instance.emit(NetworkManagerEventType.LightsPacket, {
+    deserializedLights: Deserializer.deserializeLights(data as protocol.LightsSchema),
+    serverTick: serverTick as number,
+  });
 };
 
 inboundPacketHandlers[protocol.PacketId.PHYSICS_DEBUG_RAYCASTS] = (data, serverTick) => {

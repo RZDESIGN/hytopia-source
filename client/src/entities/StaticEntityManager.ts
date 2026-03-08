@@ -15,7 +15,6 @@ import EmissiveMeshBasicMaterial from '../gltf/EmissiveMeshBasicMaterial';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import EntityStats from './EntityStats';
 import type StaticEntity from './StaticEntity';
-import { FACE_SHADE_BOTTOM, FACE_SHADE_SIDE, FACE_SHADE_TOP, LIGHT_LEVEL_STRENGTH_MULTIPLIER } from '../blocks/BlockConstants';
 import type Game from '../Game';
 import Assets from '../network/Assets';
 import { updateAABB } from '../three/utils';
@@ -80,6 +79,8 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
     this.matrixAutoUpdate = false;
     this.matrixWorldAutoUpdate = false;
     this.frustumCulled = true;
+    this.castShadow = true;
+    this.receiveShadow = true;
     updateAABB(this);
 
     const instanceLightLevel = new InstancedBufferAttribute(new Float32Array(this.count), 1);
@@ -167,24 +168,6 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
         .replace(
           '#include <opaque_fragment>',
           `
-            // Base ambient lighting (replaces Three.js AmbientLight which doesn't affect MeshBasicMaterial)
-            vec3 ambientLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
-            // Block light contribution from emissive blocks
-            vec3 blockLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${INSTANCE_LIGHT_LEVEL_VARYING} * float(${LIGHT_LEVEL_STRENGTH_MULTIPLIER});
-            // Take the brighter of ambient or block light
-            outgoingLight *= max(ambientLight, blockLight);
-
-            // Face-based shading using polynomial approximation of Block values
-            // Polynomial coefficients derived from the three shading values
-            // Solves: f(1) = TOP, f(0) = SIDE, f(-1) = BOTTOM
-            float normalY = gl_FrontFacing ? ${WORLD_NORMAL_Y_VARYING} : -${WORLD_NORMAL_Y_VARYING};
-            float faceShade = ${FACE_SHADE_SIDE.toFixed(2)}
-                  + (${FACE_SHADE_TOP.toFixed(2)} - ${FACE_SHADE_BOTTOM.toFixed(2)}) * 0.5 * normalY
-                  + ((${FACE_SHADE_TOP.toFixed(2)} + ${FACE_SHADE_BOTTOM.toFixed(2)}) * 0.5 - ${FACE_SHADE_SIDE.toFixed(2)}) * normalY * normalY;
-
-            // Apply sky light (multiply like in chunks)
-            outgoingLight *= ${INSTANCE_SKY_LIGHT_VARYING} * faceShade;
-
             #include <opaque_fragment>
           `,
         );
@@ -193,8 +176,8 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
     this.material.addShaderProcessor((params: WebGLProgramParametersWithUniforms) => {
       params.fragmentShader = params.fragmentShader
         .replace(
-          'vec3 emissiveColor = customEmissive * customEmissiveIntensity;',
-          `vec3 emissiveColor = ${INSTANCE_EMISSIVE_VARYING}.rgb * ${INSTANCE_EMISSIVE_VARYING}.a;`,
+          'vec3 totalEmissiveRadiance = emissive;',
+          `vec3 totalEmissiveRadiance = ${INSTANCE_EMISSIVE_VARYING}.rgb * ${INSTANCE_EMISSIVE_VARYING}.a;`,
         );
     }, true);
   }

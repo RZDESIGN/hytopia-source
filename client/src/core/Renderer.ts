@@ -1,15 +1,19 @@
 import {
+  AmbientLight,
   BackSide,
   BoxGeometry,
   Color,
   CubeTexture,
   DepthTexture,
+  DirectionalLight,
   Fog,
   HalfFloatType,
   Mesh,
   MeshBasicMaterial,
   MultiplyBlending,
   Object3D,
+  OrthographicCamera,
+  PCFShadowMap,
   PlaneGeometry,
   RenderItem,
   Scene,
@@ -18,6 +22,8 @@ import {
   SRGBColorSpace,
   UniformsUtils,
   Vector2,
+  Vector3,
+  VSMShadowMap,
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three';
@@ -59,10 +65,25 @@ const SCENE_UI_MEDIUM_LOAD_MAX = 12;
 const SCENE_UI_LIGHT_RENDER_INTERVAL_S = 1 / 60;
 const SCENE_UI_MEDIUM_RENDER_INTERVAL_S = 1 / 30;
 const SCENE_UI_HEAVY_RENDER_INTERVAL_S = 1 / 20;
+const DIRECTIONAL_LIGHT_SHADOW_BIAS = -0.0002;
+const DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS = 0.02;
+const DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER = 1.5;
+const DIRECTIONAL_LIGHT_MIN_HEIGHT = 24;
+const DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO = 0.35;
+const DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S = 1 / 30;
+const DIRECTIONAL_LIGHT_SHADOW_IMMEDIATE_UPDATE_DISTANCE_RATIO = 0.5;
+const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_PARALLEL_THRESHOLD = 0.95;
+const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ = 0.000001;
 
 // Working variables
 const color = new Color();
 const vec2 = new Vector2();
+const vec3 = new Vector3();
+const vec3b = new Vector3();
+const vec3c = new Vector3();
+const vec3d = new Vector3();
+const WORLD_UP = new Vector3(0, 1, 0);
+const WORLD_RIGHT = new Vector3(1, 0, 0);
 
 // Simple data container for ambient light (replaces Three.js AmbientLight which has no effect on MeshBasicMaterial)
 export type AmbientLightData = {
@@ -138,6 +159,11 @@ export default class Renderer {
   private _fogColor: Color | null = null;
   private _fogFar = 100000;
   private _fogNear = 100000;
+  private _ambientSceneLight: AmbientLight;
+  private _ambientViewModelLight: AmbientLight;
+  private _directionalSceneLight: DirectionalLight;
+  private _directionalViewModelLight: DirectionalLight;
+  private _sunDirection: Vector3 = new Vector3(0.3, -1, 0.2).normalize();
   private _targetFogColor: Color = new Color();
   private _targetFogFar: number = 100000;
   private _targetFogNear: number = 100000;
@@ -162,6 +188,11 @@ export default class Renderer {
   private _adaptiveResolutionDownHoldS: number = 0;
   private _adaptiveResolutionUpHoldS: number = 0;
   private _smoothedFrameDeltaS: number = 1 / 60;
+  private _directionalShadowUpdateCooldownS: number = 0;
+  private _directionalShadowNeedsUpdate: boolean = true;
+  private _directionalShadowInitialized: boolean = false;
+  private _lastDirectionalShadowFocusCenter: Vector3 = new Vector3();
+  private _lastDirectionalShadowSunDirection: Vector3 = new Vector3();
   private _lastAppliedPixelRatio: number = 0;
   private _lastAppliedViewportWidth: number = 0;
   private _lastAppliedViewportHeight: number = 0;
@@ -170,6 +201,10 @@ export default class Renderer {
     this._game = game;
 
     this._ambientLight = { color: new Color(), intensity: 1 };
+    this._ambientSceneLight = new AmbientLight(0xffffff, 1);
+    this._ambientViewModelLight = new AmbientLight(0xffffff, 1);
+    this._directionalSceneLight = new DirectionalLight(0xffffff, 0);
+    this._directionalViewModelLight = new DirectionalLight(0xffffff, 0);
     // Anti-aliasing is handled in post-processing
     this._renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
     this._sceneUiRenderer = new CSS2DRenderer({ element: document.getElementById('scene-ui-container')! });
@@ -192,7 +227,7 @@ export default class Renderer {
     this._viewModelRenderPass.clear = false;
     this._viewModelRenderPass.clearDepth = true;
     this._outlinePass = new SelectiveOutlinePass(
-      this._game.camera.activeCamera,
+      this._game.camera.activeCamera as never,
       new Vector2(1, 1),
     );
     // Note: Size for Passes are set appropriately when EffectComposer size is set
@@ -358,6 +393,7 @@ export default class Renderer {
     this._updateSkybox(frameDeltaS);
     this._game.audioManager.update();
     this._updateSceneUI(frameDeltaS);
+    this._updateDirectionalLight(frameDeltaS);
 
     this._applyUnderWaterEffect();
     this._syncFirstPersonViewModelEntity();
@@ -374,7 +410,7 @@ export default class Renderer {
       this._bloomPass.enabled = !!pp.bloom;
       this._smaaPass.enabled = !!pp.smaa;
       if (hasOutlineTargets) {
-        this._outlinePass.camera = this._game.camera.activeCamera;
+        this._outlinePass.camera = this._game.camera.activeCamera as never;
         this._outlinePass.setOutlineTargets(this._game.entityManager.getOutlineTargets());
       } else {
         this._outlinePass.clearOutlineTargets();
@@ -485,19 +521,46 @@ export default class Renderer {
     if (deserializedWorld.ambientLightColor) {
       // Colors from protocol are authored as sRGB; convert once for correct linear lighting math.
       this._ambientLight.color.copy(deserializedWorld.ambientLightColor).convertSRGBToLinear();
+      this._ambientSceneLight.color.copy(this._ambientLight.color);
+      this._ambientViewModelLight.color.copy(this._ambientLight.color);
       needsTargetColorsUpdate = true;
     }
 
     if (deserializedWorld.ambientLightIntensity !== undefined) {
       this._ambientLight.intensity = deserializedWorld.ambientLightIntensity;
+      this._ambientSceneLight.intensity = deserializedWorld.ambientLightIntensity;
+      this._ambientViewModelLight.intensity = deserializedWorld.ambientLightIntensity;
       // Update bloom threshold dynamically based on ambient light intensity
       // Formula: ambientLightIntensity + 0.01 (accounting for smoothWidth=0.01)
       // This ensures white colors lit by ambient light don't trigger bloom
       this._bloomPass.threshold = this._calculateBloomThreshold();
     }
 
-    // Note: directionalLight properties from server are ignored since we no longer use
-    // DirectionalLight (MeshBasicMaterial doesn't respond to Three.js lights)
+    if (deserializedWorld.directionalLightColor) {
+      const directionalColor = color.copy(deserializedWorld.directionalLightColor).convertSRGBToLinear();
+      this._directionalSceneLight.color.copy(directionalColor);
+      this._directionalViewModelLight.color.copy(directionalColor);
+    }
+
+    if (deserializedWorld.directionalLightIntensity !== undefined) {
+      this._directionalSceneLight.intensity = deserializedWorld.directionalLightIntensity;
+      this._directionalViewModelLight.intensity = deserializedWorld.directionalLightIntensity;
+    }
+
+    if (deserializedWorld.directionalLightPosition) {
+      vec3.set(
+        deserializedWorld.directionalLightPosition.x,
+        deserializedWorld.directionalLightPosition.y,
+        deserializedWorld.directionalLightPosition.z,
+      );
+      if (vec3.lengthSq() > 0.0001) {
+        vec3.normalize().negate();
+        if (this._sunDirection.distanceToSquared(vec3) > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
+          this._sunDirection.copy(vec3);
+          this._markDirectionalShadowDirty();
+        }
+      }
+    }
 
     if (deserializedWorld.fogColor !== undefined) {
       // Ensure fog color is in linear color space for proper rendering
@@ -568,6 +631,8 @@ export default class Renderer {
     this._applyRenderResolution();
     this._clampTargetFogNearAndFar();
     this._setupFog();
+    this._applyShadowSettings();
+    this._updateDirectionalLight(0, true);
   };
 
   private _setupEventListeners(): void {
@@ -586,10 +651,6 @@ export default class Renderer {
     );
   }
 
-  // Note: No Three.js lights are added to the scene because MeshBasicMaterial doesn't
-  // respond to them. _ambientLight stores color and intensity values that are passed
-  // to custom shader uniforms manually.
-
   private _setupScene(): void {
     // Disable scene-level matrix auto-updates.
     // Note: object membership is still dynamic (e.g. first-person entity re-parenting
@@ -602,6 +663,22 @@ export default class Renderer {
     this._overlayScene.matrixWorldAutoUpdate = false;
     this._uiScene.matrixAutoUpdate = false;
     this._uiScene.matrixWorldAutoUpdate = false;
+
+    this._scene.add(this._ambientSceneLight);
+    this._scene.add(this._directionalSceneLight);
+    this._scene.add(this._directionalSceneLight.target);
+
+    this._viewModelScene.add(this._ambientViewModelLight);
+    this._viewModelScene.add(this._directionalViewModelLight);
+    this._viewModelScene.add(this._directionalViewModelLight.target);
+
+    this._directionalSceneLight.castShadow = true;
+    this._directionalSceneLight.shadow.bias = DIRECTIONAL_LIGHT_SHADOW_BIAS;
+    this._directionalSceneLight.shadow.normalBias = DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS;
+    this._directionalSceneLight.shadow.autoUpdate = false;
+    this._directionalViewModelLight.castShadow = false;
+    this._applyShadowSettings();
+    this._updateDirectionalLight(0, true);
   }
 
   private _syncFirstPersonViewModelEntity(): void {
@@ -752,8 +829,10 @@ export default class Renderer {
     this._applyRenderResolution();
     this._renderer.info.autoReset = false;
     this._renderer.localClippingEnabled = false;
+    this._renderer.shadowMap.enabled = true;
     // Be explicit about output space; this is cheap and avoids surprises across Three.js versions.
     this._renderer.outputColorSpace = SRGBColorSpace;
+    this._applyShadowSettings();
 
     this._renderer.setTransparentSort((a: RenderItem, b: RenderItem): number => {
       if (a.groupOrder !== b.groupOrder) {
@@ -788,6 +867,123 @@ export default class Renderer {
   private _setupSceneUiRenderer(): void {
     this._sceneUiRenderer.setSize(document.documentElement.clientWidth, document.documentElement.clientHeight);
     document.body.appendChild(this._sceneUiRenderer.domElement);
+  }
+
+  private _applyShadowSettings(): void {
+    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
+    this._renderer.shadowMap.enabled = shadows?.enabled ?? false;
+    this._renderer.shadowMap.type = shadows?.type === 'pcf' ? PCFShadowMap : VSMShadowMap;
+
+    const directionalMapSize = shadows?.directionalMapSize ?? 1024;
+    this._directionalSceneLight.shadow.mapSize.set(directionalMapSize, directionalMapSize);
+    this._directionalSceneLight.shadow.autoUpdate = false;
+    this._directionalSceneLight.castShadow = shadows?.enabled ?? false;
+    this._markDirectionalShadowDirty();
+  }
+
+  private _markDirectionalShadowDirty(): void {
+    this._directionalShadowNeedsUpdate = true;
+    this._directionalShadowUpdateCooldownS = 0;
+  }
+
+  private _snapDirectionalShadowFocusCenter(focusCenter: Vector3, directionalDistance: number, directionalMapSize: number): void {
+    const texelWorldSize = (directionalDistance * 2) / Math.max(1, directionalMapSize);
+
+    if (texelWorldSize <= 0) {
+      return;
+    }
+
+    const basisReference = Math.abs(this._sunDirection.dot(WORLD_UP)) < DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_PARALLEL_THRESHOLD
+      ? WORLD_UP
+      : WORLD_RIGHT;
+
+    vec3b.crossVectors(basisReference, this._sunDirection).normalize();
+    vec3c.crossVectors(this._sunDirection, vec3b).normalize();
+
+    const snappedX = Math.round(focusCenter.dot(vec3b) / texelWorldSize) * texelWorldSize;
+    const snappedY = Math.round(focusCenter.dot(vec3c) / texelWorldSize) * texelWorldSize;
+    const depth = focusCenter.dot(this._sunDirection);
+
+    focusCenter.copy(this._sunDirection).multiplyScalar(depth);
+    focusCenter.addScaledVector(vec3b, snappedX);
+    focusCenter.addScaledVector(vec3c, snappedY);
+  }
+
+  private _applyDirectionalLightFocusCenter(focusCenter: Vector3, lightHeight: number, directionalDistance: number): void {
+    this._directionalSceneLight.target.position.copy(focusCenter);
+    this._directionalSceneLight.target.updateMatrixWorld();
+    this._directionalSceneLight.position.copy(focusCenter).addScaledVector(this._sunDirection, -lightHeight);
+    this._directionalSceneLight.updateMatrixWorld();
+
+    const shadowCamera = this._directionalSceneLight.shadow.camera as OrthographicCamera;
+    shadowCamera.left = -directionalDistance;
+    shadowCamera.right = directionalDistance;
+    shadowCamera.top = directionalDistance;
+    shadowCamera.bottom = -directionalDistance;
+    shadowCamera.near = 0.5;
+    shadowCamera.far = Math.max(directionalDistance * 4, lightHeight * 2);
+    shadowCamera.updateProjectionMatrix();
+  }
+
+  private _updateDirectionalLight(frameDeltaS: number = 0, force: boolean = false): void {
+    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
+    const directionalDistance = shadows?.directionalDistance ?? 48;
+    const cameraPosition = this._game.camera.activeCamera.position;
+    const lightHeight = Math.max(DIRECTIONAL_LIGHT_MIN_HEIGHT, directionalDistance * DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER);
+    const directionalMapSize = this._directionalSceneLight.shadow.mapSize.x || shadows?.directionalMapSize || 1024;
+
+    this._directionalShadowUpdateCooldownS = Math.max(0, this._directionalShadowUpdateCooldownS - frameDeltaS);
+
+    vec3.copy(cameraPosition);
+    vec3d.copy(this._game.camera.activeViewDir);
+    if (vec3d.lengthSq() > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
+      vec3d.normalize();
+      vec3.addScaledVector(vec3d, directionalDistance * DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO);
+    }
+
+    if (shadows?.enabled) {
+      this._snapDirectionalShadowFocusCenter(vec3, directionalDistance, directionalMapSize);
+    }
+
+    this._directionalViewModelLight.target.position.set(0, 0, -1);
+    this._directionalViewModelLight.target.updateMatrixWorld();
+    this._directionalViewModelLight.position.copy(this._sunDirection).multiplyScalar(-lightHeight * 0.25);
+    this._directionalViewModelLight.updateMatrixWorld();
+
+    if (!shadows?.enabled) {
+      this._applyDirectionalLightFocusCenter(vec3, lightHeight, directionalDistance);
+      this._directionalShadowInitialized = true;
+      this._directionalShadowNeedsUpdate = false;
+      this._lastDirectionalShadowFocusCenter.copy(vec3);
+      this._lastDirectionalShadowSunDirection.copy(this._sunDirection);
+      return;
+    }
+
+    const focusDeltaSq = this._directionalShadowInitialized
+      ? this._lastDirectionalShadowFocusCenter.distanceToSquared(vec3)
+      : Number.POSITIVE_INFINITY;
+    const immediateUpdateDistance = directionalDistance * DIRECTIONAL_LIGHT_SHADOW_IMMEDIATE_UPDATE_DISTANCE_RATIO;
+    const sunDirectionChanged = !this._directionalShadowInitialized
+      || this._lastDirectionalShadowSunDirection.distanceToSquared(this._sunDirection) > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ;
+    const focusCenterChanged = !this._directionalShadowInitialized
+      || focusDeltaSq > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ;
+    const shouldRefreshShadow = force
+      || this._directionalShadowNeedsUpdate
+      || sunDirectionChanged
+      || focusDeltaSq >= immediateUpdateDistance * immediateUpdateDistance
+      || (focusCenterChanged && this._directionalShadowUpdateCooldownS <= 0);
+
+    if (!shouldRefreshShadow) {
+      return;
+    }
+
+    this._applyDirectionalLightFocusCenter(vec3, lightHeight, directionalDistance);
+    this._directionalSceneLight.shadow.needsUpdate = true;
+    this._directionalShadowNeedsUpdate = false;
+    this._directionalShadowInitialized = true;
+    this._directionalShadowUpdateCooldownS = DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S;
+    this._lastDirectionalShadowFocusCenter.copy(vec3);
+    this._lastDirectionalShadowSunDirection.copy(this._sunDirection);
   }
 
   private _createUnderWaterEffectQuad(): Mesh {

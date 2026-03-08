@@ -1,4 +1,4 @@
-import { BufferAttribute, BufferGeometry, Material, Mesh, MeshBasicMaterial, ShaderMaterial, Vector2, Vector3 } from 'three';
+import { BufferAttribute, BufferGeometry, Material, Mesh, ShaderMaterial, Vector2, Vector3 } from 'three';
 import Chunk from './Chunk';
 import {
   BATCH_WORLD_SIZE,
@@ -25,12 +25,12 @@ export default class ChunkMeshManager {
   private _game: Game;
   private _batchFoliageMeshes: Map<BatchId, Mesh<BufferGeometry, ShaderMaterial>> = new Map();
   private _batchLiquidMeshes: Map<BatchId, Mesh<BufferGeometry, ShaderMaterial>> = new Map();
-  private _batchOpaqueSolidMeshes: Map<BatchId, Mesh<BufferGeometry, MeshBasicMaterial>> = new Map();
-  private _batchTransparentSolidMeshes: Map<BatchId, Mesh<BufferGeometry, MeshBasicMaterial>> = new Map();
+  private _batchOpaqueSolidMeshes: Map<BatchId, Mesh<BufferGeometry, Material>> = new Map();
+  private _batchTransparentSolidMeshes: Map<BatchId, Mesh<BufferGeometry, Material>> = new Map();
   // Track all batch IDs for efficient iteration
   private _batchIds: Set<BatchId> = new Set();
-  private _nearbySolidMeshes: Mesh<BufferGeometry, MeshBasicMaterial>[] = [];
-  private _solidMeshesInScene: Mesh<BufferGeometry, MeshBasicMaterial>[] = [];
+  private _nearbySolidMeshes: Mesh<BufferGeometry, Material>[] = [];
+  private _solidMeshesInScene: Mesh<BufferGeometry, Material>[] = [];
   private _solidMeshesInSceneDirty: boolean = true;
 
   public constructor(game: Game) {
@@ -49,7 +49,14 @@ export default class ChunkMeshManager {
     return this._batchIds.has(batchId);
   }
 
-  private _createOrUpdateMesh(id: BatchId, data: BlocksBufferGeometryData, cache: Map<BatchId, Mesh>, material: Material): Mesh {
+  private _createOrUpdateMesh(
+    id: BatchId,
+    data: BlocksBufferGeometryData,
+    cache: Map<BatchId, Mesh>,
+    material: Material,
+    castShadow: boolean,
+    receiveShadow: boolean,
+  ): Mesh {
     const { positions, normals, uvs, indices, colors, lightLevels, foamLevels, foamLevelsDiag, surfaceFlags, windData } = data;
 
     let mesh = cache.get(id);
@@ -124,6 +131,8 @@ export default class ChunkMeshManager {
       this._batchIds.add(id);
     }
 
+    mesh.castShadow = castShadow;
+    mesh.receiveShadow = receiveShadow;
     updateAABB(mesh);
 
     return mesh;
@@ -166,6 +175,8 @@ export default class ChunkMeshManager {
       data,
       this._batchFoliageMeshes,
       this._game.blockMaterialManager.foliageMaterial,
+      true,
+      false,
     );
   }
 
@@ -175,6 +186,8 @@ export default class ChunkMeshManager {
       data,
       this._batchLiquidMeshes,
       this._game.blockMaterialManager.liquidMaterial,
+      false,
+      false,
     );
   }
 
@@ -184,6 +197,8 @@ export default class ChunkMeshManager {
       data,
       this._batchOpaqueSolidMeshes,
       !!data.lightLevels ? this._game.blockMaterialManager.opaqueMaterial : this._game.blockMaterialManager.opaqueNonLitMaterial,
+      true,
+      true,
     );
   }
 
@@ -193,6 +208,8 @@ export default class ChunkMeshManager {
       data,
       this._batchTransparentSolidMeshes,
       !!data.lightLevels ? this._game.blockMaterialManager.transparentMaterial : this._game.blockMaterialManager.transparentNonLitMaterial,
+      true,
+      true,
     );
   }
 
@@ -313,7 +330,7 @@ export default class ChunkMeshManager {
     }
   }
 
-  public get solidMeshesInScene(): Mesh<BufferGeometry, MeshBasicMaterial>[] {
+  public get solidMeshesInScene(): Mesh<BufferGeometry, Material>[] {
     if (this._solidMeshesInSceneDirty) {
       this._solidMeshesInScene.length = 0;
       for (const mesh of this._batchOpaqueSolidMeshes.values()) {
@@ -331,7 +348,7 @@ export default class ChunkMeshManager {
     return this._solidMeshesInScene;
   }
 
-  public getSolidMeshesNear(worldPosition: { x: number, y: number, z: number }, maxDistance: number): Mesh<BufferGeometry, MeshBasicMaterial>[] {
+  public getSolidMeshesNear(worldPosition: { x: number, y: number, z: number }, maxDistance: number): Mesh<BufferGeometry, Material>[] {
     const nearbySolidMeshes = this._nearbySolidMeshes;
     nearbySolidMeshes.length = 0;
 
@@ -366,11 +383,11 @@ export default class ChunkMeshManager {
     return nearbySolidMeshes;
   }
 
-  public get opaqueSolidMeshes(): IterableIterator<Mesh<BufferGeometry, MeshBasicMaterial>> {
+  public get opaqueSolidMeshes(): IterableIterator<Mesh<BufferGeometry, Material>> {
     return this._batchOpaqueSolidMeshes.values();
   }
 
-  public get transparentSolidMeshes(): IterableIterator<Mesh<BufferGeometry, MeshBasicMaterial>> {
+  public get transparentSolidMeshes(): IterableIterator<Mesh<BufferGeometry, Material>> {
     return this._batchTransparentSolidMeshes.values();
   }
 

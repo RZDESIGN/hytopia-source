@@ -130,6 +130,23 @@ export type DeserializedEntity = {
 }
 export type DeserializedEntities = DeserializedEntity[];
 
+export type DeserializedLight = {
+  id: number;
+  angle?: number;
+  attachedToEntityId?: number;
+  color?: THREE.Color;
+  distance?: number;
+  intensity?: number;
+  offset?: THREE.Vector3Like;
+  position?: THREE.Vector3Like;
+  penumbra?: number;
+  removed?: boolean;
+  trackedEntityId?: number;
+  trackedPosition?: THREE.Vector3Like;
+  type?: number;
+}
+export type DeserializedLights = DeserializedLight[];
+
 export type DeserializedModelAnimation = {
   name: string;
   blendMode?: number;
@@ -600,6 +617,34 @@ export default class Deserializer {
     }
 
     return deserializedParticleEmitters;
+  }
+
+  public static deserializeLight(light: protocol.LightSchema): DeserializedLight {
+    return {
+      id: light.i,
+      angle: light.a,
+      attachedToEntityId: light.e ?? undefined,
+      color: light.c ? new THREE.Color(light.c[0] / 255, light.c[1] / 255, light.c[2] / 255) : undefined,
+      distance: light.d,
+      intensity: light.n,
+      offset: light.o ? this.deserializeVector(light.o) : undefined,
+      position: light.p ? this.deserializeVector(light.p) : undefined,
+      penumbra: light.pe,
+      removed: light.rm,
+      trackedEntityId: light.te ?? undefined,
+      trackedPosition: light.tp ? this.deserializeVector(light.tp) : undefined,
+      type: light.t,
+    };
+  }
+
+  public static deserializeLights(lights: protocol.LightsSchema): DeserializedLights {
+    const deserializedLights = new Array<DeserializedLight>(lights.length);
+
+    for (let i = 0; i < lights.length; i++) {
+      deserializedLights[i] = this.deserializeLight(lights[i]);
+    }
+
+    return deserializedLights;
   }
 
   public static deserializePhysicsDebugRaycast(physicsDebugRaycast: protocol.PhysicsDebugRaycastSchema): DeserializedPhysicsDebugRaycast {

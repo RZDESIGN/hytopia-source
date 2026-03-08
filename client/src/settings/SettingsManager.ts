@@ -20,6 +20,14 @@ type QualityPerfTradeoff = {
   blobShadows?: {
     enabled: boolean;
   },
+  shadows?: {
+    enabled: boolean;
+    type: 'pcf' | 'vsm';
+    directionalDistance: number;
+    directionalMapSize: number;
+    spotlightMapSize: number;
+    maxSpotlightShadows: number;
+  },
   resolution: {
     multiplier: number,
   },
@@ -63,7 +71,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   ULTRA: {
     antialias: true,
     blobShadows: {
+      enabled: false,
+    },
+    shadows: {
       enabled: true,
+      type: 'vsm',
+      directionalDistance: 96,
+      directionalMapSize: 2048,
+      spotlightMapSize: 1024,
+      maxSpotlightShadows: 2,
     },
     resolution: { multiplier: 2.0 },
     viewDistance: {
@@ -80,7 +96,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   HIGH: {
     antialias: true,
     blobShadows: {
+      enabled: false,
+    },
+    shadows: {
       enabled: true,
+      type: 'vsm',
+      directionalDistance: 72,
+      directionalMapSize: 1024,
+      spotlightMapSize: 512,
+      maxSpotlightShadows: 1,
     },
     resolution: { multiplier: 1.5 },
     viewDistance: {
@@ -97,7 +121,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   MEDIUM: {
     antialias: true,
     blobShadows: {
+      enabled: false,
+    },
+    shadows: {
       enabled: true,
+      type: 'vsm',
+      directionalDistance: 48,
+      directionalMapSize: 1024,
+      spotlightMapSize: 512,
+      maxSpotlightShadows: 1,
     },
     resolution: { multiplier: 1.0 },
     viewDistance: {
@@ -125,6 +157,14 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     blobShadows: {
       enabled: false,
     },
+    shadows: {
+      enabled: false,
+      type: 'pcf',
+      directionalDistance: 32,
+      directionalMapSize: 512,
+      spotlightMapSize: 256,
+      maxSpotlightShadows: 0,
+    },
     resolution: { multiplier: 0.85 },
     viewDistance: {
       enabled: true,
@@ -142,6 +182,14 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     antialias: true,
     blobShadows: {
       enabled: false,
+    },
+    shadows: {
+      enabled: false,
+      type: 'pcf',
+      directionalDistance: 32,
+      directionalMapSize: 512,
+      spotlightMapSize: 256,
+      maxSpotlightShadows: 0,
     },
     resolution: { multiplier: 0.5 },
     viewDistance: {
