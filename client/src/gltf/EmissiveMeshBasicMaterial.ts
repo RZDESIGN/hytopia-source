@@ -6,6 +6,7 @@ import {
   WebGLProgramParametersWithUniforms,
   WebGLRenderer,
 } from 'three';
+import { applyDirectionalShadowEdgeFade } from '../three/directionalShadowFade';
 
 export type ShaderProcessor = (params: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer) => void;
 
@@ -67,6 +68,8 @@ export default class EmissiveMeshBasicMaterial extends MeshPhongMaterial {
     for (const processor of this._shaderProcessors) {
       processor(params, renderer);
     }
+
+    params.fragmentShader = applyDirectionalShadowEdgeFade(params.fragmentShader);
   }
 
   clone(): this {

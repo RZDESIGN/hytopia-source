@@ -444,6 +444,8 @@ export default class EntityManager {
       visibleDynamicEntities[i].updateWorldMatrices(this._hasLightLevelVolumeUpdatedOnce);
     }
 
+    this._staticEnvironmentEntityManager.updateShadowCasterLod();
+
     // Sixth pass: Light level update
     // LightLevel is only needed when a Light Emission Block is placed. However, in most maps, Light Emission
     // Blocks are probably not placed at all. Therefore, detects whether a Light Level Volume has ever been

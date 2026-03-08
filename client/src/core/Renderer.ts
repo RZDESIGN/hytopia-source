@@ -86,15 +86,15 @@ const WATER_REFLECTION_TEXTURE_SIZE_HIGH = 512;
 const WATER_REFLECTION_TEXTURE_SIZE_MEDIUM = 384;
 const WATER_REFLECTION_TEXTURE_SIZE_LOW = 256;
 const WATER_REFLECTION_CLIP_BIAS = 0.01;
-const WATER_REFLECTION_UPDATE_INTERVAL_HIGH_S = 1 / 15;
-const WATER_REFLECTION_UPDATE_INTERVAL_MEDIUM_S = 1 / 10;
-const WATER_REFLECTION_UPDATE_INTERVAL_LOW_S = 1 / 6;
-const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_HIGH = 0.3 * 0.3;
-const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_MEDIUM = 0.55 * 0.55;
-const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_LOW = 0.85 * 0.85;
-const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_HIGH = 0.9988;
-const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_MEDIUM = 0.9976;
-const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_LOW = 0.996;
+const WATER_REFLECTION_UPDATE_INTERVAL_HIGH_S = 1 / 24;
+const WATER_REFLECTION_UPDATE_INTERVAL_MEDIUM_S = 1 / 12;
+const WATER_REFLECTION_UPDATE_INTERVAL_LOW_S = 1 / 8;
+const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_HIGH = 0.18 * 0.18;
+const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_MEDIUM = 0.4 * 0.4;
+const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_LOW = 0.65 * 0.65;
+const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_HIGH = 0.9992;
+const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_MEDIUM = 0.9984;
+const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_LOW = 0.9972;
 const WATER_REFLECTION_MAX_DISTANCE = 84;
 
 // Working variables
@@ -991,7 +991,11 @@ export default class Renderer {
   }
 
   private _resolveWaterReflectionQuality(coverage: number, centerHit: boolean): WaterReflectionQuality {
-    if (centerHit || coverage >= 0.55) {
+    const currentTextureSize = this._waterReflectionRenderTarget.width;
+    const keepHighQuality = currentTextureSize >= WATER_REFLECTION_TEXTURE_SIZE_HIGH && (centerHit || coverage >= 0.42);
+    const keepMediumQuality = currentTextureSize >= WATER_REFLECTION_TEXTURE_SIZE_MEDIUM && coverage >= 0.16;
+
+    if (centerHit || coverage >= 0.55 || keepHighQuality) {
       return {
         cameraPositionDeltaSq: WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_HIGH,
         textureSize: WATER_REFLECTION_TEXTURE_SIZE_HIGH,
@@ -1000,7 +1004,7 @@ export default class Renderer {
       };
     }
 
-    if (coverage >= 0.22) {
+    if (coverage >= 0.22 || keepMediumQuality) {
       return {
         cameraPositionDeltaSq: WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_MEDIUM,
         textureSize: WATER_REFLECTION_TEXTURE_SIZE_MEDIUM,

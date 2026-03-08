@@ -45,6 +45,9 @@ const WORLD_NORMAL_Y_VARYING = 'vWorldNormalY';
 
 const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
 const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
+const STATIC_INSTANCE_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO = 0.75;
+const STATIC_INSTANCE_SHADOW_LOD_FOCUS_PADDING_RATIO = 0.3;
+const STATIC_INSTANCE_SHADOW_LOD_MIN_PROJECTED_RADIUS = 0.02;
 
 // Working variables
 const mat4 = new Matrix4();
@@ -57,11 +60,13 @@ const UNIFORM_VIEW_DISTANCE_SQUARED = 'viewDistanceSquared';
 // There is a lot of duplicated code for shader hacks across other modules, so I
 // want to consolidate it and manage it in one place.
 class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMeshBasicMaterial> {
+  private _game: Game;
   private _uniforms: Record<string, { value: number | Color }>;
 
   constructor(game: Game, geometry: BufferGeometry, material: EmissiveMeshBasicMaterial, count: number) {
     super(geometry, material, count);
 
+    this._game = game;
     this._uniforms = {
       [UNIFORM_VIEW_DISTANCE_SQUARED]: {
         get value(): number { return Math.pow(game.renderer.viewDistance, 2); },
@@ -180,6 +185,39 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
           `vec3 totalEmissiveRadiance = ${INSTANCE_EMISSIVE_VARYING}.rgb * ${INSTANCE_EMISSIVE_VARYING}.a;`,
         );
     }, true);
+  }
+
+  public updateShadowCasterLod(): void {
+    if (this.count <= 0 || this.boundingSphere === null) {
+      this.castShadow = false;
+      return;
+    }
+
+    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
+    if (!shadows?.enabled) {
+      this.castShadow = false;
+      return;
+    }
+
+    const cameraPosition = this._game.camera.activeCamera.position;
+    const shadowFocusCenter = this._game.renderer.directionalShadowFocusCenter;
+    const directionalShadowDistance = this._game.renderer.directionalShadowDistance;
+    const distanceToCamera = this.boundingSphere.center.distanceTo(cameraPosition);
+    const maxCasterDistance = Math.min(
+      this._game.renderer.viewDistance * STATIC_INSTANCE_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO,
+      directionalShadowDistance * 1.9 + this.boundingSphere.radius * 1.5,
+    );
+    const focusRadius = directionalShadowDistance * (1 + STATIC_INSTANCE_SHADOW_LOD_FOCUS_PADDING_RATIO) + this.boundingSphere.radius;
+    const dxFocus = this.boundingSphere.center.x - shadowFocusCenter.x;
+    const dzFocus = this.boundingSphere.center.z - shadowFocusCenter.z;
+    const projectedRadius = this.boundingSphere.radius / Math.max(distanceToCamera, 1);
+
+    this.castShadow = distanceToCamera <= maxCasterDistance
+      && (dxFocus * dxFocus + dzFocus * dzFocus) <= focusRadius * focusRadius
+      && (
+        projectedRadius >= STATIC_INSTANCE_SHADOW_LOD_MIN_PROJECTED_RADIUS
+        || distanceToCamera <= directionalShadowDistance
+      );
   }
 
   public dispose(): this {
@@ -345,6 +383,8 @@ export default class StaticEntityManager {
       } else {
         instancedMesh.boundingSphere.union(sphere);
       }
+
+      instancedMesh.updateShadowCasterLod();
     });
   }
 
@@ -374,6 +414,14 @@ export default class StaticEntityManager {
       }
       for (const instancedMesh of entry.sourceToInstancedMesh.values()) {
         instancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE)!.needsUpdate = true;
+      }
+    }
+  }
+
+  public updateShadowCasterLod(): void {
+    for (const entry of this._uriToEntry.values()) {
+      for (const instancedMesh of entry.sourceToInstancedMesh.values()) {
+        instancedMesh.updateShadowCasterLod();
       }
     }
   }

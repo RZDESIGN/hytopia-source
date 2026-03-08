@@ -7,10 +7,13 @@ import {
   ShaderMaterial,
   Texture,
   Vector3,
+  WebGLProgramParametersWithUniforms,
+  WebGLRenderer,
 } from 'three';
 import { ALPHA_TEST_THRESHOLD, BlockTextureAtlasEventType, WATER_SURFACE_Y_OFFSET } from './BlockConstants';
 import Game from '../Game';
 import EventRouter from '../events/EventRouter';
+import { applyDirectionalShadowEdgeFade } from '../three/directionalShadowFade';
 
 const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
 const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
@@ -28,6 +31,11 @@ class MeshBlockMaterial extends MeshPhongMaterial {
     });
 
     this.name = hasLightLevel ? 'MeshBlockMaterial' : 'MeshBlockMaterialNonLit';
+  }
+
+  public override onBeforeCompile(params: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer): void {
+    super.onBeforeCompile(params, renderer);
+    params.fragmentShader = applyDirectionalShadowEdgeFade(params.fragmentShader);
   }
 }
 
@@ -205,11 +213,16 @@ class MeshLiquidMaterial extends ShaderMaterial {
                 vec2 projectedReflectionUv = reflectionUv.xy / max(reflectionUv.w, 0.0001);
                 vec2 projectedReflectionOffset = rippleNormal * mix(0.010, 0.018, fresnel);
                 vec2 reflectionSampleUv = projectedReflectionUv + projectedReflectionOffset;
+                float edgeDistance = min(
+                  min(reflectionSampleUv.x, reflectionSampleUv.y),
+                  min(1.0 - reflectionSampleUv.x, 1.0 - reflectionSampleUv.y)
+                );
+                float reflectionEdgeFade = smoothstep(0.004, 0.085, edgeDistance);
                 float inBounds = step(0.0, reflectionSampleUv.x) * step(reflectionSampleUv.x, 1.0)
                   * step(0.0, reflectionSampleUv.y) * step(reflectionSampleUv.y, 1.0)
                   * step(0.0, reflectionUv.w);
                 vec3 sceneReflection = texture2D(${UNIFORM_REFLECTION_TEXTURE}, clamp(reflectionSampleUv, 0.0, 1.0)).rgb;
-                reflectionColor = mix(reflectionColor, sceneReflection, inBounds * 0.88);
+                reflectionColor = mix(reflectionColor, sceneReflection, inBounds * reflectionEdgeFade * 0.88);
               }
               float sunGlint = pow(max(dot(reflectionDir, normalize(-${UNIFORM_SUN_DIRECTION})), 0.0), 112.0)
                 * (0.10 + 0.68 * fresnel)
