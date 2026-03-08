@@ -29,6 +29,7 @@ export default class ChunkMeshManager {
   private _batchTransparentSolidMeshes: Map<BatchId, Mesh<BufferGeometry, Material>> = new Map();
   // Track all batch IDs for efficient iteration
   private _batchIds: Set<BatchId> = new Set();
+  private _liquidMeshesInScene: Mesh<BufferGeometry, ShaderMaterial>[] = [];
   private _nearbySolidMeshes: Mesh<BufferGeometry, Material>[] = [];
   private _solidMeshesInScene: Mesh<BufferGeometry, Material>[] = [];
   private _solidMeshesInSceneDirty: boolean = true;
@@ -346,6 +347,18 @@ export default class ChunkMeshManager {
       this._solidMeshesInSceneDirty = false;
     }
     return this._solidMeshesInScene;
+  }
+
+  public get liquidMeshesInScene(): Mesh<BufferGeometry, ShaderMaterial>[] {
+    this._liquidMeshesInScene.length = 0;
+
+    for (const mesh of this._batchLiquidMeshes.values()) {
+      if (mesh.parent) {
+        this._liquidMeshesInScene.push(mesh);
+      }
+    }
+
+    return this._liquidMeshesInScene;
   }
 
   public getSolidMeshesNear(worldPosition: { x: number, y: number, z: number }, maxDistance: number): Mesh<BufferGeometry, Material>[] {

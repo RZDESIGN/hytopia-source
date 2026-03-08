@@ -2,8 +2,10 @@ import {
   Color,
   DoubleSide,
   FrontSide,
+  Matrix4,
   MeshPhongMaterial,
   ShaderMaterial,
+  Texture,
   Vector3,
 } from 'three';
 import { ALPHA_TEST_THRESHOLD, BlockTextureAtlasEventType, WATER_SURFACE_Y_OFFSET } from './BlockConstants';
@@ -32,6 +34,14 @@ class MeshBlockMaterial extends MeshPhongMaterial {
 const UNIFORM_TIME = 'time';
 const UNIFORM_TEXTURE_ATLAS = 'textureAtlas';
 const UNIFORM_AMBIENT_LIGHT_COLOR = 'ambientLightColor';
+const UNIFORM_FOG_REFLECTION_COLOR = 'fogReflectionColor';
+const UNIFORM_SKY_REFLECTION_COLOR = 'skyReflectionColor';
+const UNIFORM_SUN_COLOR = 'sunColor';
+const UNIFORM_SUN_DIRECTION = 'sunDirection';
+const UNIFORM_SUN_INTENSITY = 'sunIntensity';
+const UNIFORM_REFLECTION_TEXTURE = 'reflectionTexture';
+const UNIFORM_REFLECTION_TEXTURE_MATRIX = 'reflectionTextureMatrix';
+const UNIFORM_REFLECTION_ENABLED = 'reflectionEnabled';
 const UNIFORM_INTERACTION_CENTER = 'interactionCenter';
 const ATTRIBUTE_FOAM_LEVEL = 'foamLevel';
 const ATTRIBUTE_FOAM_LEVEL_DIAG = 'foamLevelDiag';
@@ -46,6 +56,14 @@ class MeshLiquidMaterial extends ShaderMaterial {
         [UNIFORM_TIME]: { value: 0 },
         [UNIFORM_TEXTURE_ATLAS]: { value: null }, // set later
         [UNIFORM_AMBIENT_LIGHT_COLOR]: { value: new Color() },
+        [UNIFORM_FOG_REFLECTION_COLOR]: { value: new Color() },
+        [UNIFORM_SKY_REFLECTION_COLOR]: { value: new Color() },
+        [UNIFORM_SUN_COLOR]: { value: new Color(1, 1, 1) },
+        [UNIFORM_SUN_DIRECTION]: { value: new Vector3(0.3, -1, 0.2).normalize() },
+        [UNIFORM_SUN_INTENSITY]: { value: 0 },
+        [UNIFORM_REFLECTION_TEXTURE]: { value: null },
+        [UNIFORM_REFLECTION_TEXTURE_MATRIX]: { value: new Matrix4() },
+        [UNIFORM_REFLECTION_ENABLED]: { value: 0 },
       },
       vertexShader: `
         uniform float ${UNIFORM_TIME};
@@ -71,8 +89,6 @@ class MeshLiquidMaterial extends ShaderMaterial {
 
           // Calculate world position and view vector
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
-          vWorldPos = worldPos.xyz;
-          vViewVector = normalize(cameraPosition - worldPos.xyz);
 
           // Wave animation calculations
           vec3 pos = position;
@@ -110,6 +126,10 @@ class MeshLiquidMaterial extends ShaderMaterial {
             if (absNormalZ > 0.5) pos.z -= sign(normal.z) * depression;
           }
 
+          vec4 displacedWorldPos = modelMatrix * vec4(pos, 1.0);
+          vWorldPos = displacedWorldPos.xyz;
+          vViewVector = normalize(cameraPosition - displacedWorldPos.xyz);
+
           gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
         }
       `,
@@ -117,6 +137,14 @@ class MeshLiquidMaterial extends ShaderMaterial {
         uniform float ${UNIFORM_TIME};
         uniform sampler2D ${UNIFORM_TEXTURE_ATLAS};
         uniform vec3 ${UNIFORM_AMBIENT_LIGHT_COLOR};
+        uniform vec3 ${UNIFORM_FOG_REFLECTION_COLOR};
+        uniform vec3 ${UNIFORM_SKY_REFLECTION_COLOR};
+        uniform vec3 ${UNIFORM_SUN_COLOR};
+        uniform vec3 ${UNIFORM_SUN_DIRECTION};
+        uniform float ${UNIFORM_SUN_INTENSITY};
+        uniform sampler2D ${UNIFORM_REFLECTION_TEXTURE};
+        uniform mat4 ${UNIFORM_REFLECTION_TEXTURE_MATRIX};
+        uniform float ${UNIFORM_REFLECTION_ENABLED};
 
         varying vec3 vNormal;
         varying vec3 vViewVector;
@@ -159,13 +187,43 @@ class MeshLiquidMaterial extends ShaderMaterial {
 
           // Only the top block in a liquid column should look like a surface.
           if (vSurfaceFlag > 0.5 && vNormal.y > 0.5) {
-              float fresnel = pow(1.0 - clamp(abs(dot(surfaceNormal, normalize(vViewVector))), 0.0, 1.0), 4.0);
-              float waveLighting = sin(dot(vWorldPos.xz, vec2(2.0)) + ${UNIFORM_TIME} * 0.5) * 0.1;
+              vec2 ripplePhase = vWorldPos.xz * vec2(0.24, 0.21) + vec2(${UNIFORM_TIME} * 0.18, -${UNIFORM_TIME} * 0.14);
+              vec2 detailPhase = vWorldPos.xz * vec2(0.58, 0.51) + vec2(-${UNIFORM_TIME} * 0.11, ${UNIFORM_TIME} * 0.09);
+              vec2 rippleNormal = vec2(
+                sin(ripplePhase.x) * 0.028 + cos(ripplePhase.y * 1.18) * 0.018 + sin(detailPhase.x * 1.07) * 0.010,
+                cos(ripplePhase.x * 0.92) * 0.024 + sin(ripplePhase.y * 1.09) * 0.016 + cos(detailPhase.y * 0.96) * 0.010
+              );
+              surfaceNormal = normalize(vec3(surfaceNormal.x + rippleNormal.x, surfaceNormal.y + 0.35, surfaceNormal.z + rippleNormal.y));
+
+              vec3 viewDir = normalize(vViewVector);
+              vec3 reflectionDir = reflect(-viewDir, surfaceNormal);
+              float fresnel = pow(1.0 - clamp(dot(surfaceNormal, viewDir), 0.0, 1.0), 3.6);
+              float horizonFactor = smoothstep(-0.2, 0.65, reflectionDir.y);
+              vec3 reflectionColor = mix(${UNIFORM_FOG_REFLECTION_COLOR}, ${UNIFORM_SKY_REFLECTION_COLOR}, horizonFactor);
+              if (${UNIFORM_REFLECTION_ENABLED} > 0.5) {
+                vec4 reflectionUv = ${UNIFORM_REFLECTION_TEXTURE_MATRIX} * vec4(vWorldPos, 1.0);
+                vec2 projectedReflectionUv = reflectionUv.xy / max(reflectionUv.w, 0.0001);
+                vec2 projectedReflectionOffset = rippleNormal * mix(0.010, 0.018, fresnel);
+                vec2 reflectionSampleUv = projectedReflectionUv + projectedReflectionOffset;
+                float inBounds = step(0.0, reflectionSampleUv.x) * step(reflectionSampleUv.x, 1.0)
+                  * step(0.0, reflectionSampleUv.y) * step(reflectionSampleUv.y, 1.0)
+                  * step(0.0, reflectionUv.w);
+                vec3 sceneReflection = texture2D(${UNIFORM_REFLECTION_TEXTURE}, clamp(reflectionSampleUv, 0.0, 1.0)).rgb;
+                reflectionColor = mix(reflectionColor, sceneReflection, inBounds * 0.88);
+              }
+              float sunGlint = pow(max(dot(reflectionDir, normalize(-${UNIFORM_SUN_DIRECTION})), 0.0), 112.0)
+                * (0.10 + 0.68 * fresnel)
+                * ${UNIFORM_SUN_INTENSITY};
+              float waveLighting = sin(dot(vWorldPos.xz, vec2(1.35, 1.15)) + ${UNIFORM_TIME} * 0.24) * 0.06;
+              float reflectionStrength = clamp(0.34 + fresnel * 0.62, 0.0, 0.96);
 
               // Combine lighting effects
-              color = color * 0.85 +
-                      vec3(0.08, 0.12, 0.15) * fresnel +
-                      vec3(0.03, 0.05, 0.08) * waveLighting;
+              color = mix(
+                color * (0.62 + waveLighting * 0.05) + vec3(0.02, 0.04, 0.07) * (0.72 + waveLighting),
+                reflectionColor + ${UNIFORM_SUN_COLOR} * sunGlint,
+                reflectionStrength
+              );
+              color += ${UNIFORM_SUN_COLOR} * sunGlint * 0.72;
 
               vec2 blockPos = fract(vWorldPos.xz);
               float foamWidth = 0.10;
@@ -216,9 +274,28 @@ class MeshLiquidMaterial extends ShaderMaterial {
     });
   }
 
-  public update(ambientLightColor: Color, ambientLightIntensity: number): void {
+  public update(
+    ambientLightColor: Color,
+    ambientLightIntensity: number,
+    fogReflectionColor: Color,
+    skyReflectionColor: Color,
+    sunDirection: Vector3,
+    sunColor: Color,
+    sunIntensity: number,
+  ): void {
     this.uniforms[UNIFORM_TIME].value += 0.0075;
     this.uniforms[UNIFORM_AMBIENT_LIGHT_COLOR].value.copy(ambientLightColor).multiplyScalar(ambientLightIntensity);
+    this.uniforms[UNIFORM_FOG_REFLECTION_COLOR].value.copy(fogReflectionColor);
+    this.uniforms[UNIFORM_SKY_REFLECTION_COLOR].value.copy(skyReflectionColor);
+    this.uniforms[UNIFORM_SUN_DIRECTION].value.copy(sunDirection);
+    this.uniforms[UNIFORM_SUN_COLOR].value.copy(sunColor);
+    this.uniforms[UNIFORM_SUN_INTENSITY].value = sunIntensity;
+  }
+
+  public setReflection(reflectionTexture: Texture | null, reflectionTextureMatrix: Matrix4, enabled: boolean): void {
+    this.uniforms[UNIFORM_REFLECTION_TEXTURE].value = reflectionTexture;
+    this.uniforms[UNIFORM_REFLECTION_TEXTURE_MATRIX].value.copy(reflectionTextureMatrix);
+    this.uniforms[UNIFORM_REFLECTION_ENABLED].value = enabled ? 1 : 0;
   }
 }
 
@@ -368,10 +445,19 @@ export default class BlockMaterialManager {
   public get foliageMaterial(): MeshFoliageMaterial { return this._foliageMaterial; }
   public get liquidMaterial(): MeshLiquidMaterial { return this._liquidMaterial; }
 
+  public setLiquidReflection(reflectionTexture: Texture | null, reflectionTextureMatrix: Matrix4, enabled: boolean): void {
+    this._liquidMaterial.setReflection(reflectionTexture, reflectionTextureMatrix, enabled);
+  }
+
   public update(): void {
     // Block materials (MeshBlockMaterial) directly reference ambientLight via getters.
     // Shader-based materials update their animation state and lighting uniforms here.
     const ambientLight = this._game.renderer.ambientLight;
+    const fogReflectionColor = this._game.renderer.fogColor;
+    const skyReflectionColor = this._game.renderer.skyColor;
+    const sunDirection = this._game.renderer.sunDirection;
+    const sunColor = this._game.renderer.sunLightColor;
+    const sunIntensity = this._game.renderer.sunLightIntensity;
     const interactionSource = this._game.camera.gameCameraAttachedEntity?.position ?? this._game.camera.activeCamera.position;
     this._foliageMaterial.uniforms[UNIFORM_INTERACTION_CENTER].value.set(
       interactionSource.x,
@@ -379,7 +465,15 @@ export default class BlockMaterialManager {
       interactionSource.z,
     );
     this._foliageMaterial.update(ambientLight.color, ambientLight.intensity);
-    this._liquidMaterial.update(ambientLight.color, ambientLight.intensity);
+    this._liquidMaterial.update(
+      ambientLight.color,
+      ambientLight.intensity,
+      fogReflectionColor,
+      skyReflectionColor,
+      sunDirection,
+      sunColor,
+      sunIntensity,
+    );
   }
 
   public cloneTransparentNonLitMaterial(): MeshBlockMaterial {

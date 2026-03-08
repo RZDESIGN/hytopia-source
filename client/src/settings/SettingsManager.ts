@@ -48,6 +48,15 @@ type QualityPerfTradeoff = {
     outline?: boolean;
     bloom?: boolean;
     smaa?: boolean;
+    depthBlur?: {
+      enabled: boolean;
+      nearStartRatio: number;
+      focusNearRatio: number;
+      focusFarRatio: number;
+      farEndRatio: number;
+      maxNearRadiusPx: number;
+      maxFarRadiusPx: number;
+    },
   },
 };
 
@@ -91,6 +100,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       outline: true,
       bloom: true,
       smaa: true,
+      depthBlur: {
+        enabled: true,
+        nearStartRatio: 0.03,
+        focusNearRatio: 0.09,
+        focusFarRatio: 0.28,
+        farEndRatio: 0.64,
+        maxNearRadiusPx: 1.45,
+        maxFarRadiusPx: 8.5,
+      },
     },
   },
   HIGH: {
@@ -116,6 +134,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       outline: true,
       bloom: true,
       smaa: true,
+      depthBlur: {
+        enabled: true,
+        nearStartRatio: 0.04,
+        focusNearRatio: 0.11,
+        focusFarRatio: 0.3,
+        farEndRatio: 0.68,
+        maxNearRadiusPx: 1.15,
+        maxFarRadiusPx: 6.75,
+      },
     },
   },
   MEDIUM: {
@@ -144,6 +171,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       outline: true,
       bloom: true,
       smaa: true,
+      depthBlur: {
+        enabled: false,
+        nearStartRatio: 0.06,
+        focusNearRatio: 0.15,
+        focusFarRatio: 0.4,
+        farEndRatio: 0.8,
+        maxNearRadiusPx: 0.85,
+        maxFarRadiusPx: 4.0,
+      },
     },
   },
   LOW: {
@@ -176,6 +212,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     },
     postProcessing: {
       outline: true,
+      depthBlur: {
+        enabled: false,
+        nearStartRatio: 0.08,
+        focusNearRatio: 0.18,
+        focusFarRatio: 0.45,
+        farEndRatio: 0.85,
+        maxNearRadiusPx: 0.6,
+        maxFarRadiusPx: 2.5,
+      },
     },
   },
   POWER_SAVING: {
@@ -202,6 +247,15 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     },
     postProcessing: {
       outline: true,
+      depthBlur: {
+        enabled: false,
+        nearStartRatio: 0.08,
+        focusNearRatio: 0.18,
+        focusFarRatio: 0.45,
+        farEndRatio: 0.85,
+        maxNearRadiusPx: 0.6,
+        maxFarRadiusPx: 2.5,
+      },
     },
     fpsCap: 30,
   },
