@@ -6,6 +6,8 @@ import type Entity from '@/worlds/entities/Entity';
 import type Player from '@/players/Player';
 import type QuaternionLike from '@/shared/types/math/QuaternionLike';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
+import { WorldLoopEvent } from '@/worlds/WorldLoop';
+import type World from '@/worlds/World';
 
 /**
  * The mode of the camera.
@@ -26,6 +28,164 @@ export enum PlayerCameraMode {
  * @public
  */
 export type PlayerCameraOrientation = { pitch: number, yaw: number };
+
+/**
+ * Common high-level camera presets.
+ *
+ * **Category:** Players
+ * @public
+ */
+export enum PlayerCameraPreset {
+  FIRST_PERSON = 'first_person',
+  THIRD_PERSON = 'third_person',
+  ISOMETRIC = 'isometric',
+  SIDE_VIEW = 'side_view',
+  SIDE_VIEW_2D = 'side_view_2d',
+  FIXED_FOLLOW_THIRD_PERSON = 'fixed_follow_third_person',
+}
+
+/**
+ * How a fixed-follow preset interprets its follow offset.
+ *
+ * **Category:** Players
+ * @public
+ */
+export enum PlayerCameraPresetOffsetSpace {
+  WORLD = 'world',
+  ENTITY = 'entity',
+}
+
+/**
+ * Options for applying a camera preset.
+ *
+ * **Category:** Players
+ * @public
+ */
+export interface PlayerCameraPresetOptions {
+  /**
+   * The entity the preset should follow.
+   *
+   * @remarks
+   * Defaults to the currently attached entity, or the player's first spawned player entity.
+   */
+  followEntity?: Entity;
+
+  /**
+   * Additional low-level camera offset for attached first/third-person presets.
+   *
+   * @remarks
+   * This maps to `PlayerCamera.offset`. Fixed-angle presets use `followOffset` instead.
+   */
+  cameraOffset?: Vector3Like;
+
+  /**
+   * World or entity-relative offset used by fixed-angle follow presets.
+   */
+  followOffset?: Vector3Like;
+
+  /**
+   * Whether `followOffset` is interpreted in world space or entity-local space.
+   */
+  followOffsetSpace?: PlayerCameraPresetOffsetSpace;
+
+  /**
+   * Focus point offset relative to the followed entity.
+   */
+  focusOffset?: Vector3Like;
+
+  /**
+   * Whether the camera collides with blocks.
+   */
+  collidesWithBlocks?: boolean;
+
+  /**
+   * Film offset applied after the preset.
+   */
+  filmOffset?: number;
+
+  /**
+   * Forward offset applied after the preset.
+   */
+  forwardOffset?: number;
+
+  /**
+   * Field of view applied after the preset.
+   */
+  fov?: number;
+
+  /**
+   * Shoulder angle applied after the preset.
+   */
+  shoulderAngle?: number;
+
+  /**
+   * Zoom applied after the preset.
+   */
+  zoom?: number;
+}
+
+type DynamicCameraPresetState = {
+  followEntity: Entity;
+  followOffset: Vector3Like;
+  followOffsetSpace: PlayerCameraPresetOffsetSpace;
+  focusOffset: Vector3Like;
+};
+
+const CAMERA_PRESET_EPSILON = 0.0001;
+const ZERO_VECTOR: Vector3Like = { x: 0, y: 0, z: 0 };
+const DEFAULT_FIRST_PERSON_CAMERA_OFFSET: Vector3Like = { x: 0, y: 0.5, z: 0 };
+const DEFAULT_THIRD_PERSON_CAMERA_OFFSET: Vector3Like = { x: 0, y: 0, z: 0 };
+const DEFAULT_FOCUS_OFFSET: Vector3Like = { x: 0, y: 1.2, z: 0 };
+const DEFAULT_ISOMETRIC_FOLLOW_OFFSET: Vector3Like = { x: 8, y: 8, z: 8 };
+const DEFAULT_SIDE_VIEW_FOLLOW_OFFSET: Vector3Like = { x: 12, y: 3, z: 0 };
+const DEFAULT_SIDE_VIEW_2D_FOLLOW_OFFSET: Vector3Like = { x: 22, y: 2.5, z: 0 };
+const DEFAULT_FIXED_FOLLOW_THIRD_PERSON_OFFSET: Vector3Like = { x: 0, y: 3.25, z: 6.5 };
+
+const cloneVector3Like = (vector: Vector3Like): Vector3Like => ({
+  x: vector.x,
+  y: vector.y,
+  z: vector.z,
+});
+
+const addVector3Like = (a: Vector3Like, b: Vector3Like): Vector3Like => ({
+  x: a.x + b.x,
+  y: a.y + b.y,
+  z: a.z + b.z,
+});
+
+const vector3LikeEquals = (
+  a: Vector3Like | undefined,
+  b: Vector3Like | undefined,
+  epsilon: number = CAMERA_PRESET_EPSILON,
+): boolean => {
+  if (!a || !b) {
+    return a === b;
+  }
+
+  return Math.abs(a.x - b.x) <= epsilon &&
+    Math.abs(a.y - b.y) <= epsilon &&
+    Math.abs(a.z - b.z) <= epsilon;
+};
+
+const rotateVector3LikeByQuaternion = (
+  vector: Vector3Like,
+  quaternion: QuaternionLike,
+): Vector3Like => {
+  const { x, y, z, w } = quaternion;
+  const uvx = y * vector.z - z * vector.y;
+  const uvy = z * vector.x - x * vector.z;
+  const uvz = x * vector.y - y * vector.x;
+
+  const uuvx = y * uvz - z * uvy;
+  const uuvy = z * uvx - x * uvz;
+  const uuvz = x * uvy - y * uvx;
+
+  return {
+    x: vector.x + ((uvx * w) + uuvx) * 2,
+    y: vector.y + ((uvy * w) + uuvy) * 2,
+    z: vector.z + ((uvz * w) + uuvz) * 2,
+  };
+};
 
 /**
  * Event types a PlayerCamera can emit.
@@ -189,6 +349,21 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
   private _orientation: PlayerCameraOrientation = { pitch: 0, yaw: 0 };
 
   /** @internal */
+  private _preset: PlayerCameraPreset | undefined;
+
+  /** @internal */
+  private _dynamicPreset: DynamicCameraPresetState | undefined;
+
+  /** @internal */
+  private _dynamicPresetLastAttachedPosition: Vector3Like | undefined;
+
+  /** @internal */
+  private _dynamicPresetLastTargetPosition: Vector3Like | undefined;
+
+  /** @internal */
+  private _presetTickWorld: World | undefined;
+
+  /** @internal */
   private _shoulderAngle: number = 0;
 
   /** @internal */
@@ -214,6 +389,26 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
 
   /** @internal */
   private _zoom: number = 1;
+
+  /** @internal */
+  private readonly _presetTickHandler = () => {
+    if (!this._dynamicPreset) {
+      this._detachPresetTickListener();
+      return;
+    }
+
+    if (!this.player.world) {
+      this._detachPresetTickListener();
+      return;
+    }
+
+    if (this._presetTickWorld && this._presetTickWorld !== this.player.world) {
+      this._detachPresetTickListener();
+    }
+
+    this._ensurePresetTickListener();
+    this._syncDynamicPresetCamera();
+  };
 
   /** @internal */
   public constructor(player: Player) {
@@ -369,6 +564,15 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
   }
 
   /**
+   * The currently active high-level preset, if any.
+   *
+   * **Category:** Players
+   */
+  public get preset(): PlayerCameraPreset | undefined {
+    return this._preset;
+  }
+
+  /**
    * The shoulder angle of the camera in degrees.
    *
    * **Category:** Players
@@ -454,6 +658,131 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
   }
 
   /**
+   * Clears the active preset and stops any automatic fixed-follow updates.
+   *
+   * **Category:** Players
+   */
+  public clearPreset() {
+    this._preset = undefined;
+    this._dynamicPreset = undefined;
+    this._dynamicPresetLastAttachedPosition = undefined;
+    this._dynamicPresetLastTargetPosition = undefined;
+    this._detachPresetTickListener();
+  }
+
+  /**
+   * Applies a high-level camera preset.
+   *
+   * @remarks
+   * Fixed-angle presets are implemented on the server by continuously updating
+   * `attachedToPosition` and `targetPosition`, so they work with the current client
+   * protocol without requiring a separate camera runtime mode.
+   *
+   * `SIDE_VIEW_2D` requests the client orthographic renderer preset by sending a
+   * non-positive FOV. Pair it with custom movement and art rules if you want a
+   * fully 2D game feel.
+   *
+   * **Category:** Players
+   */
+  public setPreset(preset: PlayerCameraPreset, options: PlayerCameraPresetOptions = {}) {
+    if (!this._requirePlayerWorld('setPreset')) { return; }
+
+    this.clearPreset();
+
+    let applied = false;
+
+    switch (preset) {
+      case PlayerCameraPreset.FIRST_PERSON:
+        applied = this._applyAttachedEntityPreset(PlayerCameraMode.FIRST_PERSON, {
+          ...options,
+          cameraOffset: options.cameraOffset ?? DEFAULT_FIRST_PERSON_CAMERA_OFFSET,
+          collidesWithBlocks: options.collidesWithBlocks ?? true,
+          filmOffset: options.filmOffset ?? 0,
+          forwardOffset: options.forwardOffset ?? 0,
+          fov: options.fov ?? 75,
+          shoulderAngle: options.shoulderAngle ?? 0,
+          zoom: options.zoom ?? 1,
+        });
+        break;
+      case PlayerCameraPreset.THIRD_PERSON:
+        applied = this._applyAttachedEntityPreset(PlayerCameraMode.THIRD_PERSON, {
+          ...options,
+          cameraOffset: options.cameraOffset ?? DEFAULT_THIRD_PERSON_CAMERA_OFFSET,
+          collidesWithBlocks: options.collidesWithBlocks ?? true,
+          filmOffset: options.filmOffset ?? 0,
+          forwardOffset: options.forwardOffset ?? 0,
+          fov: options.fov ?? 75,
+          shoulderAngle: options.shoulderAngle ?? 0,
+          zoom: options.zoom ?? 1,
+        });
+        break;
+      case PlayerCameraPreset.ISOMETRIC:
+        applied = this._applyDynamicPreset({
+          ...options,
+          collidesWithBlocks: options.collidesWithBlocks ?? false,
+          filmOffset: options.filmOffset ?? 0,
+          focusOffset: options.focusOffset ?? DEFAULT_FOCUS_OFFSET,
+          followOffset: options.followOffset ?? DEFAULT_ISOMETRIC_FOLLOW_OFFSET,
+          followOffsetSpace: options.followOffsetSpace ?? PlayerCameraPresetOffsetSpace.WORLD,
+          forwardOffset: options.forwardOffset ?? 0,
+          fov: options.fov ?? 35,
+          shoulderAngle: options.shoulderAngle ?? 0,
+          zoom: options.zoom ?? 1,
+        });
+        break;
+      case PlayerCameraPreset.SIDE_VIEW:
+        applied = this._applyDynamicPreset({
+          ...options,
+          collidesWithBlocks: options.collidesWithBlocks ?? false,
+          filmOffset: options.filmOffset ?? 0,
+          focusOffset: options.focusOffset ?? DEFAULT_FOCUS_OFFSET,
+          followOffset: options.followOffset ?? DEFAULT_SIDE_VIEW_FOLLOW_OFFSET,
+          followOffsetSpace: options.followOffsetSpace ?? PlayerCameraPresetOffsetSpace.WORLD,
+          forwardOffset: options.forwardOffset ?? 0,
+          fov: options.fov ?? 30,
+          shoulderAngle: options.shoulderAngle ?? 0,
+          zoom: options.zoom ?? 1,
+        });
+        break;
+      case PlayerCameraPreset.SIDE_VIEW_2D:
+        applied = this._applyDynamicPreset({
+          ...options,
+          collidesWithBlocks: options.collidesWithBlocks ?? false,
+          filmOffset: options.filmOffset ?? 0,
+          focusOffset: options.focusOffset ?? DEFAULT_FOCUS_OFFSET,
+          followOffset: options.followOffset ?? DEFAULT_SIDE_VIEW_2D_FOLLOW_OFFSET,
+          followOffsetSpace: options.followOffsetSpace ?? PlayerCameraPresetOffsetSpace.WORLD,
+          forwardOffset: options.forwardOffset ?? 0,
+          fov: options.fov ?? 0,
+          shoulderAngle: options.shoulderAngle ?? 0,
+          zoom: options.zoom ?? 1.4,
+        });
+        break;
+      case PlayerCameraPreset.FIXED_FOLLOW_THIRD_PERSON:
+        applied = this._applyDynamicPreset({
+          ...options,
+          collidesWithBlocks: options.collidesWithBlocks ?? false,
+          filmOffset: options.filmOffset ?? 0,
+          focusOffset: options.focusOffset ?? DEFAULT_FOCUS_OFFSET,
+          followOffset: options.followOffset ?? DEFAULT_FIXED_FOLLOW_THIRD_PERSON_OFFSET,
+          followOffsetSpace: options.followOffsetSpace ?? PlayerCameraPresetOffsetSpace.ENTITY,
+          forwardOffset: options.forwardOffset ?? 0,
+          fov: options.fov ?? 55,
+          shoulderAngle: options.shoulderAngle ?? 0,
+          zoom: options.zoom ?? 1,
+        });
+        break;
+      default:
+        applied = false;
+        break;
+    }
+
+    if (applied) {
+      this._preset = preset;
+    }
+  }
+
+  /**
    * Makes the camera look at an entity once.
    *
    * Use for: one-off focus moments (e.g., cutscene beats).
@@ -517,6 +846,7 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
    * **Category:** Players
    */
   public reset() {
+    this.clearPreset();
     this._attachedToEntity = undefined;
     this._attachedToPosition = undefined;
     this._orientation = { pitch: 0, yaw: 0 };
@@ -965,5 +1295,152 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
     }
 
     return !!this.player.world;
+  }
+
+  /** @internal */
+  private _applyAttachedEntityPreset(mode: PlayerCameraMode, options: PlayerCameraPresetOptions): boolean {
+    const followEntity = this._resolvePresetFollowEntity(options.followEntity);
+
+    if (!followEntity) {
+      ErrorHandler.error(`PlayerCamera.setPreset(): No entity is available for preset "${this._presetLabel(mode)}".`);
+      return false;
+    }
+
+    if (!followEntity.isSpawned) {
+      ErrorHandler.error(`PlayerCamera.setPreset(): Entity ${followEntity.id} is not spawned, cannot apply preset "${this._presetLabel(mode)}".`);
+      return false;
+    }
+
+    this.setTargetEntity(undefined);
+    this.setTargetPosition(undefined);
+    this.setMode(mode);
+    this.setAttachedToEntity(followEntity);
+    this.setCollidesWithBlocks(options.collidesWithBlocks ?? this._collidesWithBlocks);
+    this.setFilmOffset(options.filmOffset ?? this._filmOffset);
+    this.setForwardOffset(options.forwardOffset ?? this._forwardOffset);
+    this.setFov(options.fov ?? this._fov);
+    this.setOffset(cloneVector3Like(options.cameraOffset ?? this._offset));
+    this.setShoulderAngle(options.shoulderAngle ?? this._shoulderAngle);
+    this.setZoom(options.zoom ?? this._zoom);
+
+    return true;
+  }
+
+  /** @internal */
+  private _applyDynamicPreset(options: PlayerCameraPresetOptions): boolean {
+    const followEntity = this._resolvePresetFollowEntity(options.followEntity);
+
+    if (!followEntity) {
+      ErrorHandler.error('PlayerCamera.setPreset(): No entity is available for the requested fixed-angle preset.');
+      return false;
+    }
+
+    this.setTargetEntity(undefined);
+    this.setTargetPosition(undefined);
+    this.setMode(PlayerCameraMode.FIRST_PERSON);
+    this.setCollidesWithBlocks(options.collidesWithBlocks ?? false);
+    this.setFilmOffset(options.filmOffset ?? 0);
+    this.setForwardOffset(options.forwardOffset ?? 0);
+    this.setFov(options.fov ?? 75);
+    this.setOffset(cloneVector3Like(ZERO_VECTOR));
+    this.setShoulderAngle(options.shoulderAngle ?? 0);
+    this.setZoom(options.zoom ?? 1);
+
+    this._dynamicPreset = {
+      followEntity,
+      followOffset: cloneVector3Like(options.followOffset ?? DEFAULT_ISOMETRIC_FOLLOW_OFFSET),
+      followOffsetSpace: options.followOffsetSpace ?? PlayerCameraPresetOffsetSpace.WORLD,
+      focusOffset: cloneVector3Like(options.focusOffset ?? DEFAULT_FOCUS_OFFSET),
+    };
+
+    this._ensurePresetTickListener();
+    this._syncDynamicPresetCamera();
+
+    return true;
+  }
+
+  /** @internal */
+  private _resolvePresetFollowEntity(candidate: Entity | undefined): Entity | undefined {
+    if (candidate) {
+      return candidate;
+    }
+
+    if (this._attachedToEntity) {
+      return this._attachedToEntity;
+    }
+
+    return this.player.world?.entityManager.getPlayerEntitiesByPlayer(this.player)[0];
+  }
+
+  /** @internal */
+  private _ensurePresetTickListener(): void {
+    const world = this.player.world;
+
+    if (!world) {
+      this._detachPresetTickListener();
+      return;
+    }
+
+    if (this._presetTickWorld === world) {
+      return;
+    }
+
+    this._detachPresetTickListener();
+    world.loop.on(WorldLoopEvent.TICK_START, this._presetTickHandler);
+    this._presetTickWorld = world;
+  }
+
+  /** @internal */
+  private _detachPresetTickListener(): void {
+    if (!this._presetTickWorld) {
+      return;
+    }
+
+    this._presetTickWorld.loop.off(WorldLoopEvent.TICK_START, this._presetTickHandler);
+    this._presetTickWorld = undefined;
+  }
+
+  /** @internal */
+  private _syncDynamicPresetCamera(): void {
+    const dynamicPreset = this._dynamicPreset;
+
+    if (!dynamicPreset) {
+      return;
+    }
+
+    const basePosition = dynamicPreset.followEntity.position;
+    const followOffset = dynamicPreset.followOffsetSpace === PlayerCameraPresetOffsetSpace.ENTITY
+      ? rotateVector3LikeByQuaternion(dynamicPreset.followOffset, dynamicPreset.followEntity.rotation)
+      : dynamicPreset.followOffset;
+    const attachedPosition = addVector3Like(basePosition, followOffset);
+    const targetPosition = addVector3Like(basePosition, dynamicPreset.focusOffset);
+
+    if (vector3LikeEquals(attachedPosition, targetPosition)) {
+      ErrorHandler.error('PlayerCamera._syncDynamicPresetCamera(): Fixed-angle presets require distinct camera and target positions.');
+      return;
+    }
+
+    if (!vector3LikeEquals(this._dynamicPresetLastAttachedPosition, attachedPosition)) {
+      this.setAttachedToPosition(attachedPosition);
+      this._dynamicPresetLastAttachedPosition = cloneVector3Like(attachedPosition);
+    }
+
+    if (!vector3LikeEquals(this._dynamicPresetLastTargetPosition, targetPosition)) {
+      this.setTargetPosition(targetPosition);
+      this._dynamicPresetLastTargetPosition = cloneVector3Like(targetPosition);
+    }
+  }
+
+  /** @internal */
+  private _presetLabel(mode: PlayerCameraMode): string {
+    switch (mode) {
+      case PlayerCameraMode.FIRST_PERSON:
+        return PlayerCameraPreset.FIRST_PERSON;
+      case PlayerCameraMode.THIRD_PERSON:
+        return PlayerCameraPreset.THIRD_PERSON;
+      case PlayerCameraMode.SPECTATOR:
+      default:
+        return 'spectator';
+    }
   }
 }

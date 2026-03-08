@@ -1,4 +1,4 @@
-import { Euler, Intersection, Object3D, PerspectiveCamera, Quaternion, Raycaster, Vector2, Vector3 } from "three";
+import { Euler, Intersection, Object3D, OrthographicCamera, PerspectiveCamera, Quaternion, Raycaster, Vector2, Vector3 } from "three";
 import Entity from "../entities/Entity";
 import EventRouter from '../events/EventRouter';
 import Game from "../Game";
@@ -24,6 +24,7 @@ const CAMERA_ATTACHED_POSITION_LERP_TIME_S = 0.06;
 const CAMERA_ATTACHED_POSITION_SNAP_DISTANCE_SQ = 9;
 const CAMERA_POSITION_DEADZONE_SQ = 0.0004; // 2cm
 const CAMERA_LOOK_AT_MIN_DISTANCE_SQ = 0.0004;
+const ORTHOGRAPHIC_HALF_HEIGHT = 7.5;
 const SUPPORTS_POINTER_RAW_UPDATE = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
 
 // Working variables
@@ -45,6 +46,7 @@ const cameraCollisionIntersections: Intersection<Object3D>[] = [];
 
 const normalizeAngle = (radians: number): number => Math.atan2(Math.sin(radians), Math.cos(radians));
 const smoothingAlpha = (deltaS: number, timeConstantS: number): number => 1 - Math.exp(-deltaS / Math.max(0.001, timeConstantS));
+type ProjectionCamera = PerspectiveCamera | OrthographicCamera;
 
 export enum CameraMode {
   FIRST_PERSON = 0,
@@ -67,11 +69,14 @@ export namespace CameraEventPayload {
 export default class Camera {
   private _game: Game;
 
-  private _activeCamera: PerspectiveCamera;
+  private _activeCamera: ProjectionCamera;
   private _activeViewDir: Vector3;
 
-  private _gameCamera: PerspectiveCamera;
+  private _gameCamera: ProjectionCamera;
+  private _gamePerspectiveCamera: PerspectiveCamera;
+  private _gameOrthographicCamera: OrthographicCamera;
   private _gameCameraMode: CameraMode = CameraMode.THIRD_PERSON;
+  private _gameCameraUsesOrthographicProjection: boolean = false;
   private _gameCameraAttachedEntity: Entity | undefined;
   private _gameCameraAttachedEntityModelHiddenNodes: string[] = [];
   private _gameCameraAttachedEntityModelShownNodes: string[] = [];
@@ -122,7 +127,16 @@ export default class Camera {
     this._game = game;
 
     const aspect = document.documentElement.clientWidth / document.documentElement.clientHeight;
-    this._gameCamera = new PerspectiveCamera(75, aspect, 0.1, 1000);
+    this._gamePerspectiveCamera = new PerspectiveCamera(75, aspect, 0.1, 1000);
+    this._gameOrthographicCamera = new OrthographicCamera(
+      -aspect * ORTHOGRAPHIC_HALF_HEIGHT,
+      aspect * ORTHOGRAPHIC_HALF_HEIGHT,
+      ORTHOGRAPHIC_HALF_HEIGHT,
+      -ORTHOGRAPHIC_HALF_HEIGHT,
+      0.1,
+      1000,
+    );
+    this._gameCamera = this._gamePerspectiveCamera;
     this._spectatorCamera = new PerspectiveCamera(75, aspect, 0.1, 1000);
 
     this._activeCamera = this._spectatorCamera;
@@ -133,7 +147,7 @@ export default class Camera {
     this._setupEventListeners();
   }
 
-  public get activeCamera(): PerspectiveCamera {
+  public get activeCamera(): ProjectionCamera {
     return this._activeCamera;
   }
 
@@ -141,7 +155,7 @@ export default class Camera {
     return this._activeCamera.far;
   }
 
-  public get gameCamera(): PerspectiveCamera {
+  public get gameCamera(): ProjectionCamera {
     return this._gameCamera;
   }
 
@@ -155,6 +169,10 @@ export default class Camera {
 
   public get isGameCameraActive(): boolean {
     return this._activeCamera === this._gameCamera;
+  }
+
+  public get isOrthographicGameCameraActive(): boolean {
+    return this.isGameCameraActive && this._gameCameraUsesOrthographicProjection;
   }
 
   public get near(): number {
@@ -227,10 +245,11 @@ export default class Camera {
 
   public onWindowResize(): void {
     const aspect = document.documentElement.clientWidth / document.documentElement.clientHeight;
-    [this._gameCamera, this._spectatorCamera].forEach(camera => {
-      camera.aspect = aspect;
-      camera.updateProjectionMatrix();
-    });
+    this._gamePerspectiveCamera.aspect = aspect;
+    this._gamePerspectiveCamera.updateProjectionMatrix();
+    this._spectatorCamera.aspect = aspect;
+    this._spectatorCamera.updateProjectionMatrix();
+    this._updateOrthographicGameCameraFrustum();
   }
 
   public setMouseSensitivityMultiplier(multiplier: number): void {
@@ -269,6 +288,55 @@ export default class Camera {
     this._spectatorCamera.add(this._game.audioManager.listener);
 
     EventRouter.instance.emit(CameraEventType.UseSpectatorCamera, {});
+  }
+
+  private _updateOrthographicGameCameraFrustum(): void {
+    const aspect = document.documentElement.clientWidth / document.documentElement.clientHeight;
+    this._gameOrthographicCamera.left = -aspect * ORTHOGRAPHIC_HALF_HEIGHT;
+    this._gameOrthographicCamera.right = aspect * ORTHOGRAPHIC_HALF_HEIGHT;
+    this._gameOrthographicCamera.top = ORTHOGRAPHIC_HALF_HEIGHT;
+    this._gameOrthographicCamera.bottom = -ORTHOGRAPHIC_HALF_HEIGHT;
+    this._gameOrthographicCamera.updateProjectionMatrix();
+  }
+
+  private _setGameProjectionFromTargetFov(targetFov: number): void {
+    const useOrthographicProjection = targetFov <= 0;
+    const nextGameCamera = useOrthographicProjection ? this._gameOrthographicCamera : this._gamePerspectiveCamera;
+
+    if (this._gameCamera === nextGameCamera && this._gameCameraUsesOrthographicProjection === useOrthographicProjection) {
+      if (useOrthographicProjection) {
+        this._updateOrthographicGameCameraFrustum();
+      }
+
+      return;
+    }
+
+    const previousGameCamera = this._gameCamera;
+    const wasGameCameraActive = this._activeCamera === previousGameCamera;
+
+    nextGameCamera.position.copy(previousGameCamera.position);
+    nextGameCamera.quaternion.copy(previousGameCamera.quaternion);
+    nextGameCamera.zoom = previousGameCamera.zoom;
+    nextGameCamera.near = previousGameCamera.near;
+    nextGameCamera.far = previousGameCamera.far;
+
+    while (previousGameCamera.children.length > 0) {
+      nextGameCamera.add(previousGameCamera.children[0]);
+    }
+
+    this._gameCameraUsesOrthographicProjection = useOrthographicProjection;
+    this._gameCamera = nextGameCamera;
+
+    if (useOrthographicProjection) {
+      this._updateOrthographicGameCameraFrustum();
+    } else {
+      this._gamePerspectiveCamera.updateProjectionMatrix();
+    }
+
+    if (wasGameCameraActive) {
+      this._activeCamera = this._gameCamera;
+      this._activeViewDir = this._gameCameraViewDir;
+    }
   }
 
   public update(frameDeltaS: number): void {
@@ -383,6 +451,7 @@ export default class Camera {
 
     if (deserializedCamera.fov !== undefined) {
       this._gameCameraTargetFov = deserializedCamera.fov;
+      this._setGameProjectionFromTargetFov(deserializedCamera.fov);
     }
 
     if (deserializedCamera.modelHiddenNodes !== undefined) {
@@ -568,7 +637,7 @@ export default class Camera {
   }
 
   private _updateCameraZoom(delta: number): void {
-    if (this._activeCamera === this._gameCamera) {
+    if (this._activeCamera === this._gameCamera && !this._gameCameraUsesOrthographicProjection) {
       this._gameCameraRadialZoom = Math.max(
         MIN_ZOOM,
         Math.min(MAX_ZOOM, this._gameCameraRadialZoom + delta),
@@ -576,7 +645,7 @@ export default class Camera {
     }
   }
 
-  private _lookAt(camera: PerspectiveCamera, lookAtPosition: Vector3): void {
+  private _lookAt(camera: ProjectionCamera, lookAtPosition: Vector3): void {
     // Temporarily enable matrixAutoUpdate and matrixWorldAutoUpdate so lookAt() updates the camera matrix automatically
     const currentMatrixAutoUpdate = camera.matrixAutoUpdate;
     const currentMatrixWorldAutoUpdate = camera.matrixWorldAutoUpdate;
@@ -589,7 +658,7 @@ export default class Camera {
     this._updateViewDir(camera, camera === this._gameCamera ? this._gameCameraViewDir : this._spectatorCameraViewDir);
   }
 
-  private _updateMatrix(camera: PerspectiveCamera): void {
+  private _updateMatrix(camera: ProjectionCamera): void {
     const currentMatrixAutoUpdate = camera.matrixAutoUpdate;
     const currentMatrixWorldAutoUpdate = camera.matrixWorldAutoUpdate;
     camera.matrixAutoUpdate = true;
@@ -601,14 +670,21 @@ export default class Camera {
     this._updateViewDir(camera, camera === this._gameCamera ? this._gameCameraViewDir : this._spectatorCameraViewDir);
   }
 
-  private _updateViewDir(camera: PerspectiveCamera, viewDir: Vector3): void {
+  private _updateViewDir(camera: ProjectionCamera, viewDir: Vector3): void {
     const e = camera.matrixWorld.elements;
     viewDir.set(e[8], e[9], e[10]).normalize().negate();
   }
 
   private _setupGameCamera(): void {
-    this._gameCamera.matrixAutoUpdate = false;
-    this._gameCamera.matrixWorldAutoUpdate = false;
+    this._gamePerspectiveCamera.matrixAutoUpdate = false;
+    this._gamePerspectiveCamera.matrixWorldAutoUpdate = false;
+    this._gamePerspectiveCamera.updateProjectionMatrix();
+
+    this._gameOrthographicCamera.matrixAutoUpdate = false;
+    this._gameOrthographicCamera.matrixWorldAutoUpdate = false;
+    this._updateOrthographicGameCameraFrustum();
+
+    this._setGameProjectionFromTargetFov(this._gameCameraTargetFov);
   }
 
   private _setupSpectatorCamera(): void {
@@ -736,42 +812,45 @@ export default class Camera {
       }
     }
 
+    const gameCamera = this._gameCamera;
+    const perspectiveGameCamera = gameCamera instanceof PerspectiveCamera ? gameCamera : undefined;
     let projectionMatrixDirty = false;
 
     // Handle film offset - scale by zoom to prevent crosshair drift
-    const filmOffset = this._gameCamera.filmOffset;
-    const zoomScale = this._gameCameraMode === CameraMode.THIRD_PERSON
-      ? BASE_ZOOM / this._gameCameraRadialZoom
-      : 1;
-    const scaledTargetFilmOffset = this._gameCameraTargetFilmOffset * zoomScale;
-    if (filmOffset !== scaledTargetFilmOffset) {
-      if (this._gameCameraSkipNextFilmOffsetInterpolation) {
-        // Apply immediately when skipping interpolation
-        this._gameCamera.filmOffset = scaledTargetFilmOffset;
-        this._gameCameraSkipNextFilmOffsetInterpolation = false;
-      } else {
-        // Interpolate smoothly for normal film offset changes
-        const filmOffsetLerpFactor = Math.min(frameDeltaS / CAMERA_LERP_TIME, 1);
-        this._gameCamera.filmOffset = filmOffset + (scaledTargetFilmOffset - filmOffset) * filmOffsetLerpFactor;
+    if (perspectiveGameCamera) {
+      const filmOffset = perspectiveGameCamera.filmOffset;
+      const zoomScale = this._gameCameraMode === CameraMode.THIRD_PERSON
+        ? BASE_ZOOM / this._gameCameraRadialZoom
+        : 1;
+      const scaledTargetFilmOffset = this._gameCameraTargetFilmOffset * zoomScale;
+      if (filmOffset !== scaledTargetFilmOffset) {
+        if (this._gameCameraSkipNextFilmOffsetInterpolation) {
+          // Apply immediately when skipping interpolation
+          perspectiveGameCamera.filmOffset = scaledTargetFilmOffset;
+          this._gameCameraSkipNextFilmOffsetInterpolation = false;
+        } else {
+          // Interpolate smoothly for normal film offset changes
+          const filmOffsetLerpFactor = Math.min(frameDeltaS / CAMERA_LERP_TIME, 1);
+          perspectiveGameCamera.filmOffset = filmOffset + (scaledTargetFilmOffset - filmOffset) * filmOffsetLerpFactor;
+        }
+        projectionMatrixDirty = true;
       }
-      projectionMatrixDirty = true;
     }
 
     // Handle fov
-    const fov = this._gameCamera.fov;
     const targetFov = this._gameCameraTargetFov;
-    if (fov !== targetFov) {
+    if (perspectiveGameCamera && perspectiveGameCamera.fov !== targetFov) {
       const fovLerpFactor = Math.min(frameDeltaS / CAMERA_LERP_TIME, 1);
-      this._gameCamera.fov = fov + (targetFov - fov) * fovLerpFactor;
+      perspectiveGameCamera.fov = perspectiveGameCamera.fov + (targetFov - perspectiveGameCamera.fov) * fovLerpFactor;
       projectionMatrixDirty = true;
     }
 
     // Handle zoom
-    const zoom = this._gameCamera.zoom;
+    const zoom = gameCamera.zoom;
     const targetZoom = this._gameCameraTargetZoom;
     if (zoom !== targetZoom) {
       const zoomLerpFactor = Math.min(frameDeltaS / CAMERA_LERP_TIME, 1);
-      this._gameCamera.zoom = zoom + (targetZoom - zoom) * zoomLerpFactor;
+      gameCamera.zoom = zoom + (targetZoom - zoom) * zoomLerpFactor;
       projectionMatrixDirty = true;
     }
 
@@ -783,7 +862,7 @@ export default class Camera {
       );
 
       // First-person offset is camera-local so camera/view-model relation is stable.
-      this._gameCamera.position.copy(attachedPosition)
+      gameCamera.position.copy(attachedPosition)
         .add(vec3b.copy(this._gameCameraFirstPersonOffset).applyQuaternion(quaternion));
 
       // Apply forward offset
@@ -793,11 +872,11 @@ export default class Camera {
         this._gameCameraForwardOffset >= 0 ? 0 : -this._gameCameraForwardOffset,
       ).applyQuaternion(quaternion);
 
-      this._gameCamera.position.add(direction);
-      this._gameCamera.quaternion.copy(quaternion);
+      gameCamera.position.add(direction);
+      gameCamera.quaternion.copy(quaternion);
 
       if (lookAtPosition && lookAtDirection) {
-        this._lookAt(this._gameCamera, lookAtPosition);
+        this._lookAt(gameCamera, lookAtPosition);
       }
     }
 
@@ -812,11 +891,11 @@ export default class Camera {
 
       // Position camera based on look direction or orientation
       if (lookAtDirection) {
-        this._gameCamera.position.copy(attachedPosition)
+        gameCamera.position.copy(attachedPosition)
           .addScaledVector(lookAtDirection, -radius)
-          .setY(this._gameCamera.position.y + heightOffset);
+          .setY(gameCamera.position.y + heightOffset);
       } else {
-        this._gameCamera.position.set(
+        gameCamera.position.set(
           attachedPosition.x + radius * Math.sin(this._gameCameraYaw) * Math.cos(this._gameCameraPitch),
           attachedPosition.y + radius * Math.sin(this._gameCameraPitch) + heightOffset,
           attachedPosition.z + radius * Math.cos(this._gameCameraYaw) * Math.cos(this._gameCameraPitch)
@@ -825,21 +904,21 @@ export default class Camera {
 
       // Apply visual rotation to camera position around the look target (skip if no rotation, if not identity quat)
       if (this._gameCameraShoulderRotationOffset.w !== 1) {
-        this._gameCameraShoulderPositionOffset.copy(this._gameCamera.position).sub(lookAtTarget);
+        this._gameCameraShoulderPositionOffset.copy(gameCamera.position).sub(lookAtTarget);
         this._gameCameraShoulderPositionOffset.applyQuaternion(this._gameCameraShoulderRotationOffset);
-        this._gameCamera.position.copy(lookAtTarget).add(this._gameCameraShoulderPositionOffset);
+        gameCamera.position.copy(lookAtTarget).add(this._gameCameraShoulderPositionOffset);
       }
 
       // Third-person offset shifts perspective while preserving orbit around the target.
       if (this._gameCameraThirdPersonOffset.lengthSq() > 0) {
         yawOnlyEuler.set(0, this._gameCameraYaw, 0, 'YXZ');
         positionQuat.setFromEuler(yawOnlyEuler);
-        this._gameCamera.position.add(vec3b.copy(this._gameCameraThirdPersonOffset).applyQuaternion(positionQuat));
+        gameCamera.position.add(vec3b.copy(this._gameCameraThirdPersonOffset).applyQuaternion(positionQuat));
       }
 
       // Check for block collision and move camera closer if needed
-      const direction = vec3b.subVectors(this._gameCamera.position, lookAtTarget).normalize();
-      const desiredDistance = this._gameCamera.position.distanceTo(lookAtTarget);
+      const direction = vec3b.subVectors(gameCamera.position, lookAtTarget).normalize();
+      const desiredDistance = gameCamera.position.distanceTo(lookAtTarget);
 
       if (this._gameCameraCollidesWithBlocks) {
         if (this._shouldSampleGameCameraCollision(lookAtTarget, direction, desiredDistance, frameDeltaS)) {
@@ -862,7 +941,7 @@ export default class Camera {
         
         // Apply the collision distance if it's less than desired
         if (this._gameCameraCollisionDistance < desiredDistance) {
-          this._gameCamera.position.copy(lookAtTarget).addScaledVector(direction, this._gameCameraCollisionDistance);
+          gameCamera.position.copy(lookAtTarget).addScaledVector(direction, this._gameCameraCollisionDistance);
         } else {
           // Reset collision distance when no longer constrained
           this._gameCameraCollisionDistance = desiredDistance;
@@ -876,7 +955,7 @@ export default class Camera {
       }
 
       // Look at target - this maintains proper orientation
-      this._lookAt(this._gameCamera, lookAtTarget);
+      this._lookAt(gameCamera, lookAtTarget);
     }
 
     if (this._gameCameraMode === CameraMode.SPECTATOR) {
@@ -916,7 +995,7 @@ export default class Camera {
         modelViewQuat.setFromEuler(modelViewEuler);
 
         if (this._gameCameraMode === CameraMode.FIRST_PERSON) {
-          const modelAnchorPosition = this._gameCamera.position;
+          const modelAnchorPosition = gameCamera.position;
           const modelBaseCameraOffsetCacheKey = entity.modelUri ? `${entity.id}:${entity.modelUri}` : undefined;
           const cachedBaseCameraOffset = modelBaseCameraOffsetCacheKey
             ? this._gameCameraViewModelBaseCameraOffsets.get(modelBaseCameraOffsetCacheKey)
@@ -924,7 +1003,7 @@ export default class Camera {
           let resolvedBaseCameraOffset = baseCameraOffset ?? cachedBaseCameraOffset;
           if (!resolvedBaseCameraOffset) {
             model.getWorldPosition(vec3b).sub(modelAnchorPosition);
-            tempQuat.copy(this._gameCamera.quaternion).invert();
+            tempQuat.copy(gameCamera.quaternion).invert();
             vec3b.applyQuaternion(tempQuat);
             resolvedBaseCameraOffset = vec3b.clone();
           }
@@ -939,7 +1018,7 @@ export default class Camera {
 
           // Use full camera orientation for first-person anchoring so the model
           // stays fixed in view when pitching.
-          positionQuat.copy(this._gameCamera.quaternion);
+          positionQuat.copy(gameCamera.quaternion);
 
           vec3.copy(resolvedBaseCameraOffset)
             .applyQuaternion(positionQuat)
@@ -965,7 +1044,7 @@ export default class Camera {
     }
     
     if (projectionMatrixDirty) {
-      this._gameCamera.updateProjectionMatrix();
+      gameCamera.updateProjectionMatrix();
     }
   }
 

@@ -77,6 +77,15 @@ export type { EntityModelNodeOverrideOptions, EntityModelNodeOverrideEventPayloa
 // ErrorHandler
 export { default as ErrorHandler } from '@/errors/ErrorHandler';
 
+// Connection features
+export {
+  ConnectionFeatureFlag,
+  DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE,
+  DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID,
+  disableConnectionFeature,
+  enableConnectionFeature,
+} from '@engine-shared/network/ConnectionFeatureFlags';
+
 // Events
 export type { EventPayloads } from '@/events/Events';
 
@@ -134,8 +143,18 @@ export { default as Player, PlayerEvent, SUPPORTED_INPUTS } from '@/players/Play
 export type { PlayerEventPayloads, PlayerInput } from '@/players/Player';
 
 // PlayerCamera
-export { default as PlayerCamera, PlayerCameraMode, PlayerCameraEvent } from '@/players/PlayerCamera';
-export type { PlayerCameraEventPayloads, PlayerCameraOrientation } from '@/players/PlayerCamera';
+export {
+  default as PlayerCamera,
+  PlayerCameraEvent,
+  PlayerCameraMode,
+  PlayerCameraPreset,
+  PlayerCameraPresetOffsetSpace,
+} from '@/players/PlayerCamera';
+export type {
+  PlayerCameraEventPayloads,
+  PlayerCameraOrientation,
+  PlayerCameraPresetOptions,
+} from '@/players/PlayerCamera';
 
 // PlayerEntity
 export { default as PlayerEntity, PLAYER_POSITION_UPDATE_THRESHOLD_SQ, PLAYER_ROTATION_UPDATE_THRESHOLD } from '@/worlds/entities/PlayerEntity';

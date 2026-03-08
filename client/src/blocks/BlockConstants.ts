@@ -47,6 +47,7 @@ export type BlocksBufferGeometryData = {
   foamLevels?: Float32Array;
   foamLevelsDiag?: Float32Array;
   surfaceFlags?: Float32Array;
+  windData?: Float32Array;
 }
 
 export type BlockTextureAtlasMetadata = {

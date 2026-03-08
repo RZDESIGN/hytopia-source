@@ -453,6 +453,27 @@ The animations of the entity's model that have been accessed or configured.
 </td></tr>
 <tr><td>
 
+[modelHiddenNodes](./server.entity.modelhiddennodes.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+Set&lt;string&gt;
+
+
+</td><td>
+
+Model nodes that will not be rendered for this entity.
+
+
+</td></tr>
+<tr><td>
+
 [modelNodeOverrides](./server.entity.modelnodeoverrides.md)
 
 
@@ -538,6 +559,27 @@ number \| undefined
 The interpolation time in milliseconds applied to model scale changes.
 
 \*\*Category:\*\* Entities
+
+
+</td></tr>
+<tr><td>
+
+[modelShownNodes](./server.entity.modelshownnodes.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+Set&lt;string&gt;
+
+
+</td><td>
+
+Model nodes that will be rendered for this entity, overriding hidden nodes.
 
 
 </td></tr>
@@ -1008,6 +1050,34 @@ Sets the emissive intensity of the entity.
 </td></tr>
 <tr><td>
 
+[setModelAnimationsPlaybackRate(playbackRate)](./server.entity.setmodelanimationsplaybackrate.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Sets the playback rate for all currently created model animations on the entity.
+
+
+</td></tr>
+<tr><td>
+
+[setModelHiddenNodes(hiddenNodes)](./server.entity.setmodelhiddennodes.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Sets model nodes to hide for this entity.
+
+
+</td></tr>
+<tr><td>
+
 [setModelScale(modelScale)](./server.entity.setmodelscale.md)
 
 
@@ -1031,6 +1101,20 @@ Sets the scale of the entity's model and proportionally scales its colliders.
 </td><td>
 
 Sets the interpolation time in milliseconds applied to model scale changes.
+
+
+</td></tr>
+<tr><td>
+
+[setModelShownNodes(shownNodes)](./server.entity.setmodelshownnodes.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Sets model nodes to explicitly show for this entity.
 
 
 </td></tr>
@@ -1150,6 +1234,34 @@ Use for: placing the entity into a world so it simulates and syncs to clients. D
 </td></tr>
 <tr><td>
 
+[startModelLoopedAnimations(modelAnimationNames)](./server.entity.startmodelloopedanimations.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Starts the provided model animations as looped animations for the entity.
+
+
+</td></tr>
+<tr><td>
+
+[startModelOneshotAnimations(modelAnimationNames)](./server.entity.startmodeloneshotanimations.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Starts the provided model animations as one-shot animations for the entity.
+
+
+</td></tr>
+<tr><td>
+
 [stopAllModelAnimations(exclusionFilter)](./server.entity.stopallmodelanimations.md)
 
 
@@ -1158,7 +1270,7 @@ Use for: placing the entity into a world so it simulates and syncs to clients. D
 
 </td><td>
 
-Stops all model animations for the entity, optionally excluding the provided animations from stopping.
+Stops all model animations for the entity, optionally excluding specific animations from stopping.
 
 
 </td></tr>

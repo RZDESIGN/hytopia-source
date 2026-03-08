@@ -39,6 +39,7 @@ export type BlockTypeData = {
   id: BlockId;
   isLiquid: boolean;
   name: string;
+  surfaceGrass?: boolean;
   textureUris: Record<BlockFace, BlockTextureUri>;
   lightLevel?: number;
   trimeshIndices?: Uint32Array;
@@ -55,6 +56,7 @@ export default class BlockType {
   private _color: Vector4Tuple = DEFAULT_BLOCK_COLOR;
   private _isLiquid: boolean = false;
   private _name: string;
+  private _surfaceGrass: boolean = false;
   private _textureUris: Record<BlockFace, BlockTextureUri>;
   private _lightLevel?: number;
   private _trimeshIndices?: Uint32Array;
@@ -70,6 +72,7 @@ export default class BlockType {
     this._id = data.id;
     this._isLiquid = data.isLiquid;
     this._name = data.name;
+    this._surfaceGrass = data.surfaceGrass ?? false;
     this._textureUris = data.textureUris;
     this._lightLevel = data.lightLevel;
     this._trimeshIndices = data.trimeshIndices;
@@ -113,12 +116,20 @@ export default class BlockType {
     return this._textureUris;
   }
 
+  public get surfaceGrass(): boolean {
+    return this._surfaceGrass;
+  }
+
   public setName(name: string): void {
     this._name = name;
   }
 
   public setTextureUris(textureUris: Record<BlockFace, BlockTextureUri>): void {
     this._textureUris = { ...textureUris };
+  }
+
+  public setSurfaceGrass(surfaceGrass: boolean): void {
+    this._surfaceGrass = surfaceGrass;
   }
 
   public getTextureUri(face: BlockFace): BlockTextureUri {

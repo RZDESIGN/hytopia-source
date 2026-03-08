@@ -10,6 +10,8 @@ import type { NetworkManagerEventPayload } from '../network/NetworkManager';
 import { ChunkWorkerBlockTypeMessage, ChunkWorkerBlockTypeUpdateMessage } from '../workers/ChunkWorkerConstants';
 import type { BlockId } from './BlockConstants';
 
+const GRASS_BLOCK_PATTERN = /(^|[\/_-])grass([\/._-]|$)/i;
+
 export default class BlockTypeManager {
   private _game: Game;
   private _registry: BlockTypeRegistry = new BlockTypeRegistry();
@@ -44,6 +46,7 @@ export default class BlockTypeManager {
         id: deserializedBlockType.id,
         isLiquid: deserializedBlockType.isLiquid ?? false,
         name: deserializedBlockType.name ?? 'Unknown',
+        surfaceGrass: this._isSurfaceGrassBlock(deserializedBlockType),
         textureUris: textureUriToTextureUris(deserializedBlockType.textureUri),
         lightLevel: deserializedBlockType.lightLevel,
         trimeshIndices: deserializedBlockType.trimeshIndices,
@@ -60,6 +63,12 @@ export default class BlockTypeManager {
     } else {
       const { name, textureUri } = deserializedBlockType;
       const textureUris = textureUri ? textureUriToTextureUris(textureUri) : undefined;
+      const previousSurfaceGrass = blockType.surfaceGrass;
+      const surfaceGrass = this._isSurfaceGrassBlock({
+        ...deserializedBlockType,
+        name: name ?? blockType.name,
+        textureUri: textureUri ?? blockType.textureUris.top,
+      });
 
       if (name) {
         blockType.setName(name);
@@ -69,16 +78,27 @@ export default class BlockTypeManager {
         blockType.setTextureUris(textureUris);
       }
 
-      if (name || textureUris) {
+      blockType.setSurfaceGrass(surfaceGrass);
+
+      if (name || textureUris || surfaceGrass !== previousSurfaceGrass) {
         const message: ChunkWorkerBlockTypeUpdateMessage = {
           type: 'block_type_update',
           blockId: blockType.id,
           name,
+          surfaceGrass,
           textureUris,
         };
         this._game.chunkWorkerClient.postMessage(message);
       }
     }
+  }
+
+  private _isSurfaceGrassBlock(deserializedBlockType: Pick<DeserializedBlockType, 'name' | 'textureUri' | 'isLiquid' | 'trimeshIndices' | 'trimeshVertices'>): boolean {
+    if (deserializedBlockType.isLiquid || deserializedBlockType.trimeshIndices || deserializedBlockType.trimeshVertices) {
+      return false;
+    }
+
+    return GRASS_BLOCK_PATTERN.test(deserializedBlockType.name ?? '') || GRASS_BLOCK_PATTERN.test(deserializedBlockType.textureUri ?? '');
   }
 
   public getBlockType(blockTypeId: BlockId): BlockType | undefined {

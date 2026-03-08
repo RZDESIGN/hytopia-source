@@ -381,6 +381,29 @@ The player that the camera belongs to.
 </td></tr>
 <tr><td>
 
+[preset](./server.playercamera.preset.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+[PlayerCameraPreset](./server.playercamerapreset.md) \| undefined
+
+
+</td><td>
+
+The currently active high-level preset, if any.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
 [shoulderAngle](./server.playercamera.shoulderangle.md)
 
 
@@ -606,6 +629,22 @@ Description
 </th></tr></thead>
 <tbody><tr><td>
 
+[clearPreset()](./server.playercamera.clearpreset.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Clears the active preset and stops any automatic fixed-follow updates.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
 [faceEntity(entity)](./server.playercamera.faceentity.md)
 
 
@@ -765,6 +804,20 @@ Sets the mode of the camera.
 </td><td>
 
 Sets the relative offset of the camera from its attachment target.
+
+
+</td></tr>
+<tr><td>
+
+[setPreset(preset, options)](./server.playercamera.setpreset.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Applies a high-level camera preset.
 
 
 </td></tr>

@@ -40,7 +40,6 @@ const BLOCK_RAYCAST_EPSILON = 0.01;
 const HALF_BATCH_WORLD_SIZE = BATCH_WORLD_SIZE / 2;
 const VISIBILITY_CELL_SIZE = BATCH_WORLD_SIZE / 4;
 const VIEW_DISTANCE_SQUARED_EPSILON = 0.0001;
-const VISIBILITY_FULL_RESYNC_INTERVAL_FRAMES = 60;
 
 type ChunkBlockUpdate = {
   globalCoordinate: Vector3Like;
@@ -69,7 +68,6 @@ export type RaycastedBlock = {
 export type ChunkVisibilityDebugState = {
   cachedVisibilityDisabled: boolean;
   forceFullRefreshEnabled: boolean;
-  fullResyncIntervalFrames: number;
   lastViewDistanceSquared: number;
   pendingFullRefresh: boolean;
   visibleBatchCount: number;
@@ -146,8 +144,7 @@ export default class ChunkManager {
     const debugFlags = getDebugFlags();
     const fullRefreshRequested = this._forceFullVisibilityRefresh ||
       debugFlags.disableCachedChunkVisibility ||
-      debugFlags.forceChunkVisibilityFullRefresh ||
-      (this._game.performanceMetricsManager.frameCount % VISIBILITY_FULL_RESYNC_INTERVAL_FRAMES) === 0;
+      debugFlags.forceChunkVisibilityFullRefresh;
 
     if (modeChanged || viewDistanceChanged || cellChanged || fullRefreshRequested) {
       this._refreshVisibleBatches(
@@ -297,6 +294,7 @@ export default class ChunkManager {
     const {
       batchId,
       chunkIds,
+      foliageGeometry,
       liquidGeometry,
       opaqueSolidGeometry,
       requestVersion,
@@ -333,6 +331,12 @@ export default class ChunkManager {
     }
 
     // Update batch meshes
+    if (foliageGeometry) {
+      this._game.chunkMeshManager.createOrUpdateBatchFoliageMesh(batchId, foliageGeometry);
+    } else {
+      this._game.chunkMeshManager.removeBatchFoliageMesh(batchId);
+    }
+
     if (liquidGeometry) {
       this._game.chunkMeshManager.createOrUpdateBatchLiquidMesh(batchId, liquidGeometry);
     } else {
@@ -357,7 +361,7 @@ export default class ChunkManager {
     this._registry.updateBatchMetadata(batchId, {
       blockCount,
       opaqueFaceCount: (opaqueSolidGeometry?.indices.length || 0) / 3,
-      transparentFaceCount: (transparentSolidGeometry?.indices.length || 0) / 3,
+      transparentFaceCount: ((transparentSolidGeometry?.indices.length || 0) + (foliageGeometry?.indices.length || 0)) / 3,
       liquidFaceCount: (liquidGeometry?.indices.length || 0) / 3,
     });
   };
@@ -376,7 +380,6 @@ export default class ChunkManager {
     return {
       cachedVisibilityDisabled: debugFlags.disableCachedChunkVisibility,
       forceFullRefreshEnabled: debugFlags.forceChunkVisibilityFullRefresh,
-      fullResyncIntervalFrames: VISIBILITY_FULL_RESYNC_INTERVAL_FRAMES,
       lastViewDistanceSquared: this._lastViewDistanceSquared,
       pendingFullRefresh: this._forceFullVisibilityRefresh,
       visibleBatchCount: this._visibleBatchIds.size,

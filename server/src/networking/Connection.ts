@@ -2,7 +2,7 @@ import { gzipSync } from 'zlib';
 import { WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import protocol from '@hytopia.com/server-protocol';
-import { CONNECTION_FEATURE_FLAGS } from '@engine-shared/network/ConnectionFeatureFlags';
+import { getConnectionFeatureFlags } from '@engine-shared/network/ConnectionFeatureFlags';
 import {
   connectionPacketDefinitionWithFeatures,
   registerConnectionFeaturePacketDefinition,
@@ -563,7 +563,7 @@ export default class Connection extends EventRouter {
     this.send([
       protocol.createPacket(connectionPacketDefinitionWithFeatures, {
         i: this.id,
-        f: CONNECTION_FEATURE_FLAGS,
+        f: getConnectionFeatureFlags(),
       }),
     ]);
   }

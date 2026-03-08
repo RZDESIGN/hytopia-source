@@ -2758,6 +2758,11 @@ export declare interface ConeColliderOptions extends BaseColliderOptions {
     radius?: number;
 }
 
+export declare enum ConnectionFeatureFlag {
+    SceneInteract = 1,
+    DefaultBlockEditPrediction = 2
+}
+
 declare type ConnectionPacket = IPacket<typeof PacketId.CONNECTION, ConnectionSchema>;
 
 declare const connectionPacketDefinition: IPacketDefinition<PacketId.CONNECTION, ConnectionSchema>;
@@ -2852,6 +2857,10 @@ export declare type DecodedCollisionGroups = {
     belongsTo: string[];
     collidesWith: string[];
 };
+
+export declare const DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE = 5;
+
+export declare const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
 
 /**
  * The default rigid body options for a model entity when `EntityOptions.rigidBodyOptions` is not provided.
@@ -3268,6 +3277,8 @@ export declare type DefaultPlayerEntityOptions = {
 
 declare function definePacket<TId extends PacketId, TSchema>(id: TId, schema: JSONSchemaType<TSchema>): IPacketDefinition<TId, TSchema>;
 
+export declare const disableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
+
 /**
  * The options for a dynamic rigid body, also the default type. @public
  *
@@ -3364,6 +3375,8 @@ export declare interface DynamicRigidBodyOptions extends BaseRigidBodyOptions {
     softCcdPrediction?: number;
 }
 
+export declare const enableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
+
 declare type EntitiesPacket = IPacket<typeof PacketId.ENTITIES, EntitiesSchema> & [WorldTick];
 
 declare const entitiesPacketDefinition: IPacketDefinition<PacketId.ENTITIES, EntitiesSchema>;
@@ -3430,6 +3443,8 @@ export declare class Entity extends RigidBody implements protocol.Serializable {
 
 
     private _tickPayload;
+
+
 
 
 
@@ -3564,6 +3579,24 @@ export declare class Entity extends RigidBody implements protocol.Serializable {
      * **Category:** Entities
      */
     get modelNodeOverrides(): Readonly<EntityModelNodeOverride[]>;
+    /**
+     * Model nodes that will not be rendered for this entity.
+     *
+     * @remarks
+     * Uses case-insensitive substring matching.
+     *
+     * **Category:** Entities
+     */
+    get modelHiddenNodes(): Set<string>;
+    /**
+     * Model nodes that will be rendered for this entity, overriding hidden nodes.
+     *
+     * @remarks
+     * Uses case-insensitive substring matching.
+     *
+     * **Category:** Entities
+     */
+    get modelShownNodes(): Set<string>;
     /**
      * The preferred collider shape when auto-generating colliders from the model.
      *
@@ -3850,6 +3883,27 @@ export declare class Entity extends RigidBody implements protocol.Serializable {
      */
     setModelTextureUri(modelTextureUri: string | undefined): void;
     /**
+     * Sets model nodes to hide for this entity.
+     *
+     * @remarks
+     * This compatibility API is backed by model node overrides. Exact node-match
+     * overrides are created with `hidden=true`, while shown-node overrides remain
+     * exact-match `hidden=false` so they continue to win over broader hidden rules.
+     *
+     * **Category:** Entities
+     */
+    setModelHiddenNodes(hiddenNodes: string[]): void;
+    /**
+     * Sets model nodes to explicitly show for this entity.
+     *
+     * @remarks
+     * This compatibility API is backed by exact-match model node overrides with
+     * `hidden=false`, allowing shown nodes to override broader hidden matches.
+     *
+     * **Category:** Entities
+     */
+    setModelShownNodes(shownNodes: string[]): void;
+    /**
      * Sets the opacity of the entity.
      * @param opacity - The opacity of the entity between 0 and 1. 0 is fully transparent, 1 is fully opaque.
      *
@@ -3955,15 +4009,15 @@ export declare class Entity extends RigidBody implements protocol.Serializable {
      */
     spawn(world: World, position: Vector3Like, rotation?: QuaternionLike): void;
     /**
-     * Stops all model animations for the entity, optionally excluding the provided animations from stopping.
+     * Stops all model animations for the entity, optionally excluding specific animations from stopping.
      *
-     * @param exclusionFilter - The filter to determine if a model animation should be excluded from being stopped.
+     * @param exclusionFilter - Either a filter function or a list of animation names to exclude.
      *
      * **Side effects:** May emit `EntityModelAnimationEvent.STOP` for each stopped animation.
      *
      * **Category:** Entities
      */
-    stopAllModelAnimations(exclusionFilter?: (modelAnimation: Readonly<EntityModelAnimation>) => boolean): void;
+    stopAllModelAnimations(exclusionFilter?: ((modelAnimation: Readonly<EntityModelAnimation>) => boolean) | readonly string[]): void;
     /**
      * Stops the provided model animations for the entity.
      *
@@ -3974,6 +4028,39 @@ export declare class Entity extends RigidBody implements protocol.Serializable {
      * **Category:** Entities
      */
     stopModelAnimations(modelAnimationNames: readonly string[]): void;
+    /**
+     * Starts the provided model animations as looped animations for the entity.
+     *
+     * @param modelAnimationNames - The model animation names to start looping.
+     *
+     * **Side effects:** May emit `EntityModelAnimationEvent.SET_LOOP_MODE` and
+     * `EntityModelAnimationEvent.PLAY` for each started animation.
+     *
+     * **Category:** Entities
+     */
+    startModelLoopedAnimations(modelAnimationNames: readonly string[]): void;
+    /**
+     * Starts the provided model animations as one-shot animations for the entity.
+     *
+     * @param modelAnimationNames - The model animation names to restart once.
+     *
+     * **Side effects:** May emit `EntityModelAnimationEvent.SET_LOOP_MODE` and
+     * `EntityModelAnimationEvent.RESTART` for each started animation.
+     *
+     * **Category:** Entities
+     */
+    startModelOneshotAnimations(modelAnimationNames: readonly string[]): void;
+    /**
+     * Sets the playback rate for all currently created model animations on the entity.
+     *
+     * @param playbackRate - The playback rate to apply to the entity's model animations.
+     *
+     * **Side effects:** May emit `EntityModelAnimationEvent.SET_PLAYBACK_RATE` for
+     * each tracked model animation.
+     *
+     * **Category:** Entities
+     */
+    setModelAnimationsPlaybackRate(playbackRate: number): void;
 
 
 
@@ -8128,6 +8215,12 @@ export declare class PlayerCamera extends EventRouter implements protocol.Serial
 
 
 
+
+
+
+
+
+
     /**
      * The entity the camera is attached to.
      *
@@ -8222,6 +8315,12 @@ export declare class PlayerCamera extends EventRouter implements protocol.Serial
      */
     get orientation(): PlayerCameraOrientation;
     /**
+     * The currently active high-level preset, if any.
+     *
+     * **Category:** Players
+     */
+    get preset(): PlayerCameraPreset | undefined;
+    /**
      * The shoulder angle of the camera in degrees.
      *
      * **Category:** Players
@@ -8279,6 +8378,27 @@ export declare class PlayerCamera extends EventRouter implements protocol.Serial
      * **Category:** Players
      */
     get zoom(): number;
+    /**
+     * Clears the active preset and stops any automatic fixed-follow updates.
+     *
+     * **Category:** Players
+     */
+    clearPreset(): void;
+    /**
+     * Applies a high-level camera preset.
+     *
+     * @remarks
+     * Fixed-angle presets are implemented on the server by continuously updating
+     * `attachedToPosition` and `targetPosition`, so they work with the current client
+     * protocol without requiring a separate camera runtime mode.
+     *
+     * `SIDE_VIEW_2D` requests the client orthographic renderer preset by sending a
+     * non-positive FOV. Pair it with custom movement and art rules if you want a
+     * fully 2D game feel.
+     *
+     * **Category:** Players
+     */
+    setPreset(preset: PlayerCameraPreset, options?: PlayerCameraPresetOptions): void;
     /**
      * Makes the camera look at an entity once.
      *
@@ -8542,6 +8662,13 @@ export declare class PlayerCamera extends EventRouter implements protocol.Serial
     setZoom(zoom: number): void;
 
 
+
+
+
+
+
+
+
 }
 
 /**
@@ -8700,6 +8827,91 @@ export declare type PlayerCameraOrientation = {
     pitch: number;
     yaw: number;
 };
+
+/**
+ * Common high-level camera presets.
+ *
+ * **Category:** Players
+ * @public
+ */
+export declare enum PlayerCameraPreset {
+    FIRST_PERSON = "first_person",
+    THIRD_PERSON = "third_person",
+    ISOMETRIC = "isometric",
+    SIDE_VIEW = "side_view",
+    SIDE_VIEW_2D = "side_view_2d",
+    FIXED_FOLLOW_THIRD_PERSON = "fixed_follow_third_person"
+}
+
+/**
+ * How a fixed-follow preset interprets its follow offset.
+ *
+ * **Category:** Players
+ * @public
+ */
+export declare enum PlayerCameraPresetOffsetSpace {
+    WORLD = "world",
+    ENTITY = "entity"
+}
+
+/**
+ * Options for applying a camera preset.
+ *
+ * **Category:** Players
+ * @public
+ */
+export declare interface PlayerCameraPresetOptions {
+    /**
+     * The entity the preset should follow.
+     *
+     * @remarks
+     * Defaults to the currently attached entity, or the player's first spawned player entity.
+     */
+    followEntity?: Entity;
+    /**
+     * Additional low-level camera offset for attached first/third-person presets.
+     *
+     * @remarks
+     * This maps to `PlayerCamera.offset`. Fixed-angle presets use `followOffset` instead.
+     */
+    cameraOffset?: Vector3Like;
+    /**
+     * World or entity-relative offset used by fixed-angle follow presets.
+     */
+    followOffset?: Vector3Like;
+    /**
+     * Whether `followOffset` is interpreted in world space or entity-local space.
+     */
+    followOffsetSpace?: PlayerCameraPresetOffsetSpace;
+    /**
+     * Focus point offset relative to the followed entity.
+     */
+    focusOffset?: Vector3Like;
+    /**
+     * Whether the camera collides with blocks.
+     */
+    collidesWithBlocks?: boolean;
+    /**
+     * Film offset applied after the preset.
+     */
+    filmOffset?: number;
+    /**
+     * Forward offset applied after the preset.
+     */
+    forwardOffset?: number;
+    /**
+     * Field of view applied after the preset.
+     */
+    fov?: number;
+    /**
+     * Shoulder angle applied after the preset.
+     */
+    shoulderAngle?: number;
+    /**
+     * Zoom applied after the preset.
+     */
+    zoom?: number;
+}
 
 /**
  * The cosmetics of a player.

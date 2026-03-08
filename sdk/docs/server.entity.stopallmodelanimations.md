@@ -4,12 +4,12 @@
 
 ## Entity.stopAllModelAnimations() method
 
-Stops all model animations for the entity, optionally excluding the provided animations from stopping.
+Stops all model animations for the entity, optionally excluding specific animations from stopping.
 
 **Signature:**
 
 ```typescript
-stopAllModelAnimations(exclusionFilter?: (modelAnimation: Readonly<EntityModelAnimation>) => boolean): void;
+stopAllModelAnimations(exclusionFilter?: ((modelAnimation: Readonly<EntityModelAnimation>) => boolean) | readonly string[]): void;
 ```
 
 ## Parameters
@@ -37,12 +37,12 @@ exclusionFilter
 
 </td><td>
 
-(modelAnimation: Readonly&lt;[EntityModelAnimation](./server.entitymodelanimation.md)<!-- -->&gt;) =&gt; boolean
+((modelAnimation: Readonly&lt;[EntityModelAnimation](./server.entitymodelanimation.md)<!-- -->&gt;) =&gt; boolean) \| readonly string\[\]
 
 
 </td><td>
 
-_(Optional)_ The filter to determine if a model animation should be excluded from being stopped.
+_(Optional)_ Either a filter function or a list of animation names to exclude.
 
 \*\*Side effects:\*\* May emit `EntityModelAnimationEvent.STOP` for each stopped animation.
 

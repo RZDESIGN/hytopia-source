@@ -848,6 +848,14 @@ export interface ConeColliderOptions extends BaseColliderOptions {
     shape: ColliderShape.CONE;
 }
 
+// @public (undocumented)
+export enum ConnectionFeatureFlag {
+    // (undocumented)
+    DefaultBlockEditPrediction = 2,
+    // (undocumented)
+    SceneInteract = 1
+}
+
 // @public
 export type ContactForceData = {
     totalForce: RAPIER.Vector;
@@ -877,6 +885,12 @@ export type DecodedCollisionGroups = {
     belongsTo: string[];
     collidesWith: string[];
 };
+
+// @public (undocumented)
+export const DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE = 5;
+
+// @public (undocumented)
+export const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
 
 // @public
 export const DEFAULT_ENTITY_RIGID_BODY_OPTIONS: RigidBodyOptions;
@@ -966,6 +980,9 @@ export type DefaultPlayerEntityOptions = {
     cosmeticHiddenSlots?: PlayerCosmeticSlot[];
 } & PlayerEntityOptions;
 
+// @public (undocumented)
+export const disableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
+
 // @public
 export interface DynamicRigidBodyOptions extends BaseRigidBodyOptions {
     additionalMass?: number;
@@ -985,6 +1002,9 @@ export interface DynamicRigidBodyOptions extends BaseRigidBodyOptions {
     // (undocumented)
     type: RigidBodyType.DYNAMIC;
 }
+
+// @public (undocumented)
+export const enableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
 
 // @public
 export class Entity extends RigidBody implements protocol.Serializable {
@@ -1011,10 +1031,12 @@ export class Entity extends RigidBody implements protocol.Serializable {
     get isModelEntity(): boolean;
     get isSpawned(): boolean;
     get modelAnimations(): Readonly<EntityModelAnimation[]>;
+    get modelHiddenNodes(): Set<string>;
     get modelNodeOverrides(): Readonly<EntityModelNodeOverride[]>;
     get modelPreferredShape(): ColliderShape | undefined;
     get modelScale(): Vector3Like;
     get modelScaleInterpolationMs(): number | undefined;
+    get modelShownNodes(): Set<string>;
     get modelTextureUri(): string | undefined;
     get modelUri(): string | undefined;
     get name(): string;
@@ -1036,8 +1058,11 @@ export class Entity extends RigidBody implements protocol.Serializable {
     setBlockTextureUri(blockTextureUri: string | undefined): void;
     setEmissiveColor(emissiveColor: RgbColor | undefined): void;
     setEmissiveIntensity(emissiveIntensity: number | undefined): void;
+    setModelAnimationsPlaybackRate(playbackRate: number): void;
+    setModelHiddenNodes(hiddenNodes: string[]): void;
     setModelScale(modelScale: Vector3Like | number): void;
     setModelScaleInterpolationMs(interpolationMs: number | undefined): void;
+    setModelShownNodes(shownNodes: string[]): void;
     setModelTextureUri(modelTextureUri: string | undefined): void;
     setOpacity(opacity: number): void;
     setOutline(outline: Outline | undefined, forPlayer?: Player): void;
@@ -1046,7 +1071,9 @@ export class Entity extends RigidBody implements protocol.Serializable {
     setRotationInterpolationMs(interpolationMs: number | undefined): void;
     setTintColor(tintColor: RgbColor | undefined): void;
     spawn(world: World, position: Vector3Like, rotation?: QuaternionLike): void;
-    stopAllModelAnimations(exclusionFilter?: (modelAnimation: Readonly<EntityModelAnimation>) => boolean): void;
+    startModelLoopedAnimations(modelAnimationNames: readonly string[]): void;
+    startModelOneshotAnimations(modelAnimationNames: readonly string[]): void;
+    stopAllModelAnimations(exclusionFilter?: ((modelAnimation: Readonly<EntityModelAnimation>) => boolean) | readonly string[]): void;
     stopModelAnimations(modelAnimationNames: readonly string[]): void;
     get tag(): string | undefined;
     // @internal (undocumented)
@@ -2316,6 +2343,7 @@ export class PlayerCamera extends EventRouter implements protocol.Serializable {
     constructor(player: Player);
     get attachedToEntity(): Entity | undefined;
     get attachedToPosition(): Vector3Like | undefined;
+    clearPreset(): void;
     get collidesWithBlocks(): boolean;
     faceEntity(entity: Entity): void;
     facePosition(position: Vector3Like): void;
@@ -2330,6 +2358,7 @@ export class PlayerCamera extends EventRouter implements protocol.Serializable {
     get offset(): Vector3Like;
     get orientation(): PlayerCameraOrientation;
     readonly player: Player;
+    get preset(): PlayerCameraPreset | undefined;
     reset(): void;
     // @internal (undocumented)
     serialize(): protocol.CameraSchema;
@@ -2345,6 +2374,7 @@ export class PlayerCamera extends EventRouter implements protocol.Serializable {
     setOrientationPitch(pitch: number): void;
     // @internal (undocumented)
     setOrientationYaw(yaw: number): void;
+    setPreset(preset: PlayerCameraPreset, options?: PlayerCameraPresetOptions): void;
     setShoulderAngle(shoulderAngle: number): void;
     setTargetEntity(entity: Entity | undefined): void;
     setTargetPosition(position: Vector3Like | undefined): void;
@@ -2502,6 +2532,45 @@ export type PlayerCameraOrientation = {
     pitch: number;
     yaw: number;
 };
+
+// @public
+export enum PlayerCameraPreset {
+    // (undocumented)
+    FIRST_PERSON = "first_person",
+    // (undocumented)
+    FIXED_FOLLOW_THIRD_PERSON = "fixed_follow_third_person",
+    // (undocumented)
+    ISOMETRIC = "isometric",
+    // (undocumented)
+    SIDE_VIEW = "side_view",
+    // (undocumented)
+    SIDE_VIEW_2D = "side_view_2d",
+    // (undocumented)
+    THIRD_PERSON = "third_person"
+}
+
+// @public
+export enum PlayerCameraPresetOffsetSpace {
+    // (undocumented)
+    ENTITY = "entity",
+    // (undocumented)
+    WORLD = "world"
+}
+
+// @public
+export interface PlayerCameraPresetOptions {
+    cameraOffset?: Vector3Like;
+    collidesWithBlocks?: boolean;
+    filmOffset?: number;
+    focusOffset?: Vector3Like;
+    followEntity?: Entity;
+    followOffset?: Vector3Like;
+    followOffsetSpace?: PlayerCameraPresetOffsetSpace;
+    forwardOffset?: number;
+    fov?: number;
+    shoulderAngle?: number;
+    zoom?: number;
+}
 
 // @public
 export type PlayerCosmetics = {

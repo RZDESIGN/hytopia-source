@@ -2,6 +2,10 @@ import Game from '../Game';
 import EventRouter from '../events/EventRouter';
 import MobileManager from '../mobile/MobileManager';
 import { DISCRETE_MOVEMENT_INPUT_SET } from '@gameplay-shared/InputContract';
+import {
+  DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE,
+  DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID,
+} from '@engine-shared/network/ConnectionFeatureFlags';
 import { CameraEventType } from '../core/Camera';
 import type { CameraEventPayload } from '../core/Camera';
 
@@ -74,6 +78,12 @@ type ContinuousInputState = {
 type InputSource = 'hardware' | 'virtual' | 'gamepad';
 type InputSourceState = Record<InputSource, InputState>;
 type JoystickInputSource = 'virtual' | 'gamepad';
+type InteractPointerState = {
+  sentInteract: boolean;
+  time: number;
+  x: number;
+  y: number;
+};
 type StickState = {
   x: number;
   y: number;
@@ -219,7 +229,7 @@ export default class InputManager {
   private _movementPacketImmediateFlushScheduled: boolean = false;
 
   // Interact tracking - Map by pointerId to support multitouch
-  private _interactPointers: Map<number, { x: number; y: number; time: number }> = new Map();
+  private _interactPointers: Map<number, InteractPointerState> = new Map();
 
   public constructor(game: Game) {
     this._game = game;
@@ -352,7 +362,10 @@ export default class InputManager {
       }
     });
     window.addEventListener('keyup', (event) => this._onKeyboardInputChange(event.code, false));
-    window.addEventListener('mousedown', (event) => this._onInputChange(`mouse${event.button}`, true, 'hardware'));
+    window.addEventListener('mousedown', (event) => {
+      this._maybePredictDefaultBlockEditFromMouseDown(event);
+      this._onInputChange(`mouse${event.button}`, true, 'hardware');
+    });
     window.addEventListener('mouseup', (event) => this._onInputChange(`mouse${event.button}`, false, 'hardware'));
     window.addEventListener('pointerdown', (event) => this._onPointerDown(event));
     window.addEventListener('pointerup', (event) => this._onPointerUp(event));
@@ -551,6 +564,8 @@ export default class InputManager {
       return;
     }
 
+    const wasMergedPressed = !!this._inputState[mappedInput];
+
     const sourceState = this._inputStateBySource[source];
 
     if (!!sourceState[mappedInput] === isPressed) {
@@ -564,6 +579,15 @@ export default class InputManager {
     }
 
     this._syncMergedInput(mappedInput);
+
+    if (
+      source === 'gamepad' &&
+      isPressed &&
+      !wasMergedPressed &&
+      (mappedInput === 'ml' || mappedInput === 'mr')
+    ) {
+      this._predictDefaultBlockEdit(mappedInput);
+    }
   }
 
   private _syncMergedInput(input: keyof InputState): void {
@@ -590,6 +614,55 @@ export default class InputManager {
         this._game.networkManager.sendInputPacket({ [input]: isPressed });
       }
     }
+  }
+
+  private _maybePredictDefaultBlockEditFromMouseDown(event: MouseEvent): void {
+    if (event.button !== 0 && event.button !== 2) {
+      return;
+    }
+
+    if (
+      !this._isPointerLocked &&
+      this._game.uiManager.eventPathHasClickListener(event as unknown as PointerEvent)
+    ) {
+      return;
+    }
+
+    const screenX = this._isPointerLocked ? window.innerWidth / 2 : event.clientX;
+    const screenY = this._isPointerLocked ? window.innerHeight / 2 : event.clientY;
+    this._predictDefaultBlockEdit(event.button === 0 ? 'ml' : 'mr', screenX, screenY);
+  }
+
+  private _predictDefaultBlockEdit(
+    input: 'ml' | 'mr',
+    screenX: number = window.innerWidth / 2,
+    screenY: number = window.innerHeight / 2,
+  ): boolean {
+    if (
+      !this._game.camera.isGameCameraActive ||
+      !this._game.networkManager.serverFeatures.supportsDefaultBlockEditPrediction
+    ) {
+      return false;
+    }
+
+    const hit = this._game.chunkManager.raycastBlockFromCamera(
+      screenX,
+      screenY,
+      DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE,
+    );
+
+    if (!hit) {
+      return false;
+    }
+
+    if (input === 'ml') {
+      return this._game.chunkManager.predictBlock(hit.globalCoordinate, 0);
+    }
+
+    return this._game.chunkManager.predictBlock(
+      hit.neighborGlobalCoordinate,
+      DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID,
+    );
   }
 
   private _clearInputSource(source: InputSource): void {
@@ -734,11 +807,39 @@ export default class InputManager {
   private _onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0) return;
 
-    this._interactPointers.set(event.pointerId, {
-      x: this._isPointerLocked ? window.innerWidth / 2 : event.clientX,
-      y: this._isPointerLocked ? window.innerHeight / 2 : event.clientY,
+    const screenX = this._isPointerLocked ? window.innerWidth / 2 : event.clientX;
+    const screenY = this._isPointerLocked ? window.innerHeight / 2 : event.clientY;
+    const pointerState: InteractPointerState = {
+      sentInteract: false,
       time: performance.now(),
+      x: screenX,
+      y: screenY,
+    };
+
+    this._interactPointers.set(event.pointerId, pointerState);
+
+    if (
+      this._isPointerLocked &&
+      event.pointerType === 'mouse' &&
+      !this._game.uiManager.eventPathHasClickListener(event)
+    ) {
+      pointerState.sentInteract = this._sendSceneInteract(screenX, screenY);
+    }
+  }
+
+  private _sendSceneInteract(screenX: number, screenY: number): boolean {
+    if (!this._game.networkManager.serverFeatures.supportsSceneInteract) {
+      return false;
+    }
+
+    const ray = this._game.camera.rayForInteract(screenX, screenY);
+
+    this._game.networkManager.sendInputPacket({
+      ird: [ ray.direction.x, ray.direction.y, ray.direction.z ],
+      iro: [ ray.origin.x, ray.origin.y, ray.origin.z ],
     });
+
+    return true;
   }
 
   private _onPointerUp = (event: PointerEvent) => {
@@ -747,7 +848,7 @@ export default class InputManager {
     const pointerData = this._interactPointers.get(event.pointerId);
     this._interactPointers.delete(event.pointerId);
 
-    if (!pointerData) return;
+    if (!pointerData || pointerData.sentInteract) return;
 
     // Check if any UI element in the event path has a click/pointer listener
     if (this._game.uiManager.eventPathHasClickListener(event)) return;
@@ -765,14 +866,7 @@ export default class InputManager {
     const distanceSq = dx * dx + dy * dy;
     if (distanceSq > INTERACT_DRAG_CANCEL_MAX_DISTANCE_SQ) return;
     
-    const ray = this._game.camera.rayForInteract(screenX, screenY);
-
-    if (this._game.networkManager.serverFeatures.supportsSceneInteract) {
-      this._game.networkManager.sendInputPacket({
-        ird: [ ray.direction.x, ray.direction.y, ray.direction.z ],
-        iro: [ ray.origin.x, ray.origin.y, ray.origin.z ],
-      });
-    }
+    this._sendSceneInteract(screenX, screenY);
   }
 
   private _onPointerCancel = (event: PointerEvent) => {

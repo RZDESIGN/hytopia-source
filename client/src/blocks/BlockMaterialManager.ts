@@ -4,6 +4,7 @@ import {
   FrontSide,
   MeshBasicMaterial,
   ShaderMaterial,
+  Vector3,
   WebGLProgramParametersWithUniforms,
 } from 'three';
 import { ALPHA_TEST_THRESHOLD, BlockTextureAtlasEventType, LIGHT_LEVEL_STRENGTH_MULTIPLIER, WATER_SURFACE_Y_OFFSET } from './BlockConstants';
@@ -110,9 +111,11 @@ class MeshBlockMaterial extends MeshBasicMaterial {
 const UNIFORM_TIME = 'time';
 const UNIFORM_TEXTURE_ATLAS = 'textureAtlas';
 const UNIFORM_AMBIENT_LIGHT_COLOR = 'ambientLightColor';
+const UNIFORM_INTERACTION_CENTER = 'interactionCenter';
 const ATTRIBUTE_FOAM_LEVEL = 'foamLevel';
 const ATTRIBUTE_FOAM_LEVEL_DIAG = 'foamLevelDiag';
 const ATTRIBUTE_SURFACE_FLAG = 'surfaceFlag';
+const ATTRIBUTE_WIND_DATA = 'windData';
 
 class MeshLiquidMaterial extends ShaderMaterial {
   constructor() {
@@ -298,9 +301,99 @@ class MeshLiquidMaterial extends ShaderMaterial {
   }
 }
 
+class MeshFoliageMaterial extends ShaderMaterial {
+  constructor() {
+    super({
+      uniforms: {
+        [UNIFORM_TIME]: { value: 0 },
+        [UNIFORM_TEXTURE_ATLAS]: { value: null },
+        [UNIFORM_RAW_AMBIENT_LIGHT_COLOR]: { value: new Color() },
+        [UNIFORM_AMBIENT_LIGHT_INTENSITY]: { value: 1 },
+        [UNIFORM_INTERACTION_CENTER]: { value: new Vector3() },
+      },
+      vertexShader: `
+        uniform float ${UNIFORM_TIME};
+        uniform vec3 ${UNIFORM_INTERACTION_CENTER};
+
+        attribute float lightLevel;
+        attribute vec4 color;
+        attribute vec3 ${ATTRIBUTE_WIND_DATA};
+
+        varying vec2 vUv;
+        varying vec4 vColor;
+        varying float vLightLevel;
+
+        void main() {
+          vUv = uv;
+          vColor = color;
+          vLightLevel = lightLevel;
+
+          vec3 pos = position;
+          float tipWeight = ${ATTRIBUTE_WIND_DATA}.z;
+          float tipWeightSq = tipWeight * tipWeight;
+          vec4 worldPos = modelMatrix * vec4(position, 1.0);
+          vec2 windDir = normalize(vec2(1.0, 0.32));
+
+          float swayPrimary = 0.5 + 0.5 * sin(${UNIFORM_TIME} * 2.2 + worldPos.x * 0.05 + worldPos.z * 0.04);
+          float swaySecondary = 0.5 + 0.5 * sin(${UNIFORM_TIME} * 1.4 + ${ATTRIBUTE_WIND_DATA}.y * 0.45);
+          float swayMix = mix(swayPrimary, swaySecondary, 0.35);
+          float sway = (0.04 + ${ATTRIBUTE_WIND_DATA}.x * 0.03) * swayMix * tipWeightSq;
+
+          pos.xz += windDir * sway;
+          pos.y -= sway * 0.12 * tipWeightSq;
+
+          vec2 away = worldPos.xz - ${UNIFORM_INTERACTION_CENTER}.xz;
+          float awayLength = length(away);
+          float bendFalloff = 1.0 - smoothstep(0.0, 1.8, awayLength);
+          float pressFalloff = 1.0 - smoothstep(0.0, 0.85, awayLength);
+          if (bendFalloff > 0.0) {
+            vec2 awayDir = awayLength > 0.0001 ? away / awayLength : windDir;
+            float spread = bendFalloff * (0.16 + ${ATTRIBUTE_WIND_DATA}.x * 0.16) * tipWeightSq;
+            float flatten = (pressFalloff * pressFalloff * 0.28 + bendFalloff * 0.07) * tipWeightSq;
+            pos.xz += awayDir * spread;
+            pos.y -= flatten;
+          }
+
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D ${UNIFORM_TEXTURE_ATLAS};
+        uniform vec3 ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR};
+        uniform float ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
+
+        varying vec2 vUv;
+        varying vec4 vColor;
+        varying float vLightLevel;
+
+        void main() {
+          vec4 texColor = texture2D(${UNIFORM_TEXTURE_ATLAS}, vUv);
+          if (texColor.a < ${ALPHA_TEST_THRESHOLD}) {
+            discard;
+          }
+
+          vec3 ambientLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
+          vec3 blockLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * vLightLevel * float(${LIGHT_LEVEL_STRENGTH_MULTIPLIER});
+          vec3 litColor = texColor.rgb * vColor.rgb * max(ambientLight, blockLight);
+
+          gl_FragColor = vec4(litColor, texColor.a * vColor.a);
+        }
+      `,
+      side: DoubleSide,
+    });
+  }
+
+  public update(ambientLightColor: Color, ambientLightIntensity: number): void {
+    this.uniforms[UNIFORM_TIME].value += 0.02;
+    this.uniforms[UNIFORM_RAW_AMBIENT_LIGHT_COLOR].value.copy(ambientLightColor);
+    this.uniforms[UNIFORM_AMBIENT_LIGHT_INTENSITY].value = ambientLightIntensity;
+  }
+}
+
 export default class BlockMaterialManager {
   private _game: Game;
 
+  private _foliageMaterial: MeshFoliageMaterial;
   private _opaqueMaterial: MeshBlockMaterial;
   private _transparentMaterial: MeshBlockMaterial;
   private _opaqueNonLitMaterial: MeshBlockMaterial;
@@ -316,6 +409,7 @@ export default class BlockMaterialManager {
     this._transparentMaterial = new MeshBlockMaterial(game, true, true);
     this._opaqueNonLitMaterial = new MeshBlockMaterial(game, false, false);
     this._transparentNonLitMaterial = new MeshBlockMaterial(game, true, false);
+    this._foliageMaterial = new MeshFoliageMaterial();
     this._liquidMaterial = new MeshLiquidMaterial();
 
     EventRouter.instance.on(
@@ -326,6 +420,7 @@ export default class BlockMaterialManager {
         this._transparentMaterial.map = textureAtlas;
         this._opaqueNonLitMaterial.map = textureAtlas;
         this._transparentNonLitMaterial.map = textureAtlas;
+        this._foliageMaterial.uniforms[UNIFORM_TEXTURE_ATLAS].value = textureAtlas;
         this._liquidMaterial.uniforms[UNIFORM_TEXTURE_ATLAS].value = textureAtlas;
 
         // It seems that when map changes from null to non-null, it still requires an
@@ -334,6 +429,7 @@ export default class BlockMaterialManager {
         this._transparentMaterial.needsUpdate = true;
         this._opaqueNonLitMaterial.needsUpdate = true;
         this._transparentNonLitMaterial.needsUpdate = true;
+        this._foliageMaterial.needsUpdate = true;
         this._liquidMaterial.needsUpdate = true;
 
         this._materialsToUpdate.forEach(material => {
@@ -349,12 +445,20 @@ export default class BlockMaterialManager {
   public get transparentMaterial(): MeshBlockMaterial { return this._transparentMaterial; }
   public get opaqueNonLitMaterial(): MeshBlockMaterial { return this._opaqueNonLitMaterial; }
   public get transparentNonLitMaterial(): MeshBlockMaterial { return this._transparentNonLitMaterial; }
+  public get foliageMaterial(): MeshFoliageMaterial { return this._foliageMaterial; }
   public get liquidMaterial(): MeshLiquidMaterial { return this._liquidMaterial; }
 
   public update(): void {
-    // Block materials (MeshBlockMaterial) directly reference ambientLight via getters,
-    // so they don't need explicit updates. Only liquid material needs updating for time animation.
+    // Block materials (MeshBlockMaterial) directly reference ambientLight via getters.
+    // Shader-based materials update their animation state and lighting uniforms here.
     const ambientLight = this._game.renderer.ambientLight;
+    const interactionSource = this._game.camera.gameCameraAttachedEntity?.position ?? this._game.camera.activeCamera.position;
+    this._foliageMaterial.uniforms[UNIFORM_INTERACTION_CENTER].value.set(
+      interactionSource.x,
+      interactionSource.y,
+      interactionSource.z,
+    );
+    this._foliageMaterial.update(ambientLight.color, ambientLight.intensity);
     this._liquidMaterial.update(ambientLight.color, ambientLight.intensity);
   }
 

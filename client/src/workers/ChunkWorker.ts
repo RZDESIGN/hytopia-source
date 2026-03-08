@@ -111,6 +111,8 @@ const skylightCoords: { x: number, y: number, z: number }[] = [
   { x: 0, y: 0, z: 0 },
   { x: 0, y: 0, z: 0 },
 ];
+const SURFACE_GRASS_BLADE_COUNT = 72;
+const SURFACE_GRASS_EDGE_OVERDRAW = 0.08;
 
 // Constructing the geometry for chunk blocks is CPU-intensive, so it is offloaded from the
 // main thread to WebWorkers. Ideally, only the geometry construction function would be
@@ -407,7 +409,7 @@ class ChunkWorker {
   };
 
   private _onBlockTypeUpdate = async (message: ChunkWorkerBlockTypeUpdateMessage): Promise<void> => {
-    const { blockId, name, textureUris } = message;
+    const { blockId, name, surfaceGrass, textureUris } = message;
     const blockType = this._blockTypeRegistry.getBlockType(blockId);
 
     if (!blockType) {
@@ -416,6 +418,10 @@ class ChunkWorker {
 
     if (name) {
       blockType.setName(name);
+    }
+
+    if (surfaceGrass !== undefined) {
+      blockType.setSurfaceGrass(surfaceGrass);
     }
 
     if (textureUris) {
@@ -474,10 +480,13 @@ class ChunkWorker {
   };
 
   private _buildChunkBatchGeometries(batchId: BatchId, chunkIds: ChunkId[], requestVersion: number): void {
-    const { liquidGeometry, opaqueSolidGeometry, transparentSolidGeometry, blockCount, lightLevelVolumes, skyDistanceVolumes } =
+    const { foliageGeometry, liquidGeometry, opaqueSolidGeometry, transparentSolidGeometry, blockCount, lightLevelVolumes, skyDistanceVolumes } =
       this._createChunkBatchGeometries(batchId, chunkIds);
 
     const geometries: BlocksBufferGeometryData[] = [];
+    if (foliageGeometry) {
+      geometries.push(foliageGeometry);
+    }
     if (liquidGeometry) {
       geometries.push(liquidGeometry);
     }
@@ -493,6 +502,7 @@ class ChunkWorker {
       type: 'chunk_batch_built',
       batchId,
       chunkIds,
+      foliageGeometry,
       liquidGeometry,
       opaqueSolidGeometry,
       requestVersion,
@@ -544,6 +554,9 @@ class ChunkWorker {
       }
       if (data.surfaceFlags) {
         transferables.push(data.surfaceFlags.buffer);
+      }
+      if (data.windData) {
+        transferables.push(data.windData.buffer);
       }
     }
     return transferables;
@@ -732,6 +745,7 @@ class ChunkWorker {
   }
 
   private _createChunkBatchGeometries(batchId: BatchId, chunkIds: ChunkId[]): {
+    foliageGeometry?: BlocksBufferGeometryData,
     liquidGeometry?: BlocksBufferGeometryData,
     opaqueSolidGeometry?: BlocksBufferGeometryData,
     transparentSolidGeometry?: BlocksBufferGeometryData,
@@ -772,6 +786,14 @@ class ChunkWorker {
     const skyDistanceVolumes: Map<ChunkId, Uint8Array> = new Map();
 
     // Batch mesh arrays (combined for all chunks in batch)
+    const foliageMeshColors: number[] = [];
+    const foliageMeshIndices: number[] = [];
+    const foliageMeshNormals: number[] = [];
+    const foliageMeshPositions: number[] = [];
+    const foliageMeshUvs: number[] = [];
+    const foliageMeshLightLevels: number[] = [];
+    const foliageMeshWindData: number[] = [];
+
     const liquidMeshColors: number[] = [];
     const liquidMeshIndices: number[] = [];
     const liquidMeshNormals: number[] = [];
@@ -861,6 +883,29 @@ class ChunkWorker {
 
             // Get block rotation (0 = identity, no rotation)
             const blockRotation = chunk.getBlockRotation(localCoord);
+
+            if (blockType.surfaceGrass) {
+              neighborCoord.x = globalX;
+              neighborCoord.y = globalY + 1;
+              neighborCoord.z = globalZ;
+
+              if (!this._getGlobalBlockType(neighborCoord)) {
+                this._appendSurfaceGrassGeometry(
+                  globalX,
+                  globalY,
+                  globalZ,
+                  blockType,
+                  lightLevel / MAX_LIGHT_LEVEL,
+                  foliageMeshColors,
+                  foliageMeshIndices,
+                  foliageMeshNormals,
+                  foliageMeshPositions,
+                  foliageMeshUvs,
+                  foliageMeshLightLevels,
+                  foliageMeshWindData,
+                );
+              }
+            }
 
             // Render trimesh block types. Uses precomputed per-triangle data (normals, vertices, UVs)
             // cached in BlockType to avoid redundant calculations across chunks and instances.
@@ -1244,6 +1289,15 @@ class ChunkWorker {
     }
 
     return {
+      foliageGeometry: foliageMeshPositions.length > 0 ? {
+        colors: new Float32Array(foliageMeshColors),
+        indices: this._createIndicesTypedArray(foliageMeshIndices, foliageMeshIndices[foliageMeshIndices.length - 1]),
+        normals: new Float32Array(foliageMeshNormals),
+        positions: new Float32Array(foliageMeshPositions),
+        uvs: new Float32Array(foliageMeshUvs),
+        lightLevels: new Float32Array(foliageMeshLightLevels),
+        windData: new Float32Array(foliageMeshWindData),
+      } : undefined,
       liquidGeometry: liquidMeshPositions.length > 0 ? {
         colors: new Float32Array(liquidMeshColors),
         indices: this._createIndicesTypedArray(liquidMeshIndices, liquidMeshIndices[liquidMeshIndices.length - 1]),
@@ -1279,6 +1333,113 @@ class ChunkWorker {
 
   private _createIndicesTypedArray(indices: number[], max: number): Uint32Array | Uint16Array {
     return new (max > 65535 ? Uint32Array : Uint16Array)(indices);
+  }
+
+  private _hashToUnit(x: number, y: number, z: number, salt: number): number {
+    let hash = Math.imul(x, 374761393) ^ Math.imul(y, 668265263) ^ Math.imul(z, 2147483647) ^ Math.imul(salt, 1597334677);
+    hash = Math.imul(hash ^ (hash >>> 13), 1274126177);
+    return ((hash ^ (hash >>> 16)) >>> 0) / 4294967295;
+  }
+
+  private _fract(value: number): number {
+    return value - Math.floor(value);
+  }
+
+  private _appendSurfaceGrassGeometry(
+    globalX: number,
+    globalY: number,
+    globalZ: number,
+    blockType: BlockType,
+    normalizedLightLevel: number,
+    colors: number[],
+    indices: number[],
+    normals: number[],
+    positions: number[],
+    uvs: number[],
+    lightLevels: number[],
+    windData: number[],
+  ): void {
+    const textureUri = blockType.textureUris.top;
+    const baseY = globalY + 1.001;
+    const blockSeedX = this._hashToUnit(globalX, globalY, globalZ, 91);
+    const blockSeedZ = this._hashToUnit(globalX, globalY, globalZ, 137);
+    const spread = 1 + SURFACE_GRASS_EDGE_OVERDRAW * 2;
+
+    for (let bladeIndex = 0; bladeIndex < SURFACE_GRASS_BLADE_COUNT; bladeIndex++) {
+      // Low-discrepancy placement keeps the block densely covered without revealing a rigid lattice.
+      const sampleX = this._fract(blockSeedX + bladeIndex * 0.7548776662466927);
+      const sampleZ = this._fract(blockSeedZ + bladeIndex * 0.5698402909980532);
+      const orientation = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 1) * Math.PI;
+      const placementJitterAngle = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 2) * Math.PI * 2;
+      const placementJitterRadius = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 3) * 0.028;
+      const width = 0.022 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 4) * 0.014;
+      const height = 0.24 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 5) * 0.12;
+      const lean = 0.05 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 6) * 0.07;
+      const swayStrength = 0.95 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 7) * 0.65;
+      const swayPhase = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 8) * Math.PI * 2;
+      const centerX =
+        globalX
+        + sampleX * spread
+        - SURFACE_GRASS_EDGE_OVERDRAW
+        + Math.cos(placementJitterAngle) * placementJitterRadius;
+      const centerZ =
+        globalZ
+        + sampleZ * spread
+        - SURFACE_GRASS_EDGE_OVERDRAW
+        + Math.sin(placementJitterAngle) * placementJitterRadius;
+      const halfWidthX = Math.cos(orientation) * width * 0.5;
+      const halfWidthZ = Math.sin(orientation) * width * 0.5;
+      const halfTopWidthX = halfWidthX * 0.26;
+      const halfTopWidthZ = halfWidthZ * 0.26;
+      const tipX = centerX + Math.cos(orientation + 0.8) * lean;
+      const tipZ = centerZ + Math.sin(orientation + 0.8) * lean;
+      const vertexOffset = positions.length / 3;
+
+      positions.push(
+        centerX - halfWidthX, baseY, centerZ - halfWidthZ,
+        centerX + halfWidthX, baseY, centerZ + halfWidthZ,
+        tipX - halfTopWidthX, baseY + height, tipZ - halfTopWidthZ,
+        tipX + halfTopWidthX, baseY + height, tipZ + halfTopWidthZ,
+      );
+
+      normals.push(
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+        0, 1, 0,
+      );
+
+      const rootLeftUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.47, 0.0]);
+      const rootRightUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.53, 0.0]);
+      const tipLeftUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.48, 1.0]);
+      const tipRightUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.52, 1.0]);
+      uvs.push(
+        rootLeftUv[0], rootLeftUv[1],
+        rootRightUv[0], rootRightUv[1],
+        tipLeftUv[0], tipLeftUv[1],
+        tipRightUv[0], tipRightUv[1],
+      );
+
+      colors.push(
+        0.68, 0.68, 0.68, 1,
+        0.72, 0.72, 0.72, 1,
+        1, 1, 1, 1,
+        1, 1, 1, 1,
+      );
+
+      lightLevels.push(normalizedLightLevel, normalizedLightLevel, normalizedLightLevel, normalizedLightLevel);
+      windData.push(
+        swayStrength, swayPhase, 0,
+        swayStrength, swayPhase, 0,
+        swayStrength, swayPhase, 1,
+        swayStrength, swayPhase, 1,
+      );
+
+      indices.push(
+        vertexOffset, vertexOffset + 1, vertexOffset + 2,
+        vertexOffset + 2, vertexOffset + 1, vertexOffset + 3,
+      );
+    }
   }
 
   // Calculate light level at a specific vertex position from pre-collected light sources

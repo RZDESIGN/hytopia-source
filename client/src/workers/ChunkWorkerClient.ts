@@ -51,6 +51,7 @@ export default class ChunkWorkerClient {
     EventRouter.instance.emit(WorkerEventType.ChunkBatchBuilt, {
       batchId: message.batchId,
       chunkIds: message.chunkIds,
+      foliageGeometry: message.foliageGeometry,
       liquidGeometry: message.liquidGeometry,
       opaqueSolidGeometry: message.opaqueSolidGeometry,
       requestVersion: message.requestVersion,

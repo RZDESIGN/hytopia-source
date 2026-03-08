@@ -40,6 +40,7 @@ export namespace WorkerEventPayload {
   export interface IChunkBatchBuilt {
     batchId: BatchId;
     chunkIds: ChunkId[];
+    foliageGeometry?: BlocksBufferGeometryData;
     liquidGeometry?: BlocksBufferGeometryData;
     opaqueSolidGeometry?: BlocksBufferGeometryData;
     requestVersion: number;
@@ -80,6 +81,7 @@ export type ChunkWorkerBlockTypeUpdateMessage = ToChunkWorkerMessageCore & {
   type: 'block_type_update';
   blockId: BlockId;
   name?: string;
+  surfaceGrass?: boolean;
   textureUris?: Record<BlockFace, BlockTextureUri>;
 };
 
@@ -158,6 +160,7 @@ export type ChunkWorkerChunkBatchBuiltMessage = FromChunkWorkerMessageCore & {
   type: 'chunk_batch_built';
   batchId: BatchId;
   chunkIds: ChunkId[];
+  foliageGeometry?: BlocksBufferGeometryData;
   liquidGeometry?: BlocksBufferGeometryData;
   opaqueSolidGeometry?: BlocksBufferGeometryData;
   requestVersion: number;

@@ -794,6 +794,15 @@ The default collision groups.
 </td></tr>
 <tr><td>
 
+[ConnectionFeatureFlag](./server.connectionfeatureflag.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 [EntityEvent](./server.entityevent.md)
 
 
@@ -929,6 +938,32 @@ See `PlayerCameraEventPayloads` for the payloads.
 </td><td>
 
 The mode of the camera.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
+[PlayerCameraPreset](./server.playercamerapreset.md)
+
+
+</td><td>
+
+Common high-level camera presets.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
+[PlayerCameraPresetOffsetSpace](./server.playercamerapresetoffsetspace.md)
+
+
+</td><td>
+
+How a fixed-follow preset interprets its follow offset.
 
 \*\*Category:\*\* Players
 
@@ -1096,6 +1131,24 @@ Description
 
 </th></tr></thead>
 <tbody><tr><td>
+
+[disableConnectionFeature(featureFlag)](./server.disableconnectionfeature.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+[enableConnectionFeature(featureFlag)](./server.enableconnectionfeature.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
 
 [startServer(init)](./server.startserver.md)
 
@@ -1633,6 +1686,19 @@ Event payloads for PlayerCamera emitted events.
 </td></tr>
 <tr><td>
 
+[PlayerCameraPresetOptions](./server.playercamerapresetoptions.md)
+
+
+</td><td>
+
+Options for applying a camera preset.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
 [PlayerEventPayloads](./server.playereventpayloads.md)
 
 
@@ -1954,6 +2020,24 @@ All valid block rotations, named as `{face pointing up}_{Y rotation degrees}`<!-
 N prefix = negative axis (e.g. `NZ_90` = -Z face up, rotated 90° around global Y).
 
 \*\*Category:\*\* Blocks
+
+
+</td></tr>
+<tr><td>
+
+[DEFAULT\_BLOCK\_EDIT\_PREDICTION\_MAX\_DISTANCE](./server.default_block_edit_prediction_max_distance.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+[DEFAULT\_BLOCK\_EDIT\_PREDICTION\_PLACE\_BLOCK\_ID](./server.default_block_edit_prediction_place_block_id.md)
+
+
+</td><td>
 
 
 </td></tr>

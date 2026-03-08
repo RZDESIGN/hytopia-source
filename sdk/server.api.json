@@ -12186,6 +12186,65 @@
           ]
         },
         {
+          "kind": "Enum",
+          "canonicalReference": "server!ConnectionFeatureFlag:enum",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export declare enum ConnectionFeatureFlag "
+            }
+          ],
+          "fileUrlPath": "src/shared/network/ConnectionFeatureFlags.ts",
+          "releaseTag": "Public",
+          "name": "ConnectionFeatureFlag",
+          "preserveMemberOrder": false,
+          "members": [
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!ConnectionFeatureFlag.DefaultBlockEditPrediction:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "DefaultBlockEditPrediction = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "2"
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "DefaultBlockEditPrediction"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!ConnectionFeatureFlag.SceneInteract:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "SceneInteract = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "1"
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "SceneInteract"
+            }
+          ]
+        },
+        {
           "kind": "TypeAlias",
           "canonicalReference": "server!ContactForceData:type",
           "docComment": "/**\n * Data for contact forces.\n *\n * **Category:** Physics\n *\n * @public\n */\n",
@@ -12429,6 +12488,60 @@
           "typeTokenRange": {
             "startIndex": 1,
             "endIndex": 2
+          }
+        },
+        {
+          "kind": "Variable",
+          "canonicalReference": "server!DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE:var",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE = "
+            },
+            {
+              "kind": "Content",
+              "text": "5"
+            }
+          ],
+          "fileUrlPath": "src/shared/network/ConnectionFeatureFlags.ts",
+          "initializerTokenRange": {
+            "startIndex": 1,
+            "endIndex": 2
+          },
+          "isReadonly": true,
+          "releaseTag": "Public",
+          "name": "DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE",
+          "variableTypeTokenRange": {
+            "startIndex": 0,
+            "endIndex": 0
+          }
+        },
+        {
+          "kind": "Variable",
+          "canonicalReference": "server!DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID:var",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = "
+            },
+            {
+              "kind": "Content",
+              "text": "3"
+            }
+          ],
+          "fileUrlPath": "src/shared/network/ConnectionFeatureFlags.ts",
+          "initializerTokenRange": {
+            "startIndex": 1,
+            "endIndex": 2
+          },
+          "isReadonly": true,
+          "releaseTag": "Public",
+          "name": "DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID",
+          "variableTypeTokenRange": {
+            "startIndex": 0,
+            "endIndex": 0
           }
         },
         {
@@ -14643,6 +14756,48 @@
           }
         },
         {
+          "kind": "Function",
+          "canonicalReference": "server!disableConnectionFeature:function(1)",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "disableConnectionFeature: (featureFlag: "
+            },
+            {
+              "kind": "Reference",
+              "text": "ConnectionFeatureFlag",
+              "canonicalReference": "server!ConnectionFeatureFlag:enum"
+            },
+            {
+              "kind": "Content",
+              "text": ") => "
+            },
+            {
+              "kind": "Content",
+              "text": "void"
+            }
+          ],
+          "fileUrlPath": "src/shared/network/ConnectionFeatureFlags.ts",
+          "returnTypeTokenRange": {
+            "startIndex": 3,
+            "endIndex": 4
+          },
+          "releaseTag": "Public",
+          "overloadIndex": 1,
+          "parameters": [
+            {
+              "parameterName": "featureFlag",
+              "parameterTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isOptional": false
+            }
+          ],
+          "name": "disableConnectionFeature"
+        },
+        {
           "kind": "Interface",
           "canonicalReference": "server!DynamicRigidBodyOptions:interface",
           "docComment": "/**\n * The options for a dynamic rigid body, also the default type.\n *\n * Use for: physics-driven bodies affected by forces and collisions. Do NOT use for: kinematic bodies; use the kinematic option types instead.\n *\n * **Category:** Physics\n *\n * @public\n */\n",
@@ -15084,6 +15239,48 @@
               "endIndex": 2
             }
           ]
+        },
+        {
+          "kind": "Function",
+          "canonicalReference": "server!enableConnectionFeature:function(1)",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "enableConnectionFeature: (featureFlag: "
+            },
+            {
+              "kind": "Reference",
+              "text": "ConnectionFeatureFlag",
+              "canonicalReference": "server!ConnectionFeatureFlag:enum"
+            },
+            {
+              "kind": "Content",
+              "text": ") => "
+            },
+            {
+              "kind": "Content",
+              "text": "void"
+            }
+          ],
+          "fileUrlPath": "src/shared/network/ConnectionFeatureFlags.ts",
+          "returnTypeTokenRange": {
+            "startIndex": 3,
+            "endIndex": 4
+          },
+          "releaseTag": "Public",
+          "overloadIndex": 1,
+          "parameters": [
+            {
+              "parameterName": "featureFlag",
+              "parameterTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isOptional": false
+            }
+          ],
+          "name": "enableConnectionFeature"
         },
         {
           "kind": "Class",
@@ -15877,6 +16074,41 @@
             },
             {
               "kind": "Property",
+              "canonicalReference": "server!Entity#modelHiddenNodes:member",
+              "docComment": "/**\n * Model nodes that will not be rendered for this entity.\n *\n * @remarks\n *\n * Uses case-insensitive substring matching.\n *\n * **Category:** Entities\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get modelHiddenNodes(): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Set",
+                  "canonicalReference": "!Set:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<string>"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "modelHiddenNodes",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 3
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
               "canonicalReference": "server!Entity#modelNodeOverrides:member",
               "docComment": "/**\n * The node overrides of the entity's model that have been accessed or configured.\n *\n * @remarks\n *\n * Node overrides are lazily created on first access via `getModelNodeOverride()`. This array only contains overrides that have been explicitly used.\n *\n * **Category:** Entities\n */\n",
               "excerptTokens": [
@@ -16010,6 +16242,41 @@
               "propertyTypeTokenRange": {
                 "startIndex": 1,
                 "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!Entity#modelShownNodes:member",
+              "docComment": "/**\n * Model nodes that will be rendered for this entity, overriding hidden nodes.\n *\n * @remarks\n *\n * Uses case-insensitive substring matching.\n *\n * **Category:** Entities\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get modelShownNodes(): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Set",
+                  "canonicalReference": "!Set:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<string>"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "modelShownNodes",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 3
               },
               "isStatic": false,
               "isProtected": false,
@@ -16542,6 +16809,102 @@
             },
             {
               "kind": "Method",
+              "canonicalReference": "server!Entity#setModelAnimationsPlaybackRate:member(1)",
+              "docComment": "/**\n * Sets the playback rate for all currently created model animations on the entity.\n *\n * @param playbackRate - The playback rate to apply to the entity's model animations.\n *\n * **Side effects:** May emit `EntityModelAnimationEvent.SET_PLAYBACK_RATE` for each tracked model animation.\n *\n * **Category:** Entities\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setModelAnimationsPlaybackRate(playbackRate: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "playbackRate",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setModelAnimationsPlaybackRate"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!Entity#setModelHiddenNodes:member(1)",
+              "docComment": "/**\n * Sets model nodes to hide for this entity.\n *\n * @remarks\n *\n * This compatibility API is backed by model node overrides. Exact node-match overrides are created with `hidden=true`, while shown-node overrides remain exact-match `hidden=false` so they continue to win over broader hidden rules.\n *\n * **Category:** Entities\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setModelHiddenNodes(hiddenNodes: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "string[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "hiddenNodes",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setModelHiddenNodes"
+            },
+            {
+              "kind": "Method",
               "canonicalReference": "server!Entity#setModelScale:member(1)",
               "docComment": "/**\n * Sets the scale of the entity's model and proportionally scales its colliders.\n *\n * @remarks\n *\n * Model entities only; no effect for block entities.\n *\n * **Collider scaling is relative:** Colliders are scaled by the ratio of new/old scale, not set to absolute values. Example: scaling from 1 to 2 doubles collider size; scaling from 2 to 4 also doubles it.\n *\n * **Reference equality check:** Uses `===` to compare with current scale, so passing the same object reference will early return even if values changed. Always pass a new object.\n *\n * @param modelScale - The scale of the entity's model. Can be a vector or a number for uniform scaling.\n *\n * **Side effects:** Scales existing colliders and emits `EntityEvent.SET_MODEL_SCALE` when spawned.\n *\n * **Category:** Entities\n */\n",
               "excerptTokens": [
@@ -16640,6 +17003,54 @@
               "isOptional": false,
               "isAbstract": false,
               "name": "setModelScaleInterpolationMs"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!Entity#setModelShownNodes:member(1)",
+              "docComment": "/**\n * Sets model nodes to explicitly show for this entity.\n *\n * @remarks\n *\n * This compatibility API is backed by exact-match model node overrides with `hidden=false`, allowing shown nodes to override broader hidden matches.\n *\n * **Category:** Entities\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setModelShownNodes(shownNodes: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "string[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "shownNodes",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setModelShownNodes"
             },
             {
               "kind": "Method",
@@ -17144,8 +17555,104 @@
             },
             {
               "kind": "Method",
+              "canonicalReference": "server!Entity#startModelLoopedAnimations:member(1)",
+              "docComment": "/**\n * Starts the provided model animations as looped animations for the entity.\n *\n * @param modelAnimationNames - The model animation names to start looping.\n *\n * **Side effects:** May emit `EntityModelAnimationEvent.SET_LOOP_MODE` and `EntityModelAnimationEvent.PLAY` for each started animation.\n *\n * **Category:** Entities\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "startModelLoopedAnimations(modelAnimationNames: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "readonly string[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "modelAnimationNames",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "startModelLoopedAnimations"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!Entity#startModelOneshotAnimations:member(1)",
+              "docComment": "/**\n * Starts the provided model animations as one-shot animations for the entity.\n *\n * @param modelAnimationNames - The model animation names to restart once.\n *\n * **Side effects:** May emit `EntityModelAnimationEvent.SET_LOOP_MODE` and `EntityModelAnimationEvent.RESTART` for each started animation.\n *\n * **Category:** Entities\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "startModelOneshotAnimations(modelAnimationNames: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "readonly string[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "modelAnimationNames",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "startModelOneshotAnimations"
+            },
+            {
+              "kind": "Method",
               "canonicalReference": "server!Entity#stopAllModelAnimations:member(1)",
-              "docComment": "/**\n * Stops all model animations for the entity, optionally excluding the provided animations from stopping.\n *\n * @param exclusionFilter - The filter to determine if a model animation should be excluded from being stopped.\n *\n * **Side effects:** May emit `EntityModelAnimationEvent.STOP` for each stopped animation.\n *\n * **Category:** Entities\n */\n",
+              "docComment": "/**\n * Stops all model animations for the entity, optionally excluding specific animations from stopping.\n *\n * @param exclusionFilter - Either a filter function or a list of animation names to exclude.\n *\n * **Side effects:** May emit `EntityModelAnimationEvent.STOP` for each stopped animation.\n *\n * **Category:** Entities\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",
@@ -17153,7 +17660,7 @@
                 },
                 {
                   "kind": "Content",
-                  "text": "(modelAnimation: "
+                  "text": "((modelAnimation: "
                 },
                 {
                   "kind": "Reference",
@@ -17171,7 +17678,7 @@
                 },
                 {
                   "kind": "Content",
-                  "text": ">) => boolean"
+                  "text": ">) => boolean) | readonly string[]"
                 },
                 {
                   "kind": "Content",
@@ -41616,6 +42123,37 @@
               "isAbstract": false
             },
             {
+              "kind": "Method",
+              "canonicalReference": "server!PlayerCamera#clearPreset:member(1)",
+              "docComment": "/**\n * Clears the active preset and stops any automatic fixed-follow updates.\n *\n * **Category:** Players\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "clearPreset(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "clearPreset"
+            },
+            {
               "kind": "Property",
               "canonicalReference": "server!PlayerCamera#collidesWithBlocks:member",
               "docComment": "/**\n * Whether the camera collides with blocks instead of clipping through them.\n *\n * **Category:** Players\n */\n",
@@ -42090,6 +42628,41 @@
               "isAbstract": false
             },
             {
+              "kind": "Property",
+              "canonicalReference": "server!PlayerCamera#preset:member",
+              "docComment": "/**\n * The currently active high-level preset, if any.\n *\n * **Category:** Players\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get preset(): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerCameraPreset",
+                  "canonicalReference": "server!PlayerCameraPreset:enum"
+                },
+                {
+                  "kind": "Content",
+                  "text": " | undefined"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "preset",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 3
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
               "kind": "Method",
               "canonicalReference": "server!PlayerCamera#reset:member(1)",
               "docComment": "/**\n * Resets the camera state on the server.\n *\n * Use for: clearing camera state on disconnect or reconnect.\n *\n * @remarks\n *\n * Clears `attachedToEntity`, `attachedToPosition`, `orientation`, `trackedEntity`, and `trackedPosition`. This does not emit a camera event; it only resets server-side state.\n *\n * **Category:** Players\n */\n",
@@ -42507,6 +43080,72 @@
               "isOptional": false,
               "isAbstract": false,
               "name": "setOffset"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!PlayerCamera#setPreset:member(1)",
+              "docComment": "/**\n * Applies a high-level camera preset.\n *\n * @remarks\n *\n * Fixed-angle presets are implemented on the server by continuously updating `attachedToPosition` and `targetPosition`, so they work with the current client protocol without requiring a separate camera runtime mode.\n *\n * `SIDE_VIEW_2D` requests the client orthographic renderer preset by sending a non-positive FOV. Pair it with custom movement and art rules if you want a fully 2D game feel.\n *\n * **Category:** Players\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setPreset(preset: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerCameraPreset",
+                  "canonicalReference": "server!PlayerCameraPreset:enum"
+                },
+                {
+                  "kind": "Content",
+                  "text": ", options?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerCameraPresetOptions",
+                  "canonicalReference": "server!PlayerCameraPresetOptions:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 5,
+                "endIndex": 6
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "preset",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                },
+                {
+                  "parameterName": "options",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 3,
+                    "endIndex": 4
+                  },
+                  "isOptional": true
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setPreset"
             },
             {
               "kind": "Method",
@@ -44736,6 +45375,528 @@
             "startIndex": 1,
             "endIndex": 2
           }
+        },
+        {
+          "kind": "Enum",
+          "canonicalReference": "server!PlayerCameraPreset:enum",
+          "docComment": "/**\n * Common high-level camera presets.\n *\n * **Category:** Players\n *\n * @public\n */\n",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export declare enum PlayerCameraPreset "
+            }
+          ],
+          "fileUrlPath": "src/players/PlayerCamera.ts",
+          "releaseTag": "Public",
+          "name": "PlayerCameraPreset",
+          "preserveMemberOrder": false,
+          "members": [
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPreset.FIRST_PERSON:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "FIRST_PERSON = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"first_person\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "FIRST_PERSON"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPreset.FIXED_FOLLOW_THIRD_PERSON:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "FIXED_FOLLOW_THIRD_PERSON = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"fixed_follow_third_person\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "FIXED_FOLLOW_THIRD_PERSON"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPreset.ISOMETRIC:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "ISOMETRIC = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"isometric\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "ISOMETRIC"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPreset.SIDE_VIEW:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "SIDE_VIEW = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"side_view\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "SIDE_VIEW"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPreset.SIDE_VIEW_2D:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "SIDE_VIEW_2D = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"side_view_2d\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "SIDE_VIEW_2D"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPreset.THIRD_PERSON:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "THIRD_PERSON = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"third_person\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "THIRD_PERSON"
+            }
+          ]
+        },
+        {
+          "kind": "Enum",
+          "canonicalReference": "server!PlayerCameraPresetOffsetSpace:enum",
+          "docComment": "/**\n * How a fixed-follow preset interprets its follow offset.\n *\n * **Category:** Players\n *\n * @public\n */\n",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export declare enum PlayerCameraPresetOffsetSpace "
+            }
+          ],
+          "fileUrlPath": "src/players/PlayerCamera.ts",
+          "releaseTag": "Public",
+          "name": "PlayerCameraPresetOffsetSpace",
+          "preserveMemberOrder": false,
+          "members": [
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPresetOffsetSpace.ENTITY:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "ENTITY = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"entity\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "ENTITY"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!PlayerCameraPresetOffsetSpace.WORLD:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "WORLD = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"world\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "WORLD"
+            }
+          ]
+        },
+        {
+          "kind": "Interface",
+          "canonicalReference": "server!PlayerCameraPresetOptions:interface",
+          "docComment": "/**\n * Options for applying a camera preset.\n *\n * **Category:** Players\n *\n * @public\n */\n",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export interface PlayerCameraPresetOptions "
+            }
+          ],
+          "fileUrlPath": "src/players/PlayerCamera.ts",
+          "releaseTag": "Public",
+          "name": "PlayerCameraPresetOptions",
+          "preserveMemberOrder": false,
+          "members": [
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#cameraOffset:member",
+              "docComment": "/**\n * Additional low-level camera offset for attached first/third-person presets.\n *\n * @remarks\n *\n * This maps to `PlayerCamera.offset`. Fixed-angle presets use `followOffset` instead.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "cameraOffset?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "cameraOffset",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#collidesWithBlocks:member",
+              "docComment": "/**\n * Whether the camera collides with blocks.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "collidesWithBlocks?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "boolean"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "collidesWithBlocks",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#filmOffset:member",
+              "docComment": "/**\n * Film offset applied after the preset.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "filmOffset?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "filmOffset",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#focusOffset:member",
+              "docComment": "/**\n * Focus point offset relative to the followed entity.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "focusOffset?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "focusOffset",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#followEntity:member",
+              "docComment": "/**\n * The entity the preset should follow.\n *\n * @remarks\n *\n * Defaults to the currently attached entity, or the player's first spawned player entity.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "followEntity?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Entity",
+                  "canonicalReference": "server!Entity:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "followEntity",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#followOffset:member",
+              "docComment": "/**\n * World or entity-relative offset used by fixed-angle follow presets.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "followOffset?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "followOffset",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#followOffsetSpace:member",
+              "docComment": "/**\n * Whether `followOffset` is interpreted in world space or entity-local space.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "followOffsetSpace?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerCameraPresetOffsetSpace",
+                  "canonicalReference": "server!PlayerCameraPresetOffsetSpace:enum"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "followOffsetSpace",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#forwardOffset:member",
+              "docComment": "/**\n * Forward offset applied after the preset.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "forwardOffset?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "forwardOffset",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#fov:member",
+              "docComment": "/**\n * Field of view applied after the preset.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "fov?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "fov",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#shoulderAngle:member",
+              "docComment": "/**\n * Shoulder angle applied after the preset.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "shoulderAngle?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "shoulderAngle",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!PlayerCameraPresetOptions#zoom:member",
+              "docComment": "/**\n * Zoom applied after the preset.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "zoom?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "zoom",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              }
+            }
+          ],
+          "extendsTokenRanges": []
         },
         {
           "kind": "TypeAlias",
