@@ -874,7 +874,7 @@ class ChunkWorker {
               neighborCoord.y = globalY + 1;
               neighborCoord.z = globalZ;
               const liquidAbove = this._getGlobalBlockType(neighborCoord);
-              liquidSurfaceFlag = Number(!liquidAbove || !liquidAbove.isLiquid || liquidAbove.id !== blockType.id);
+              liquidSurfaceFlag = Number(!liquidAbove || !liquidAbove.isLiquid);
             }
 
             totalBlockCount++;
@@ -1065,7 +1065,14 @@ class ChunkWorker {
 
               // cull face when possible for optimization
               if (neighborBlockType) {
-                if (neighborBlockType.isLiquid || neighborBlockType.isTrimesh) {
+                if (neighborBlockType.isLiquid) {
+                  // Treat adjacent liquid variants as a continuous volume so
+                  // differently tinted water blocks do not render fighting
+                  // internal faces or duplicate surface layers.
+                  if (blockType.isLiquid) {
+                    continue;
+                  }
+                } else if (neighborBlockType.isTrimesh) {
                   if (neighborBlockType.id === blockType.id) {
                     continue;
                   }
