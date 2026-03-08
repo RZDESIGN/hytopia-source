@@ -1,16 +1,24 @@
 import ChunkStats from '../chunks/ChunkStats';
+import type { ChunkVisibilityDebugState } from '../chunks/ChunkManager';
 import EntityStats from '../entities/EntityStats';
 import GLTFStats from '../gltf/GLTFStats';
 import SceneUIStats from '../ui/SceneUIStats';
 import SampleWindow, { type SampleWindowSnapshot } from './SampleWindow';
+import {
+  ensureRuntimeDebugSurface,
+  getDebugFlags,
+  type HytopiaDebugFlags,
+} from './RuntimeDebug';
 
 import type Game from '../Game';
 
 declare global {
   interface Window {
     __HYTOPIA_PERF__?: {
+      printSnapshot: () => DetailedPerformanceBaselineSnapshot;
       reset: () => void;
       snapshot: () => PerformanceBaselineSnapshot;
+      snapshotDetailed: () => DetailedPerformanceBaselineSnapshot;
     };
   }
 }
@@ -60,6 +68,33 @@ export type PerformanceBaselineSnapshot = {
   };
 };
 
+export type DetailedPerformanceBaselineSnapshot = PerformanceBaselineSnapshot & {
+  chunks: {
+    blockCount: number;
+    count: number;
+    liquidFaceCount: number;
+    opaqueFaceCount: number;
+    transparentFaceCount: number;
+    visibleCount: number;
+  };
+  chunkVisibility: ChunkVisibilityDebugState;
+  debugFlags: HytopiaDebugFlags;
+  renderer: {
+    calls: number;
+    canvasHeight: number;
+    canvasWidth: number;
+    lines: number;
+    pixelRatio: number;
+    points: number;
+    triangles: number;
+  };
+  settings: {
+    qualityPerfTradeoff: object;
+    qualityPresetLevel: string;
+    viewDistance: number;
+  };
+};
+
 const LONG_FRAME_THRESHOLD_MS = 50;
 
 export default class PerformanceBaselineManager {
@@ -82,10 +117,13 @@ export default class PerformanceBaselineManager {
 
   public constructor(game: Game) {
     this._game = game;
+    ensureRuntimeDebugSurface();
 
     window.__HYTOPIA_PERF__ = {
+      printSnapshot: () => this.printSnapshot(),
       reset: () => this.reset(),
       snapshot: () => this.snapshot(),
+      snapshotDetailed: () => this.snapshotDetailed(),
     };
   }
 
@@ -211,5 +249,45 @@ export default class PerformanceBaselineManager {
         entityCount: EntityStats.count,
       },
     };
+  }
+
+  public snapshotDetailed(): DetailedPerformanceBaselineSnapshot {
+    const renderer = this._game.renderer.webGLRenderer;
+    const renderInfo = renderer.info.render;
+    const baseSnapshot = this.snapshot();
+
+    return {
+      ...baseSnapshot,
+      chunks: {
+        blockCount: ChunkStats.blockCount,
+        count: ChunkStats.count,
+        liquidFaceCount: ChunkStats.liquidFaceCount,
+        opaqueFaceCount: ChunkStats.opaqueFaceCount,
+        transparentFaceCount: ChunkStats.transparentFaceCount,
+        visibleCount: ChunkStats.visibleCount,
+      },
+      chunkVisibility: this._game.chunkManager.getVisibilityDebugState(),
+      debugFlags: getDebugFlags(),
+      renderer: {
+        calls: renderInfo.calls,
+        canvasHeight: renderer.domElement.height,
+        canvasWidth: renderer.domElement.width,
+        lines: renderInfo.lines,
+        pixelRatio: renderer.getPixelRatio(),
+        points: renderInfo.points,
+        triangles: renderInfo.triangles,
+      },
+      settings: {
+        qualityPerfTradeoff: JSON.parse(JSON.stringify(this._game.settingsManager.qualityPerfTradeoff)) as object,
+        qualityPresetLevel: this._game.settingsManager.qualityPresetLevel,
+        viewDistance: this._game.renderer.viewDistance,
+      },
+    };
+  }
+
+  public printSnapshot(): DetailedPerformanceBaselineSnapshot {
+    const snapshot = this.snapshotDetailed();
+    console.log(JSON.stringify(snapshot, null, 2));
+    return snapshot;
   }
 }

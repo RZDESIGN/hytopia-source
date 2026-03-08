@@ -1,6 +1,11 @@
 {
   "name": "hytopia-source-monorepo",
   "private": true,
+  "scripts": {
+    "engine:use-local": "node scripts/engine-swap.mjs use-local",
+    "engine:use-prod": "node scripts/engine-swap.mjs use-prod",
+    "engine:status": "node scripts/engine-swap.mjs status"
+  },
   "workspaces": [
     "assets/release",
     "sdk",

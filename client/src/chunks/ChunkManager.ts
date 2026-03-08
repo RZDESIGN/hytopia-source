@@ -8,6 +8,7 @@ import {
   RendererEventType,
   type RendererEventPayload,
 } from '../core/Renderer';
+import { getDebugFlags } from '../core/RuntimeDebug';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
 import type { DeserializedBlock } from '../network/Deserializer';
@@ -39,6 +40,7 @@ const BLOCK_RAYCAST_EPSILON = 0.01;
 const HALF_BATCH_WORLD_SIZE = BATCH_WORLD_SIZE / 2;
 const VISIBILITY_CELL_SIZE = BATCH_WORLD_SIZE / 4;
 const VIEW_DISTANCE_SQUARED_EPSILON = 0.0001;
+const VISIBILITY_FULL_RESYNC_INTERVAL_FRAMES = 60;
 
 type ChunkBlockUpdate = {
   globalCoordinate: Vector3Like;
@@ -64,6 +66,16 @@ export type RaycastedBlock = {
   normal: Vector3Like;
 };
 
+export type ChunkVisibilityDebugState = {
+  cachedVisibilityDisabled: boolean;
+  forceFullRefreshEnabled: boolean;
+  fullResyncIntervalFrames: number;
+  lastViewDistanceSquared: number;
+  pendingFullRefresh: boolean;
+  visibleBatchCount: number;
+  wasViewDistanceEnabled: boolean | null;
+};
+
 export default class ChunkManager {
   private _game: Game;
   private _registry: ChunkRegistry = new ChunkRegistry();
@@ -75,6 +87,7 @@ export default class ChunkManager {
   private _lastVisibilityCellZ: number | null = null;
   private _lastViewDistanceSquared: number = -1;
   private _wasViewDistanceEnabled: boolean | null = null;
+  private _forceFullVisibilityRefresh: boolean = false;
 
   public constructor(game: Game) {
     this._game = game;
@@ -130,12 +143,22 @@ export default class ChunkManager {
     const viewDistanceChanged = Math.abs(this._lastViewDistanceSquared - viewDistanceSquared) > VIEW_DISTANCE_SQUARED_EPSILON;
     const cellChanged = this._lastVisibilityCellX !== cellX || this._lastVisibilityCellZ !== cellZ;
     const modeChanged = this._wasViewDistanceEnabled !== true;
+    const debugFlags = getDebugFlags();
+    const fullRefreshRequested = this._forceFullVisibilityRefresh ||
+      debugFlags.disableCachedChunkVisibility ||
+      debugFlags.forceChunkVisibilityFullRefresh ||
+      (this._game.performanceMetricsManager.frameCount % VISIBILITY_FULL_RESYNC_INTERVAL_FRAMES) === 0;
 
-    if (modeChanged || viewDistanceChanged || cellChanged) {
-      this._refreshVisibleBatches(fromVec2.set(cameraPos.x, cameraPos.z), viewDistanceSquared, modeChanged);
+    if (modeChanged || viewDistanceChanged || cellChanged || fullRefreshRequested) {
+      this._refreshVisibleBatches(
+        fromVec2.set(cameraPos.x, cameraPos.z),
+        viewDistanceSquared,
+        modeChanged || fullRefreshRequested,
+      );
       this._lastVisibilityCellX = cellX;
       this._lastVisibilityCellZ = cellZ;
       this._lastViewDistanceSquared = viewDistanceSquared;
+      this._forceFullVisibilityRefresh = false;
     }
 
     this._wasViewDistanceEnabled = true;
@@ -227,6 +250,12 @@ export default class ChunkManager {
         updates: workerChunkUpdates,
       };
       this._game.chunkWorkerClient.postMessage(message);
+    }
+
+    if (affectedBatches.size > 0) {
+      // World streaming is where cached visibility state is most likely to drift.
+      // Schedule a one-shot full refresh on the next frame as a safety net.
+      this._forceFullVisibilityRefresh = true;
     }
 
     // Build affected batches in order of proximity to the player
@@ -339,6 +368,20 @@ export default class ChunkManager {
 
   public getChunkByGlobalCoordinate(globalCoordinate: Vector3Like): Chunk | undefined {
     return this.getChunk(Chunk.globalCoordinateToChunkId(globalCoordinate));
+  }
+
+  public getVisibilityDebugState(): ChunkVisibilityDebugState {
+    const debugFlags = getDebugFlags();
+
+    return {
+      cachedVisibilityDisabled: debugFlags.disableCachedChunkVisibility,
+      forceFullRefreshEnabled: debugFlags.forceChunkVisibilityFullRefresh,
+      fullResyncIntervalFrames: VISIBILITY_FULL_RESYNC_INTERVAL_FRAMES,
+      lastViewDistanceSquared: this._lastViewDistanceSquared,
+      pendingFullRefresh: this._forceFullVisibilityRefresh,
+      visibleBatchCount: this._visibleBatchIds.size,
+      wasViewDistanceEnabled: this._wasViewDistanceEnabled,
+    };
   }
 
   public getBlock(globalCoordinate: Vector3Like): { blockId: BlockId, blockRotationIndex: number } | undefined {
