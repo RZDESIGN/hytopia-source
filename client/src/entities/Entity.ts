@@ -59,6 +59,9 @@ const BLOB_SHADOW_MIN_SCALE = 0.35;
 const BLOB_SHADOW_MAX_SCALE = 1.2;
 const BLOB_SHADOW_MAX_HEIGHT = 8;
 const BLOB_SHADOW_MAX_GROUND_SCAN = 12;
+const ENTITY_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO = 0.58;
+const ENTITY_SHADOW_LOD_FOCUS_PADDING_RATIO = 0.2;
+const ENTITY_SHADOW_LOD_MIN_PROJECTED_RADIUS = 0.012;
 
 // Working variables
 const corners: Vector3[] = new Array(8).fill(undefined).map(() => new Vector3());
@@ -71,6 +74,7 @@ const rotatedCenterOffset = new Vector3();
 const worldCenter = new Vector3();
 const localCenter = new Vector3();
 const nextQuaternion = new Quaternion();
+const shadowCasterSize = new Vector3();
 const shadowGlobalCoordinate: Vector3LikeMutable = { x: 0, y: 0, z: 0 };
 const shadowLocalCoordinate: Vector3LikeMutable = { x: 0, y: 0, z: 0 };
 
@@ -272,6 +276,9 @@ export default class Entity {
   private _blobShadow: Mesh | null = null;
   private _blobShadowGroundY: number | null = null;
   private _localBoundingBox: Box3 | null = null;
+  private _localBoundingSphereRadius: number = 0;
+  private _shadowCasterMeshes: Mesh[] = [];
+  private _shadowCastingEnabled: boolean = true;
   private _worldBoundingBox: Box3 | null = null;
   protected _globalCoordinate: Vector3LikeMutable;
   private _distanceToCameraSquared: number = 0;
@@ -589,6 +596,38 @@ export default class Entity {
     }
 
     return this._entityRoot.position.y;
+  }
+
+  private _getShadowCasterRadius(): number {
+    if (this._blockHalfExtents) {
+      return Math.max(
+        this._blockHalfExtents.x * Math.abs(this._scale.x),
+        this._blockHalfExtents.y * Math.abs(this._scale.y),
+        this._blockHalfExtents.z * Math.abs(this._scale.z),
+      );
+    }
+
+    if (this._localBoundingSphereRadius > 0) {
+      return this._localBoundingSphereRadius * Math.max(
+        Math.abs(this._scale.x),
+        Math.abs(this._scale.y),
+        Math.abs(this._scale.z),
+      );
+    }
+
+    return 0.75;
+  }
+
+  private _setShadowCastingEnabled(enabled: boolean): void {
+    if (this._shadowCastingEnabled === enabled) {
+      return;
+    }
+
+    for (let i = 0; i < this._shadowCasterMeshes.length; i++) {
+      this._shadowCasterMeshes[i].castShadow = enabled;
+    }
+
+    this._shadowCastingEnabled = enabled;
   }
 
   private _findGroundYForBlobShadow(): number | null {
@@ -2457,6 +2496,45 @@ export default class Entity {
     return this.visible;
   }
 
+  public applyShadowCasterLod(): void {
+    if (!this.visible || this._model === null || this._shadowCasterMeshes.length === 0) {
+      return;
+    }
+
+    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
+    if (!shadows?.enabled) {
+      this._setShadowCastingEnabled(false);
+      return;
+    }
+
+    const cameraPosition = this._game.camera.activeCamera.position;
+    const shadowFocusCenter = this._game.renderer.directionalShadowFocusCenter;
+    const directionalShadowDistance = this._game.renderer.directionalShadowDistance;
+    const shadowCasterRadius = this._getShadowCasterRadius();
+
+    const dxCamera = this._entityRoot.position.x - cameraPosition.x;
+    const dyCamera = this._entityRoot.position.y - cameraPosition.y;
+    const dzCamera = this._entityRoot.position.z - cameraPosition.z;
+    const distanceToCamera = Math.sqrt(dxCamera * dxCamera + dyCamera * dyCamera + dzCamera * dzCamera);
+    const maxCasterDistance = Math.min(
+      this._game.renderer.viewDistance * ENTITY_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO,
+      directionalShadowDistance * 1.45 + shadowCasterRadius * 10,
+    );
+
+    const dxFocus = this._entityRoot.position.x - shadowFocusCenter.x;
+    const dzFocus = this._entityRoot.position.z - shadowFocusCenter.z;
+    const focusRadius = directionalShadowDistance * (1 + ENTITY_SHADOW_LOD_FOCUS_PADDING_RATIO) + shadowCasterRadius;
+    const projectedRadius = shadowCasterRadius / Math.max(distanceToCamera, 1);
+    const shouldCastShadow = distanceToCamera <= maxCasterDistance
+      && (dxFocus * dxFocus + dzFocus * dzFocus) <= focusRadius * focusRadius
+      && (
+        projectedRadius >= ENTITY_SHADOW_LOD_MIN_PROJECTED_RADIUS
+        || distanceToCamera <= directionalShadowDistance * 0.9
+      );
+
+    this._setShadowCastingEnabled(shouldCastShadow);
+  }
+
   // Fourth update pass: Update Local matrix and animation
   public updateAnimationAndLocalMatrix(deltaTimeS: number, frameCount: number): void {
     // Do not update since it will not be visible anyway.
@@ -2677,6 +2755,7 @@ export default class Entity {
     // animation into account, we can expect improved accuracy.
     this._localBoundingBox = new Box3().setFromObject(model, precise);
     model.userData.modelCenter = this._localBoundingBox.getCenter(new Vector3());
+    this._localBoundingSphereRadius = this._localBoundingBox.getSize(shadowCasterSize).length() * 0.5;
     this._worldBoundingBox = this._localBoundingBox.clone();
     this._needsWorldBoundingBoxUpdate = true;
   }
@@ -2815,6 +2894,8 @@ export default class Entity {
     mesh.material.transparent = transparent;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    this._shadowCasterMeshes = [mesh];
+    this._shadowCastingEnabled = true;
     model.add(mesh);
 
     this._storeModelCenter(model, false);
@@ -2887,6 +2968,8 @@ export default class Entity {
 
     this._entityRoot.remove(this._model);
     this._model = null;
+    this._shadowCasterMeshes.length = 0;
+    this._shadowCastingEnabled = false;
     this._clearModelNodeTransformOverrides();
   }
 
@@ -2916,6 +2999,8 @@ export default class Entity {
     // Recompute them on the cloned model to avoid sharing stale/source-scene bounds
     // across animated player models and other entities with runtime differences.
     this._storeModelCenter(model, true);
+    this._shadowCasterMeshes.length = 0;
+    this._shadowCastingEnabled = true;
 
     model.traverse((node) => {
       this._storeModelNodeOverrideBaseTransform(node);
@@ -2930,6 +3015,7 @@ export default class Entity {
         material.forceSinglePass = true;
         node.castShadow = true;
         node.receiveShadow = true;
+        this._shadowCasterMeshes.push(node);
 
         this._storeOriginalMaterialData(material);
       }
@@ -3071,6 +3157,8 @@ export default class Entity {
       this._model = null;
     }
 
+    this._shadowCasterMeshes.length = 0;
+    this._shadowCastingEnabled = false;
     this._gltf = null;
     this._gltfAnimationMixer = null;
   }

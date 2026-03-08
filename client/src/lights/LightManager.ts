@@ -22,11 +22,15 @@ const LIGHT_TYPE_POINT = 0;
 const LIGHT_TYPE_SPOT = 1;
 const SPOT_SHADOW_BIAS = -0.0002;
 const SPOT_SHADOW_NORMAL_BIAS = 0.02;
+const MIN_SPOT_SHADOW_SCORE = 0.08;
 
 const tempOffset = new Vector3();
 const tempTarget = new Vector3();
 const tempForward = new Vector3();
 const tempQuaternion = new Quaternion();
+const tempInterest = new Vector3();
+const tempLightDirection = new Vector3();
+const tempLightToCamera = new Vector3();
 
 type ManagedPointLight = {
   data: DeserializedLight;
@@ -243,6 +247,45 @@ export default class LightManager {
     entry.light.visible = entry.light.intensity > 0;
   }
 
+  private _scoreSpotShadowCandidate(
+    entry: ManagedSpotLight,
+    cameraPosition: Vector3,
+    cameraForward: Vector3,
+  ): number {
+    tempInterest.copy(entry.light.position).lerp(entry.target.position, 0.65);
+    tempOffset.subVectors(tempInterest, cameraPosition);
+    const interestDistance = Math.max(0.001, tempOffset.length());
+    tempOffset.multiplyScalar(1 / interestDistance);
+    const screenWeight = Math.max(0, Math.min(1, (tempOffset.dot(cameraForward) + 0.25) / 1.25));
+    if (screenWeight <= 0.001) {
+      return 0;
+    }
+
+    tempLightDirection.subVectors(entry.target.position, entry.light.position);
+    const lightDirectionLength = tempLightDirection.length();
+    if (lightDirectionLength > 0.0001) {
+      tempLightDirection.multiplyScalar(1 / lightDirectionLength);
+    } else {
+      tempLightDirection.set(0, 0, -1);
+    }
+
+    tempLightToCamera.subVectors(cameraPosition, entry.light.position);
+    const lightToCameraDistance = Math.max(0.001, tempLightToCamera.length());
+    tempLightToCamera.multiplyScalar(1 / lightToCameraDistance);
+
+    const coneWeight = Math.max(0, tempLightDirection.dot(tempLightToCamera));
+    const lightRange = Math.max(entry.light.distance || DEFAULT_SPOT_LIGHT_DISTANCE, DEFAULT_SPOT_TARGET_DISTANCE);
+    const distanceWeight = 1 - Math.min(1, interestDistance / (lightRange * 2.4));
+    const intensityWeight = 0.35 + Math.min(2, Math.max(0, entry.light.intensity)) * 0.5;
+    const coneSizeWeight = 0.65 + Math.sin(entry.light.angle) * 0.55;
+
+    return intensityWeight
+      * coneSizeWeight
+      * (0.1 + 0.9 * screenWeight)
+      * (0.25 + 0.75 * coneWeight)
+      * (0.2 + 0.8 * distanceWeight);
+  }
+
   private _applySpotShadowBudget(): void {
     const shadowSettings = this._game.settingsManager.qualityPerfTradeoff.shadows;
     const maxSpotlightShadows = shadowSettings?.enabled ? shadowSettings.maxSpotlightShadows : 0;
@@ -264,18 +307,31 @@ export default class LightManager {
     }
 
     const cameraPosition = this._game.camera.activeCamera.position;
+    tempForward.copy(this._game.camera.activeViewDir);
+    if (tempForward.lengthSq() <= 0.0001) {
+      tempForward.set(0, 0, -1);
+    } else {
+      tempForward.normalize();
+    }
     this._spotShadowCandidates.sort(
-      (a, b) => a.light.position.distanceToSquared(cameraPosition) - b.light.position.distanceToSquared(cameraPosition),
+      (a, b) => this._scoreSpotShadowCandidate(b, cameraPosition, tempForward)
+        - this._scoreSpotShadowCandidate(a, cameraPosition, tempForward),
     );
 
+    let assignedShadowCount = 0;
     for (let i = 0; i < this._spotShadowCandidates.length; i++) {
       const entry = this._spotShadowCandidates[i];
-      const shouldCastShadow = i < maxSpotlightShadows;
+      const score = this._scoreSpotShadowCandidate(entry, cameraPosition, tempForward);
+      const shouldCastShadow = assignedShadowCount < maxSpotlightShadows && score >= MIN_SPOT_SHADOW_SCORE;
       if (entry.light.castShadow !== shouldCastShadow) {
         entry.light.castShadow = shouldCastShadow;
+        if (shouldCastShadow) {
+          entry.light.shadow.needsUpdate = true;
+        }
       }
 
       if (shouldCastShadow) {
+        assignedShadowCount++;
         if (
           entry.light.shadow.mapSize.x !== spotlightMapSize ||
           entry.light.shadow.mapSize.y !== spotlightMapSize

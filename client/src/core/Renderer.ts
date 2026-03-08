@@ -82,11 +82,19 @@ const DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S = 1 / 30;
 const DIRECTIONAL_LIGHT_SHADOW_IMMEDIATE_UPDATE_DISTANCE_RATIO = 0.5;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_PARALLEL_THRESHOLD = 0.95;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ = 0.000001;
-const WATER_REFLECTION_TEXTURE_SIZE = 512;
+const WATER_REFLECTION_TEXTURE_SIZE_HIGH = 512;
+const WATER_REFLECTION_TEXTURE_SIZE_MEDIUM = 384;
+const WATER_REFLECTION_TEXTURE_SIZE_LOW = 256;
 const WATER_REFLECTION_CLIP_BIAS = 0.01;
-const WATER_REFLECTION_UPDATE_INTERVAL_S = 1 / 15;
-const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ = 0.3 * 0.3;
-const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD = 0.9988;
+const WATER_REFLECTION_UPDATE_INTERVAL_HIGH_S = 1 / 15;
+const WATER_REFLECTION_UPDATE_INTERVAL_MEDIUM_S = 1 / 10;
+const WATER_REFLECTION_UPDATE_INTERVAL_LOW_S = 1 / 6;
+const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_HIGH = 0.3 * 0.3;
+const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_MEDIUM = 0.55 * 0.55;
+const WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_LOW = 0.85 * 0.85;
+const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_HIGH = 0.9988;
+const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_MEDIUM = 0.9976;
+const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_LOW = 0.996;
 const WATER_REFLECTION_MAX_DISTANCE = 84;
 
 // Working variables
@@ -120,6 +128,19 @@ export type AmbientLightData = {
   color: Color;
   intensity: number;
 }
+
+type WaterReflectionPlaneInfo = {
+  centerHit: boolean;
+  coverage: number;
+  planeY: number;
+};
+
+type WaterReflectionQuality = {
+  cameraPositionDeltaSq: number;
+  textureSize: number;
+  updateIntervalS: number;
+  viewDirDotThreshold: number;
+};
 
 export enum RendererEventType {
   Animate = 'RENDERER.ANIMATE',
@@ -251,8 +272,8 @@ export default class Renderer {
     this._overlayScene = new Scene();
     this._uiScene = new Scene();
     this._waterReflectionRenderTarget = new WebGLRenderTarget(
-      WATER_REFLECTION_TEXTURE_SIZE,
-      WATER_REFLECTION_TEXTURE_SIZE,
+      WATER_REFLECTION_TEXTURE_SIZE_HIGH,
+      WATER_REFLECTION_TEXTURE_SIZE_HIGH,
       { type: HalfFloatType },
     );
     this._waterReflectionCamera = new PerspectiveCamera();
@@ -266,6 +287,13 @@ export default class Renderer {
       depthTexture: new DepthTexture(1, 1),
       type: HalfFloatType,
     }));
+    // Preserve scene depth across post passes that read it after a color-only
+    // pass. Later passes temporarily detach the shared depth attachment if they
+    // sample it while writing into the alternate composer target.
+    if (this._effectComposer.renderTarget2.depthTexture) {
+      this._effectComposer.renderTarget2.depthTexture.dispose();
+    }
+    this._effectComposer.renderTarget2.depthTexture = this._effectComposer.renderTarget1.depthTexture;
     this._renderPass = new RenderPass(this._scene, this._game.camera.activeCamera);
     this._viewModelRenderPass = new RenderPass(this._viewModelScene, this._game.camera.activeCamera);
     this._viewModelRenderPass.clear = false;
@@ -311,6 +339,8 @@ export default class Renderer {
   public get sunDirection(): Vector3 { return this._sunDirection; }
   public get sunLightColor(): Color { return this._directionalSceneLight.color; }
   public get sunLightIntensity(): number { return this._directionalSceneLight.intensity; }
+  public get directionalShadowDistance(): number { return this._game.settingsManager.qualityPerfTradeoff.shadows?.directionalDistance ?? 48; }
+  public get directionalShadowFocusCenter(): Vector3 { return this._lastDirectionalShadowFocusCenter; }
   public get viewDistance(): number { return Math.min(this._game.settingsManager.qualityPerfTradeoff.viewDistance.distance, this._fogFar); }
   public get webGLRenderer(): WebGLRenderer { return this._renderer; }
 
@@ -924,7 +954,70 @@ export default class Renderer {
     document.body.appendChild(this._sceneUiRenderer.domElement);
   }
 
-  private _resolveWaterReflectionPlaneY(activeCamera: PerspectiveCamera): number | null {
+  private _ensureWaterReflectionRenderTargetSize(textureSize: number): void {
+    if (
+      this._waterReflectionRenderTarget.width === textureSize
+      && this._waterReflectionRenderTarget.height === textureSize
+    ) {
+      return;
+    }
+
+    this._waterReflectionRenderTarget.setSize(textureSize, textureSize);
+  }
+
+  private _estimateWaterCoverage(
+    activeCamera: PerspectiveCamera,
+    planeY: number,
+    worldCenter: Vector3 | null,
+    radius: number,
+    forwardness: number,
+    centerHit: boolean,
+  ): number {
+    const cameraHeightAbovePlane = Math.max(0, activeCamera.position.y - planeY);
+    if (centerHit) {
+      const heightWeight = 1 - Math.min(1, cameraHeightAbovePlane / 36);
+      return 0.56 + heightWeight * 0.32;
+    }
+
+    if (worldCenter === null) {
+      return 0.12;
+    }
+
+    const distance = Math.max(1, worldCenter.distanceTo(activeCamera.position));
+    const projectedRadius = radius / (distance * Math.max(0.2, Math.tan(activeCamera.fov * Math.PI / 360)));
+    const coverage = Math.min(0.7, Math.max(0.08, projectedRadius * projectedRadius * 2.4));
+
+    return coverage * (0.3 + 0.7 * Math.max(0, forwardness));
+  }
+
+  private _resolveWaterReflectionQuality(coverage: number, centerHit: boolean): WaterReflectionQuality {
+    if (centerHit || coverage >= 0.55) {
+      return {
+        cameraPositionDeltaSq: WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_HIGH,
+        textureSize: WATER_REFLECTION_TEXTURE_SIZE_HIGH,
+        updateIntervalS: WATER_REFLECTION_UPDATE_INTERVAL_HIGH_S,
+        viewDirDotThreshold: WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_HIGH,
+      };
+    }
+
+    if (coverage >= 0.22) {
+      return {
+        cameraPositionDeltaSq: WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_MEDIUM,
+        textureSize: WATER_REFLECTION_TEXTURE_SIZE_MEDIUM,
+        updateIntervalS: WATER_REFLECTION_UPDATE_INTERVAL_MEDIUM_S,
+        viewDirDotThreshold: WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_MEDIUM,
+      };
+    }
+
+    return {
+      cameraPositionDeltaSq: WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ_LOW,
+      textureSize: WATER_REFLECTION_TEXTURE_SIZE_LOW,
+      updateIntervalS: WATER_REFLECTION_UPDATE_INTERVAL_LOW_S,
+      viewDirDotThreshold: WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_LOW,
+    };
+  }
+
+  private _resolveWaterReflectionPlaneInfo(activeCamera: PerspectiveCamera): WaterReflectionPlaneInfo | null {
     const liquidMeshes = this._game.chunkMeshManager.liquidMeshesInScene;
 
     if (liquidMeshes.length === 0) {
@@ -951,10 +1044,15 @@ export default class Renderer {
         continue;
       }
 
-      return Math.round(intersection.point.y) + WATER_SURFACE_Y_OFFSET;
+      const planeY = Math.round(intersection.point.y) + WATER_SURFACE_Y_OFFSET;
+      return {
+        centerHit: true,
+        coverage: this._estimateWaterCoverage(activeCamera, planeY, null, 0, 1, true),
+        planeY,
+      };
     }
 
-    let nearestPlaneY: number | null = null;
+    let nearestPlaneInfo: WaterReflectionPlaneInfo | null = null;
     let nearestScore = Number.POSITIVE_INFINITY;
     const cameraPosition = activeCamera.position;
     const viewDir = vec3d.copy(this._game.camera.activeViewDir).normalize();
@@ -988,14 +1086,26 @@ export default class Renderer {
       const worldTopY = vec3e.copy(geometry.boundingBox.max).applyMatrix4(mesh.matrixWorld).y;
       const planeY = Math.round(worldTopY) + WATER_SURFACE_Y_OFFSET;
       const score = horizontalDistanceSq * (1.15 - Math.min(1, Math.max(0, forwardness)));
+      const coverage = this._estimateWaterCoverage(
+        activeCamera,
+        planeY,
+        worldCenter,
+        geometry.boundingSphere.radius,
+        forwardness,
+        false,
+      );
 
       if (score < nearestScore) {
         nearestScore = score;
-        nearestPlaneY = planeY;
+        nearestPlaneInfo = {
+          centerHit: false,
+          coverage,
+          planeY,
+        };
       }
     }
 
-    return nearestPlaneY;
+    return nearestPlaneInfo;
   }
 
   private _disableWaterReflection(): void {
@@ -1007,6 +1117,7 @@ export default class Renderer {
     activeCamera: PerspectiveCamera,
     planeY: number,
     liquidMeshes: Mesh[],
+    textureSize: number,
   ): boolean {
     const cameraPosition = activeCamera.position;
     const planePointY = planeY;
@@ -1067,6 +1178,8 @@ export default class Renderer {
     const currentShadowAutoUpdate = this._renderer.shadowMap.autoUpdate;
     const currentAutoClear = this._renderer.autoClear;
 
+    this._ensureWaterReflectionRenderTargetSize(textureSize);
+
     for (const liquidMesh of liquidMeshes) {
       liquidMesh.visible = false;
     }
@@ -1108,19 +1221,24 @@ export default class Renderer {
       return;
     }
 
-    const planeY = this._resolveWaterReflectionPlaneY(activeCamera);
-    if (planeY === null || activeCamera.position.y <= planeY + 0.15) {
+    const reflectionPlaneInfo = this._resolveWaterReflectionPlaneInfo(activeCamera);
+    if (reflectionPlaneInfo === null || activeCamera.position.y <= reflectionPlaneInfo.planeY + 0.15) {
       this._disableWaterReflection();
       return;
     }
 
+    const reflectionQuality = this._resolveWaterReflectionQuality(
+      reflectionPlaneInfo.coverage,
+      reflectionPlaneInfo.centerHit,
+    );
     this._waterReflectionUpdateCooldownS = Math.max(0, this._waterReflectionUpdateCooldownS - frameDeltaS);
     vec3d.copy(this._game.camera.activeViewDir).normalize();
 
     const shouldRefresh = this._waterReflectionPlaneY === null
-      || Math.abs((this._waterReflectionPlaneY ?? 0) - planeY) > 0.01
-      || this._lastWaterReflectionCameraPosition.distanceToSquared(activeCamera.position) > WATER_REFLECTION_CAMERA_POSITION_DELTA_SQ
-      || this._lastWaterReflectionViewDir.dot(vec3d) < WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD
+      || Math.abs((this._waterReflectionPlaneY ?? 0) - reflectionPlaneInfo.planeY) > 0.01
+      || this._waterReflectionRenderTarget.width !== reflectionQuality.textureSize
+      || this._lastWaterReflectionCameraPosition.distanceToSquared(activeCamera.position) > reflectionQuality.cameraPositionDeltaSq
+      || this._lastWaterReflectionViewDir.dot(vec3d) < reflectionQuality.viewDirDotThreshold
       || this._waterReflectionUpdateCooldownS <= 0;
 
     if (!shouldRefresh) {
@@ -1132,14 +1250,19 @@ export default class Renderer {
       return;
     }
 
-    const rendered = this._renderWaterReflection(activeCamera, planeY, liquidMeshes);
+    const rendered = this._renderWaterReflection(
+      activeCamera,
+      reflectionPlaneInfo.planeY,
+      liquidMeshes,
+      reflectionQuality.textureSize,
+    );
     if (!rendered) {
       return;
     }
-    this._waterReflectionPlaneY = planeY;
+    this._waterReflectionPlaneY = reflectionPlaneInfo.planeY;
     this._lastWaterReflectionCameraPosition.copy(activeCamera.position);
     this._lastWaterReflectionViewDir.copy(vec3d);
-    this._waterReflectionUpdateCooldownS = WATER_REFLECTION_UPDATE_INTERVAL_S;
+    this._waterReflectionUpdateCooldownS = reflectionQuality.updateIntervalS;
   }
 
   private _updateGameplayDistanceBlur(): void {

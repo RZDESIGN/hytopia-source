@@ -426,6 +426,7 @@ export default class EntityManager {
     for (let i = 0; i < inViewDistanceDynamicEntities.length; i++) {
       const entity = inViewDistanceDynamicEntities[i];
       if (entity.applyFrustumCulling(frustum)) {
+        entity.applyShadowCasterLod();
         visibleDynamicEntities.push(entity);
       }
     }
