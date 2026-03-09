@@ -1,5 +1,6 @@
 import protocol from '@hytopia.com/server-protocol';
 import ErrorHandler from '@/errors/ErrorHandler';
+import type GatewayPlayerSession from '@/networking/GatewayPlayerSession';
 import GatewayPlayerSessionManager from '@/networking/GatewayPlayerSessionManager';
 import IterationMap from '@/shared/classes/IterationMap';
 import Telemetry, { TelemetrySpanOperation } from '@/metrics/Telemetry';
@@ -76,7 +77,10 @@ type ReliablePacketSlot = {
 };
 
 type PacketPlan = {
-  reliableSlots: ReliablePacketSlot[];
+  postPlayerUIAfterChatReliableSlots: ReliablePacketSlot[];
+  postPlayerUIBeforeWorldAndPlayersReliableSlots: ReliablePacketSlot[];
+  prePlayerUIReliableSlots: ReliablePacketSlot[];
+  prePlayerUISpecialReliableSlots: ReliablePacketSlot[];
   sharedUnreliablePackets: AnyPacket[];
 };
 
@@ -110,7 +114,6 @@ export default class NetworkSynchronizer {
   private _queuedChatMessagesSyncs: SingletonSyncQueue<protocol.ChatMessagesSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedDebugRaycastsSyncs: SingletonSyncQueue<protocol.PhysicsDebugRaycastsSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedDebugRenderSyncs: SingletonSyncQueue<protocol.PhysicsDebugRenderSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
-  private _queuedNotificationPermissionRequestSyncs: SingletonSyncQueue<protocol.NotificationPermissionRequestSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedUISyncs: SingletonSyncQueue<protocol.UISchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedUIDatasSyncs: SingletonSyncQueue<protocol.UIDatasSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedWorldSyncs: SingletonSyncQueue<protocol.WorldSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
@@ -193,7 +196,7 @@ export default class NetworkSynchronizer {
       operation: TelemetrySpanOperation.BUILD_PACKETS,
     }, () => this._buildPacketPlan(currentTick));
 
-    this._sendPacketPlan(packetPlan);
+    this._sendPacketPlan(packetPlan, currentTick);
 
     /*
      * Clear sync queues - We only clear queues if they aren't empty,
@@ -217,7 +220,6 @@ export default class NetworkSynchronizer {
       this._clearSingletonSyncQueue(this._queuedChatMessagesSyncs);
       this._clearSingletonSyncQueue(this._queuedDebugRaycastsSyncs);
       this._clearSingletonSyncQueue(this._queuedDebugRenderSyncs);
-      this._clearSingletonSyncQueue(this._queuedNotificationPermissionRequestSyncs);
       this._clearSingletonSyncQueue(this._queuedUISyncs);
       this._clearSingletonSyncQueue(this._queuedUIDatasSyncs);
       this._clearSingletonSyncQueue(this._queuedWorldSyncs);
@@ -239,6 +241,7 @@ export default class NetworkSynchronizer {
     this._world.final(AudioEvent.SET_PLAYBACK_RATE, this._onAudioSetPlaybackRate);
     this._world.final(AudioEvent.SET_REFERENCE_DISTANCE, this._onAudioSetReferenceDistance);
     this._world.final(AudioEvent.SET_VOLUME, this._onAudioSetVolume);
+    this._world.final(AudioEvent.UNLOAD, this._onAudioUnload);
   }
 
   private _subscribeToBlockTypeRegistryEvents() {
@@ -321,6 +324,8 @@ export default class NetworkSynchronizer {
     this._world.final(ParticleEmitterEvent.SET_LIFETIME_VARIANCE, this._onParticleEmitterSetLifetimeVariance);
     this._world.final(ParticleEmitterEvent.SET_MAX_PARTICLES, this._onParticleEmitterSetMaxParticles);
     this._world.final(ParticleEmitterEvent.SET_OFFSET, this._onParticleEmitterSetOffset);
+    this._world.final(ParticleEmitterEvent.SET_ORIENTATION, this._onParticleEmitterSetOrientation);
+    this._world.final(ParticleEmitterEvent.SET_ORIENTATION_FIXED_ROTATION, this._onParticleEmitterSetOrientationFixedRotation);
     this._world.final(ParticleEmitterEvent.SET_OPACITY_END, this._onParticleEmitterSetOpacityEnd);
     this._world.final(ParticleEmitterEvent.SET_OPACITY_END_VARIANCE, this._onParticleEmitterSetOpacityEndVariance);
     this._world.final(ParticleEmitterEvent.SET_OPACITY_START, this._onParticleEmitterSetOpacityStart);
@@ -408,6 +413,13 @@ export default class NetworkSynchronizer {
   }
 
   private _onAudioPause = (payload: EventPayloads[AudioEvent.PAUSE]) => {
+    if (this._mirrorAudioStatePatch({
+      i: payload.audio.id!,
+      pa: true,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.pa = true;
     delete audioSync.pl;
@@ -415,6 +427,15 @@ export default class NetworkSynchronizer {
   };
 
   private _onAudioPlay = (payload: EventPayloads[AudioEvent.PLAY]) => {
+    if (this._mirrorAudioStatePatch({
+      ...payload.audio.serialize(),
+      pa: undefined,
+      pl: true,
+      r: undefined,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     Object.assign(audioSync, payload.audio.serialize());
     audioSync.pl = true;
@@ -423,6 +444,15 @@ export default class NetworkSynchronizer {
   };
 
   private _onAudioPlayRestart = (payload: EventPayloads[AudioEvent.PLAY_RESTART]) => {
+    if (this._mirrorAudioStatePatch({
+      ...payload.audio.serialize(),
+      pa: undefined,
+      pl: undefined,
+      r: true,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     Object.assign(audioSync, payload.audio.serialize());
     audioSync.r = true;
@@ -431,48 +461,114 @@ export default class NetworkSynchronizer {
   };
 
   private _onAudioSetAttachedToEntity = (payload: EventPayloads[AudioEvent.SET_ATTACHED_TO_ENTITY]) => {
+    if (this._mirrorAudioStatePatch({
+      e: payload.entity ? payload.entity.id : undefined,
+      i: payload.audio.id!,
+      p: payload.entity ? undefined : payload.audio.position ? Serializer.serializeVector(payload.audio.position) : undefined,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.e = payload.entity ? payload.entity.id : undefined;
     audioSync.p = payload.entity ? undefined : audioSync.p;
   };
 
   private _onAudioSetCutoffDistance = (payload: EventPayloads[AudioEvent.SET_CUTOFF_DISTANCE]) => {
+    if (this._mirrorAudioStatePatch({
+      cd: payload.cutoffDistance,
+      i: payload.audio.id!,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.cd = payload.cutoffDistance;
   };
 
   private _onAudioSetDetune = (payload: EventPayloads[AudioEvent.SET_DETUNE]) => {
+    if (this._mirrorAudioStatePatch({
+      de: payload.detune,
+      i: payload.audio.id!,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.de = payload.detune;
   };
 
   private _onAudioSetDistortion = (payload: EventPayloads[AudioEvent.SET_DISTORTION]) => {
+    if (this._mirrorAudioStatePatch({
+      di: payload.distortion,
+      i: payload.audio.id!,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.di = payload.distortion;
   };
 
   private _onAudioSetPosition = (payload: EventPayloads[AudioEvent.SET_POSITION]) => {
+    if (this._mirrorAudioStatePatch({
+      e: payload.position ? undefined : payload.audio.attachedToEntity?.id,
+      i: payload.audio.id!,
+      p: payload.position ? Serializer.serializeVector(payload.position) : undefined,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.e = payload.position ? undefined : audioSync.e;
     audioSync.p = payload.position ? Serializer.serializeVector(payload.position) : undefined;
   };
 
   private _onAudioSetPlaybackRate = (payload: EventPayloads[AudioEvent.SET_PLAYBACK_RATE]) => {
+    if (this._mirrorAudioStatePatch({
+      i: payload.audio.id!,
+      pr: payload.playbackRate,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.pr = payload.playbackRate;
   };
 
   private _onAudioSetReferenceDistance = (payload: EventPayloads[AudioEvent.SET_REFERENCE_DISTANCE]) => {
+    if (this._mirrorAudioStatePatch({
+      i: payload.audio.id!,
+      rd: payload.referenceDistance,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.rd = payload.referenceDistance;
   };
 
   private _onAudioSetVolume = (payload: EventPayloads[AudioEvent.SET_VOLUME]) => {
+    if (this._mirrorAudioStatePatch({
+      i: payload.audio.id!,
+      v: payload.volume,
+    })) {
+      return;
+    }
+
     const audioSync = this._createOrGetQueuedAudioSync(payload.audio);
     audioSync.v = payload.volume;
   };
 
+  private _onAudioUnload = (payload: EventPayloads[AudioEvent.UNLOAD]) => {
+    this._removeMirroredAudioState(payload.audio.id!);
+  };
+
   private _onBlockTypeRegistryRegisterBlockType = (payload: EventPayloads[BlockTypeRegistryEvent.REGISTER_BLOCK_TYPE]) => {
+    if (this._mirrorBlockTypeStatePatch(payload.blockType.serialize())) {
+      return;
+    }
+
     const blockTypeSync = this._createOrGetQueuedBlockTypeSync(payload.blockType);
     Object.assign(blockTypeSync, payload.blockType.serialize());
   };
@@ -488,6 +584,10 @@ export default class NetworkSynchronizer {
   };
 
   private _onChunkLatticeAddChunk = (payload: EventPayloads[ChunkLatticeEvent.ADD_CHUNK]) => {
+    if (this._mirrorChunkStatePatch(payload.chunk.serialize())) {
+      return;
+    }
+
     const chunkSync = this._createOrGetQueuedChunkSync(payload.chunk);
     Object.assign(chunkSync, payload.chunk.serialize());
     chunkSync.rm = undefined;
@@ -496,6 +596,13 @@ export default class NetworkSynchronizer {
   };
 
   private _onChunkLatticeRemoveChunk = (payload: EventPayloads[ChunkLatticeEvent.REMOVE_CHUNK]) => {
+    if (this._mirrorChunkStatePatch({
+      c: Serializer.serializeVector(payload.chunk.originCoordinate),
+      rm: true,
+    })) {
+      return;
+    }
+
     const chunkSync = this._createOrGetQueuedChunkSync(payload.chunk);
     const chunkKey = chunkSync.c.join(',');
 
@@ -508,12 +615,28 @@ export default class NetworkSynchronizer {
   };
 
   private _onChunkLatticeSetBlock = (payload: EventPayloads[ChunkLatticeEvent.SET_BLOCK]) => {
+    if (this._mirrorBlockStatePatch({
+      c: Serializer.serializeVector(payload.globalCoordinate),
+      i: payload.blockTypeId,
+      r: payload.blockRotation?.enumIndex,
+    })) {
+      return;
+    }
+
     const blockSync = this._createOrGetQueuedBlockSync(payload.globalCoordinate);
     blockSync.i = payload.blockTypeId;
     blockSync.r = payload.blockRotation?.enumIndex;
   };
 
   private _onEntitySpawn = (payload: EventPayloads[EntityEvent.SPAWN]) => {
+    if (this._mirrorEntityStatePatch(payload.entity.serialize())) {
+      if (payload.entity instanceof PlayerEntity) {
+        this._queueOwnerPlayerEntityPredictionSync(payload.entity);
+      }
+
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     Object.assign(entitySync, payload.entity.serialize());
     if (payload.entity instanceof PlayerEntity) {
@@ -523,6 +646,13 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityDespawn = (payload: EventPayloads[EntityEvent.DESPAWN]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      rm: true,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
 
     if (this._spawnedEntities.has(entitySync.i)) {
@@ -534,72 +664,175 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityRemoveModelNodeOverride = (payload: EventPayloads[EntityEvent.REMOVE_MODEL_NODE_OVERRIDE]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{ n: payload.entityModelNodeOverride.nameMatch, rm: true }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.rm = true;
   };
 
   private _onEntitySetBlockTextureUri = (payload: EventPayloads[EntityEvent.SET_BLOCK_TEXTURE_URI]) => {
+    if (this._mirrorEntityStatePatch({
+      bt: payload.blockTextureUri,
+      i: payload.entity.id!,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.bt = payload.blockTextureUri;
   };
 
   private _onEntitySetEmissiveColor = (payload: EventPayloads[EntityEvent.SET_EMISSIVE_COLOR]) => {
+    if (this._mirrorEntityStatePatch({
+      ec: payload.emissiveColor ? Serializer.serializeRgbColor(payload.emissiveColor) : undefined,
+      i: payload.entity.id!,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.ec = payload.emissiveColor ? Serializer.serializeRgbColor(payload.emissiveColor) : undefined;
   };
 
   private _onEntitySetEmissiveIntensity = (payload: EventPayloads[EntityEvent.SET_EMISSIVE_INTENSITY]) => {
+    if (this._mirrorEntityStatePatch({
+      ei: payload.emissiveIntensity,
+      i: payload.entity.id!,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.ei = payload.emissiveIntensity;
   };
 
   private _onEntitySetModelScale = (payload: EventPayloads[EntityEvent.SET_MODEL_SCALE]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      sv: payload.modelScale ? Serializer.serializeVector(payload.modelScale) : undefined,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.sv = payload.modelScale ? Serializer.serializeVector(payload.modelScale) : undefined;
   };
 
   private _onEntitySetModelScaleInterpolationMs = (payload: EventPayloads[EntityEvent.SET_MODEL_SCALE_INTERPOLATION_MS]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      si: payload.interpolationMs,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.si = payload.interpolationMs;
   };
 
   private _onEntitySetModelTextureUri = (payload: EventPayloads[EntityEvent.SET_MODEL_TEXTURE_URI]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      mt: payload.modelTextureUri,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.mt = payload.modelTextureUri;
   };
 
   private _onEntitySetOpacity = (payload: EventPayloads[EntityEvent.SET_OPACITY]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      o: payload.opacity,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.o = payload.opacity;
   };
 
   private _onEntitySetOutline = (payload: EventPayloads[EntityEvent.SET_OUTLINE]) => {
+    if (!payload.forPlayer && this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      ol: payload.outline ? Serializer.serializeOutline(payload.outline) : undefined,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity, payload.forPlayer);
     entitySync.ol = payload.outline ? Serializer.serializeOutline(payload.outline) : undefined;
   };
 
   private _onEntitySetParent = (payload: EventPayloads[EntityEvent.SET_PARENT]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      pe: payload.parent ? payload.parent.id : undefined,
+      pn: payload.parentNodeName,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.pe = payload.parent ? payload.parent.id : undefined;
     entitySync.pn = payload.parentNodeName;
   };
 
   private _onEntitySetPositionInterpolationMs = (payload: EventPayloads[EntityEvent.SET_POSITION_INTERPOLATION_MS]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      pi: payload.interpolationMs,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.pi = payload.interpolationMs;
   };
 
   private _onEntitySetRotationInterpolationMs = (payload: EventPayloads[EntityEvent.SET_ROTATION_INTERPOLATION_MS]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      ri: payload.interpolationMs,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.ri = payload.interpolationMs;
   };
 
   private _onEntitySetTintColor = (payload: EventPayloads[EntityEvent.SET_TINT_COLOR]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      t: payload.tintColor ? Serializer.serializeRgbColor(payload.tintColor) : undefined,
+    })) {
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     entitySync.t = payload.tintColor ? Serializer.serializeRgbColor(payload.tintColor) : undefined;
   };
 
   private _onEntityUpdatePosition = (payload: EventPayloads[EntityEvent.UPDATE_POSITION]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      p: [ payload.position.x, payload.position.y, payload.position.z ],
+    })) {
+      if (payload.entity instanceof PlayerEntity) {
+        this._queueOwnerPlayerEntityPredictionSync(payload.entity, true);
+      }
+
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     const p = entitySync.p;
     if (p) {
@@ -616,6 +849,17 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityUpdateRotation = (payload: EventPayloads[EntityEvent.UPDATE_ROTATION]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entity.id!,
+      r: [ payload.rotation.x, payload.rotation.y, payload.rotation.z, payload.rotation.w ],
+    })) {
+      if (payload.entity instanceof PlayerEntity) {
+        this._queueOwnerPlayerEntityPredictionSync(payload.entity, true);
+      }
+
+      return;
+    }
+
     const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
     const r = entitySync.r;
     if (r) {
@@ -633,6 +877,13 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityModelAnimationPause = (payload: EventPayloads[EntityModelAnimationEvent.PAUSE]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ n: payload.entityModelAnimation.name, pa: true }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.pa = true;
     delete entityModelAnimationSync.p;
@@ -641,6 +892,13 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityModelAnimationPlay = (payload: EventPayloads[EntityModelAnimationEvent.PLAY]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ n: payload.entityModelAnimation.name, p: true }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.p = true;
     delete entityModelAnimationSync.pa;
@@ -649,6 +907,13 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityModelAnimationRestart = (payload: EventPayloads[EntityModelAnimationEvent.RESTART]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ n: payload.entityModelAnimation.name, r: true }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.r = true;
     delete entityModelAnimationSync.pa;
@@ -657,41 +922,97 @@ export default class NetworkSynchronizer {
   };
   
   private _onEntityModelAnimationSetBlendMode = (payload: EventPayloads[EntityModelAnimationEvent.SET_BLEND_MODE]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ b: payload.blendMode, n: payload.entityModelAnimation.name }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.b = payload.blendMode;
   };
 
   private _onEntityModelAnimationSetClampWhenFinished = (payload: EventPayloads[EntityModelAnimationEvent.SET_CLAMP_WHEN_FINISHED]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ c: payload.clampWhenFinished, n: payload.entityModelAnimation.name }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.c = payload.clampWhenFinished;
   };
 
   private _onEntityModelAnimationSetFadesIn = (payload: EventPayloads[EntityModelAnimationEvent.SET_FADES_IN]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ fi: payload.fadesIn, n: payload.entityModelAnimation.name }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.fi = payload.fadesIn;
   };
 
   private _onEntityModelAnimationSetFadesOut = (payload: EventPayloads[EntityModelAnimationEvent.SET_FADES_OUT]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ fo: payload.fadesOut, n: payload.entityModelAnimation.name }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.fo = payload.fadesOut;
   };
 
   private _onEntityModelAnimationSetLoopMode = (payload: EventPayloads[EntityModelAnimationEvent.SET_LOOP_MODE]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ l: payload.loopMode, n: payload.entityModelAnimation.name }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.l = payload.loopMode;
   };
 
   private _onEntityModelAnimationSetPlaybackRate = (payload: EventPayloads[EntityModelAnimationEvent.SET_PLAYBACK_RATE]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ n: payload.entityModelAnimation.name, pr: payload.playbackRate }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.pr = payload.playbackRate;
   };
   
   private _onEntityModelAnimationSetWeight = (payload: EventPayloads[EntityModelAnimationEvent.SET_WEIGHT]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ n: payload.entityModelAnimation.name, w: payload.weight }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.w = payload.weight;
   };
 
   private _onEntityModelAnimationStop = (payload: EventPayloads[EntityModelAnimationEvent.STOP]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelAnimation.entity.id!,
+      ma: [{ n: payload.entityModelAnimation.name, s: true }],
+    })) {
+      return;
+    }
+
     const entityModelAnimationSync = this._createOrGetQueuedEntityModelAnimationSync(payload.entityModelAnimation);
     entityModelAnimationSync.s = true;
     delete entityModelAnimationSync.p;
@@ -700,176 +1021,450 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityModelNodeOverrideSetEmissiveColor = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_EMISSIVE_COLOR]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{
+        ec: payload.emissiveColor ? Serializer.serializeRgbColor(payload.emissiveColor) : undefined,
+        n: payload.entityModelNodeOverride.nameMatch,
+      }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.ec = payload.emissiveColor ? Serializer.serializeRgbColor(payload.emissiveColor) : undefined;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetEmissiveIntensity = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_EMISSIVE_INTENSITY]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{ ei: payload.emissiveIntensity, n: payload.entityModelNodeOverride.nameMatch }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.ei = payload.emissiveIntensity;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetHidden = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_HIDDEN]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{ h: payload.hidden, n: payload.entityModelNodeOverride.nameMatch }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.h = payload.hidden;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetLocalPosition = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_LOCAL_POSITION]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{
+        n: payload.entityModelNodeOverride.nameMatch,
+        p: payload.localPosition ? Serializer.serializeVector(payload.localPosition) : undefined,
+      }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.p = payload.localPosition ? Serializer.serializeVector(payload.localPosition) : undefined;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetLocalPositionInterpolationMs = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_LOCAL_POSITION_INTERPOLATION_MS]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{ n: payload.entityModelNodeOverride.nameMatch, pi: payload.interpolationMs }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.pi = payload.interpolationMs;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetLocalRotation = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_LOCAL_ROTATION]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{
+        n: payload.entityModelNodeOverride.nameMatch,
+        r: payload.localRotation ? Serializer.serializeQuaternion(payload.localRotation) : undefined,
+      }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.r = payload.localRotation ? Serializer.serializeQuaternion(payload.localRotation) : undefined;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetLocalRotationInterpolationMs = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_LOCAL_ROTATION_INTERPOLATION_MS]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{ n: payload.entityModelNodeOverride.nameMatch, ri: payload.interpolationMs }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.ri = payload.interpolationMs;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetLocalScale = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_LOCAL_SCALE]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{
+        n: payload.entityModelNodeOverride.nameMatch,
+        s: payload.localScale ? Serializer.serializeVector(payload.localScale) : undefined,
+      }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.s = payload.localScale ? Serializer.serializeVector(payload.localScale) : undefined;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onEntityModelNodeOverrideSetLocalScaleInterpolationMs = (payload: EventPayloads[EntityModelNodeOverrideEvent.SET_LOCAL_SCALE_INTERPOLATION_MS]) => {
+    if (this._mirrorEntityStatePatch({
+      i: payload.entityModelNodeOverride.entity.id!,
+      mo: [{ n: payload.entityModelNodeOverride.nameMatch, si: payload.interpolationMs }],
+    })) {
+      return;
+    }
+
     const entityModelNodeOverrideSync = this._createOrGetQueuedEntityModelNodeOverrideSync(payload.entityModelNodeOverride);
     entityModelNodeOverrideSync.si = payload.interpolationMs;
     delete entityModelNodeOverrideSync.rm;
   };
 
   private _onParticleEmitterBurst = (payload: EventPayloads[ParticleEmitterEvent.BURST]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      b: payload.count,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.b = payload.count;
   };
 
   private _onParticleEmitterDespawn = (payload: EventPayloads[ParticleEmitterEvent.DESPAWN]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      rm: true,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.rm = true;
   };
 
   private _onParticleEmitterSetAlphaTest = (payload: EventPayloads[ParticleEmitterEvent.SET_ALPHA_TEST]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      at: payload.alphaTest,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.at = payload.alphaTest;
   };
 
   private _onParticleEmitterSetAttachedToEntity = (payload: EventPayloads[ParticleEmitterEvent.SET_ATTACHED_TO_ENTITY]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      e: payload.entity ? payload.entity.id : undefined,
+      i: payload.particleEmitter.id!,
+      p: payload.entity ? undefined : payload.particleEmitter.position ? Serializer.serializeVector(payload.particleEmitter.position) : undefined,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.e = payload.entity ? payload.entity.id : undefined;
     particleEmitterSync.p = payload.entity ? undefined : particleEmitterSync.p;
   };
 
   private _onParticleEmitterSetAttachedToEntityNodeName = (payload: EventPayloads[ParticleEmitterEvent.SET_ATTACHED_TO_ENTITY_NODE_NAME]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      en: payload.attachedToEntityNodeName,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.en = payload.attachedToEntityNodeName;
   };
 
   private _onParticleEmitterSetColorEnd = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_END]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      ce: payload.colorEnd ? Serializer.serializeRgbColor(payload.colorEnd) : undefined,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.ce = payload.colorEnd ? Serializer.serializeRgbColor(payload.colorEnd) : undefined;
   };
 
   private _onParticleEmitterSetColorEndVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_END_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      cev: payload.colorEndVariance ? Serializer.serializeRgbColor(payload.colorEndVariance) : undefined,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.cev = payload.colorEndVariance ? Serializer.serializeRgbColor(payload.colorEndVariance) : undefined;
   };
 
   private _onParticleEmitterSetColorIntensityEnd = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_INTENSITY_END]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      cie: payload.colorIntensityEnd,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.cie = payload.colorIntensityEnd;
   };
 
   private _onParticleEmitterSetColorIntensityEndVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_INTENSITY_END_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      ciev: payload.colorIntensityEndVariance,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.ciev = payload.colorIntensityEndVariance;
   };
 
   private _onParticleEmitterSetColorIntensityStart = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_INTENSITY_START]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      cis: payload.colorIntensityStart,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.cis = payload.colorIntensityStart;
   };
 
   private _onParticleEmitterSetColorIntensityStartVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_INTENSITY_START_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      cisv: payload.colorIntensityStartVariance,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.cisv = payload.colorIntensityStartVariance;
   };
 
   private _onParticleEmitterSetColorStart = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_START]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      cs: payload.colorStart ? Serializer.serializeRgbColor(payload.colorStart) : undefined,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.cs = payload.colorStart ? Serializer.serializeRgbColor(payload.colorStart) : undefined;
   };
 
   private _onParticleEmitterSetColorStartVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_COLOR_START_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      csv: payload.colorStartVariance ? Serializer.serializeRgbColor(payload.colorStartVariance) : undefined,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.csv = payload.colorStartVariance ? Serializer.serializeRgbColor(payload.colorStartVariance) : undefined;
   };
 
   private _onParticleEmitterSetGravity = (payload: EventPayloads[ParticleEmitterEvent.SET_GRAVITY]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      g: payload.gravity ? Serializer.serializeVector(payload.gravity) : undefined,
+      i: payload.particleEmitter.id!,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.g = payload.gravity ? Serializer.serializeVector(payload.gravity) : undefined;
   };
 
   private _onParticleEmitterSetLifetime = (payload: EventPayloads[ParticleEmitterEvent.SET_LIFETIME]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      l: payload.lifetime,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.l = payload.lifetime;
   };
 
   private _onParticleEmitterSetLifetimeVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_LIFETIME_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      lv: payload.lifetimeVariance,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.lv = payload.lifetimeVariance;
   };
 
   private _onParticleEmitterSetMaxParticles = (payload: EventPayloads[ParticleEmitterEvent.SET_MAX_PARTICLES]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      mp: payload.maxParticles,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.mp = payload.maxParticles;
   };
 
   private _onParticleEmitterSetOffset = (payload: EventPayloads[ParticleEmitterEvent.SET_OFFSET]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      o: payload.offset ? Serializer.serializeVector(payload.offset) : undefined,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.o = payload.offset ? Serializer.serializeVector(payload.offset) : undefined;
   };
 
+  private _onParticleEmitterSetOrientation = (payload: EventPayloads[ParticleEmitterEvent.SET_ORIENTATION]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      or: Serializer.serializeParticleEmitterOrientation(payload.orientation),
+    })) {
+      return;
+    }
+
+    const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
+    particleEmitterSync.or = Serializer.serializeParticleEmitterOrientation(payload.orientation);
+  };
+
+  private _onParticleEmitterSetOrientationFixedRotation = (
+    payload: EventPayloads[ParticleEmitterEvent.SET_ORIENTATION_FIXED_ROTATION],
+  ) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      ofr: payload.orientationFixedRotation ? Serializer.serializeVector(payload.orientationFixedRotation) : undefined,
+    })) {
+      return;
+    }
+
+    const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
+    particleEmitterSync.ofr = payload.orientationFixedRotation
+      ? Serializer.serializeVector(payload.orientationFixedRotation)
+      : undefined;
+  };
+
   private _onParticleEmitterSetOpacityEnd = (payload: EventPayloads[ParticleEmitterEvent.SET_OPACITY_END]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      oe: payload.opacityEnd,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.oe = payload.opacityEnd;
   };
 
   private _onParticleEmitterSetOpacityEndVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_OPACITY_END_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      oev: payload.opacityEndVariance,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.oev = payload.opacityEndVariance;
   };
 
   private _onParticleEmitterSetOpacityStart = (payload: EventPayloads[ParticleEmitterEvent.SET_OPACITY_START]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      os: payload.opacityStart,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.os = payload.opacityStart;
   };
 
   private _onParticleEmitterSetOpacityStartVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_OPACITY_START_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      osv: payload.opacityStartVariance,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.osv = payload.opacityStartVariance;
   };
 
   private _onParticleEmitterSetPaused = (payload: EventPayloads[ParticleEmitterEvent.SET_PAUSED]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      pa: payload.paused,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.pa = payload.paused;
   };
 
   private _onParticleEmitterSetPosition = (payload: EventPayloads[ParticleEmitterEvent.SET_POSITION]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      e: payload.position ? undefined : payload.particleEmitter.attachedToEntity?.id,
+      en: payload.position ? undefined : payload.particleEmitter.attachedToEntityNodeName,
+      i: payload.particleEmitter.id!,
+      p: payload.position ? Serializer.serializeVector(payload.position) : undefined,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.p = payload.position ? Serializer.serializeVector(payload.position) : undefined;
     particleEmitterSync.e = payload.position ? undefined : particleEmitterSync.e;
@@ -877,61 +1472,142 @@ export default class NetworkSynchronizer {
   };
 
   private _onParticleEmitterSetPositionVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_POSITION_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      pv: payload.positionVariance ? Serializer.serializeVector(payload.positionVariance) : undefined,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.pv = payload.positionVariance ? Serializer.serializeVector(payload.positionVariance) : undefined;
   };
 
   private _onParticleEmitterSetRate = (payload: EventPayloads[ParticleEmitterEvent.SET_RATE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      r: payload.rate,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.r = payload.rate;
   };
 
   private _onParticleEmitterSetRateVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_RATE_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      rv: payload.rateVariance,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.rv = payload.rateVariance;
   };
 
   private _onParticleEmitterSetSizeEnd = (payload: EventPayloads[ParticleEmitterEvent.SET_SIZE_END]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      se: payload.sizeEnd,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.se = payload.sizeEnd;
   };
 
   private _onParticleEmitterSetSizeEndVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_SIZE_END_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      sev: payload.sizeEndVariance,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.sev = payload.sizeEndVariance;
   };
 
   private _onParticleEmitterSetSizeStart = (payload: EventPayloads[ParticleEmitterEvent.SET_SIZE_START]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      ss: payload.sizeStart,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.ss = payload.sizeStart;
   };
 
   private _onParticleEmitterSetSizeStartVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_SIZE_START_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      ssv: payload.sizeStartVariance,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.ssv = payload.sizeStartVariance;
   };
 
   private _onParticleEmitterSetTextureUri = (payload: EventPayloads[ParticleEmitterEvent.SET_TEXTURE_URI]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      tu: payload.textureUri,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.tu = payload.textureUri;
   };
 
   private _onParticleEmitterSetTransparent = (payload: EventPayloads[ParticleEmitterEvent.SET_TRANSPARENT]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      t: payload.transparent,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.t = payload.transparent;
   };
 
   private _onParticleEmitterSetVelocity = (payload: EventPayloads[ParticleEmitterEvent.SET_VELOCITY]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      v: payload.velocity ? Serializer.serializeVector(payload.velocity) : undefined,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.v = payload.velocity ? Serializer.serializeVector(payload.velocity) : undefined;
   };
 
   private _onParticleEmitterSetVelocityVariance = (payload: EventPayloads[ParticleEmitterEvent.SET_VELOCITY_VARIANCE]) => {
+    if (this._mirrorParticleEmitterStatePatch({
+      i: payload.particleEmitter.id!,
+      vv: payload.velocityVariance ? Serializer.serializeVector(payload.velocityVariance) : undefined,
+    })) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.vv = payload.velocityVariance ? Serializer.serializeVector(payload.velocityVariance) : undefined;
   };
 
   private _onParticleEmitterSpawn = (payload: EventPayloads[ParticleEmitterEvent.SPAWN]) => {
+    if (this._mirrorParticleEmitterStatePatch(payload.particleEmitter.serialize())) {
+      return;
+    }
+
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     Object.assign(particleEmitterSync, payload.particleEmitter.serialize());
   };
@@ -1044,21 +1720,26 @@ export default class NetworkSynchronizer {
 
   private _onPlayerJoinedWorld = (payload: EventPayloads[PlayerEvent.JOINED_WORLD]) => {
     const { player } = payload;
+    const hostOwnsDerivedState = WorldHostManager.instance.client.ownsDerivedState(this._world);
     this._lastSentInputAcknowledgementByPlayer.delete(player);
 
     // Order doesn't matter here - synchronize() handles send order.
     // Use _assignUndefined to avoid overwriting properties already set by other event handlers.
 
     // Sync Audio
-    for (const audio of this._world.audioManager.getAllAudios()) {
-      const playerAudioSync = this._createOrGetQueuedAudioSync(audio, player);
-      this._assignUndefined(playerAudioSync, audio.serialize());
+    if (!hostOwnsDerivedState) {
+      for (const audio of this._world.audioManager.getAllAudios()) {
+        const playerAudioSync = this._createOrGetQueuedAudioSync(audio, player);
+        this._assignUndefined(playerAudioSync, audio.serialize());
+      }
     }
 
     // Sync Block Types
-    for (const blockType of this._world.blockTypeRegistry.getAllBlockTypes()) {
-      const playerBlockTypeSync = this._createOrGetQueuedBlockTypeSync(blockType, player);
-      this._assignUndefined(playerBlockTypeSync, blockType.serialize());
+    if (!hostOwnsDerivedState) {
+      for (const blockType of this._world.blockTypeRegistry.getAllBlockTypes()) {
+        const playerBlockTypeSync = this._createOrGetQueuedBlockTypeSync(blockType, player);
+        this._assignUndefined(playerBlockTypeSync, blockType.serialize());
+      }
     }
 
     // Sync Camera
@@ -1066,9 +1747,11 @@ export default class NetworkSynchronizer {
     this._assignUndefined(playerCameraSync, player.camera.serialize());
 
     // Sync Chunks
-    for (const chunk of this._world.chunkLattice.getAllChunks()) {
-      const chunkSync = this._createOrGetQueuedChunkSync(chunk, player);
-      this._assignUndefined(chunkSync, chunk.serialize());
+    if (!hostOwnsDerivedState) {
+      for (const chunk of this._world.chunkLattice.getAllChunks()) {
+        const chunkSync = this._createOrGetQueuedChunkSync(chunk, player);
+        this._assignUndefined(chunkSync, chunk.serialize());
+      }
     }
 
     // Sync Entities
@@ -1077,10 +1760,15 @@ export default class NetworkSynchronizer {
         player.camera.setAttachedToEntity(entity);
       }
 
-      const playerEntitySync = this._createOrGetQueuedEntitySync(entity, player);
-      this._assignUndefined(playerEntitySync, entity.serialize());
+      if (!hostOwnsDerivedState) {
+        const playerEntitySync = this._createOrGetQueuedEntitySync(entity, player);
+        this._assignUndefined(playerEntitySync, entity.serialize());
 
-      if (entity instanceof PlayerEntity && entity.player === player) {
+        if (entity instanceof PlayerEntity && entity.player === player) {
+          this._queuePlayerEntityOwnerPredictionState(playerEntitySync, entity);
+        }
+      } else if (entity instanceof PlayerEntity && entity.player === player) {
+        const playerEntitySync = this._createOrGetQueuedEntitySync(entity, player);
         this._queuePlayerEntityOwnerPredictionState(playerEntitySync, entity);
       }
     }
@@ -1088,34 +1776,48 @@ export default class NetworkSynchronizer {
     this._syncPlayerCameraAttachedEntityModel(player.camera);
 
     // Sync Particle Emitters
-    for (const particleEmitter of this._world.particleEmitterManager.getAllParticleEmitters()) {
-      const playerParticleEmitterSync = this._createOrGetQueuedParticleEmitterSync(particleEmitter, player);
-      this._assignUndefined(playerParticleEmitterSync, particleEmitter.serialize());
+    if (!hostOwnsDerivedState) {
+      for (const particleEmitter of this._world.particleEmitterManager.getAllParticleEmitters()) {
+        const playerParticleEmitterSync = this._createOrGetQueuedParticleEmitterSync(particleEmitter, player);
+        this._assignUndefined(playerParticleEmitterSync, particleEmitter.serialize());
+      }
     }
 
     // Sync Players
-    for (const otherPlayer of PlayerManager.instance.getConnectedPlayers()) {
-      const playerPlayerSync = this._createOrGetQueuedPlayerSync(otherPlayer, player);
-      this._assignUndefined(playerPlayerSync, otherPlayer.serialize());
+    if (!hostOwnsDerivedState) {
+      for (const otherPlayer of PlayerManager.instance.getConnectedPlayers()) {
+        const playerPlayerSync = this._createOrGetQueuedPlayerSync(otherPlayer, player);
+        this._assignUndefined(playerPlayerSync, otherPlayer.serialize());
+      }
     }
 
     // Sync Scene UIs
-    for (const sceneUI of this._world.sceneUIManager.getAllSceneUIs()) {
-      const playerSceneUISync = this._createOrGetQueuedSceneUISync(sceneUI, player);
-      this._assignUndefined(playerSceneUISync, sceneUI.serialize());
+    if (!hostOwnsDerivedState) {
+      for (const sceneUI of this._world.sceneUIManager.getAllSceneUIs()) {
+        const playerSceneUISync = this._createOrGetQueuedSceneUISync(sceneUI, player);
+        this._assignUndefined(playerSceneUISync, sceneUI.serialize());
+      }
     }
 
     // Sync World
-    const playerWorldSync = this._createOrGetQueuedWorldSync(this._world, player);
-    this._assignUndefined(playerWorldSync, this._world.serialize());
+    if (!hostOwnsDerivedState) {
+      const playerWorldSync = this._createOrGetQueuedWorldSync(this._world, player);
+      this._assignUndefined(playerWorldSync, this._world.serialize());
+    }
 
     // Notify everyone of the new player
-    const playerSync = this._createOrGetQueuedPlayerSync(player);
-    this._assignUndefined(playerSync, player.serialize());
+    if (!hostOwnsDerivedState) {
+      const playerSync = this._createOrGetQueuedPlayerSync(player);
+      this._assignUndefined(playerSync, player.serialize());
+    }
   };
 
   private _onPlayerLeftWorld = (payload: EventPayloads[PlayerEvent.LEFT_WORLD]) => {
     this._lastSentInputAcknowledgementByPlayer.delete(payload.player);
+    if (WorldHostManager.instance.client.ownsDerivedState(this._world)) {
+      return;
+    }
+
     const playerSync = this._createOrGetQueuedPlayerSync(payload.player);
     playerSync.rm = true;
   };
@@ -1126,7 +1828,12 @@ export default class NetworkSynchronizer {
   };
 
   private _onPlayerRequestNotificationPermission = (payload: EventPayloads[PlayerEvent.REQUEST_NOTIFICATION_PERMISSION]) => {
-    this._createOrGetQueuedNotificationPermissionRequestSync(payload.player); // null payload default
+    const session = GatewayPlayerSessionManager.instance.getSessionByPlayer(payload.player);
+    if (!session) {
+      return;
+    }
+
+    WorldHostManager.instance.client.requestNotificationPermission(session);
   };
 
   private _onPlayerRequestSync = (payload: EventPayloads[PlayerEvent.REQUEST_SYNC]) => {
@@ -1172,39 +1879,87 @@ export default class NetworkSynchronizer {
   };
 
   private _onSceneUILoad = (payload: EventPayloads[SceneUIEvent.LOAD]) => {
+    if (this._mirrorSceneUIStatePatch(payload.sceneUI.serialize())) {
+      return;
+    }
+
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
     Object.assign(sceneUISync, payload.sceneUI.serialize());
     this._loadedSceneUIs.add(sceneUISync.i);
   };
 
   private _onSceneUISetAttachedToEntity = (payload: EventPayloads[SceneUIEvent.SET_ATTACHED_TO_ENTITY]) => {
+    if (this._mirrorSceneUIStatePatch({
+      e: payload.entity ? payload.entity.id : undefined,
+      i: payload.sceneUI.id!,
+      p: payload.entity ? undefined : payload.sceneUI.position ? Serializer.serializeVector(payload.sceneUI.position) : undefined,
+    })) {
+      return;
+    }
+
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
     sceneUISync.e = payload.entity ? payload.entity.id : undefined;
     sceneUISync.p = payload.entity ? undefined : sceneUISync.p;
   };
 
   private _onSceneUISetOffset = (payload: EventPayloads[SceneUIEvent.SET_OFFSET]) => {
+    if (this._mirrorSceneUIStatePatch({
+      i: payload.sceneUI.id!,
+      o: payload.offset ? Serializer.serializeVector(payload.offset) : undefined,
+    })) {
+      return;
+    }
+
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
     sceneUISync.o = payload.offset ? Serializer.serializeVector(payload.offset) : undefined;
   };
 
   private _onSceneUISetPosition = (payload: EventPayloads[SceneUIEvent.SET_POSITION]) => {
+    if (this._mirrorSceneUIStatePatch({
+      e: payload.position ? undefined : payload.sceneUI.attachedToEntity?.id,
+      i: payload.sceneUI.id!,
+      p: payload.position ? Serializer.serializeVector(payload.position) : undefined,
+    })) {
+      return;
+    }
+
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
     sceneUISync.p = payload.position ? Serializer.serializeVector(payload.position) : undefined;
     sceneUISync.e = payload.position ? undefined : sceneUISync.e;
   };
 
   private _onSceneUISetState = (payload: EventPayloads[SceneUIEvent.SET_STATE]) => {
+    if (this._mirrorSceneUIStatePatch({
+      i: payload.sceneUI.id!,
+      s: payload.state,
+    })) {
+      return;
+    }
+
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
     sceneUISync.s = payload.state;
   };
 
   private _onSceneUISetViewDistance = (payload: EventPayloads[SceneUIEvent.SET_VIEW_DISTANCE]) => {
+    if (this._mirrorSceneUIStatePatch({
+      i: payload.sceneUI.id!,
+      v: payload.viewDistance,
+    })) {
+      return;
+    }
+
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
     sceneUISync.v = payload.viewDistance;
   };
 
   private _onSceneUIUnload = (payload: EventPayloads[SceneUIEvent.UNLOAD]) => {
+    if (this._mirrorSceneUIStatePatch({
+      i: payload.sceneUI.id!,
+      rm: true,
+    })) {
+      return;
+    }
+
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
 
     if (this._loadedSceneUIs.has(sceneUISync.i)) {
@@ -1227,51 +1982,91 @@ export default class NetworkSynchronizer {
   };
 
   private _onWorldSetAmbientLightColor = (payload: EventPayloads[WorldEvent.SET_AMBIENT_LIGHT_COLOR]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, ac: Serializer.serializeRgbColor(payload.color) })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.ac = Serializer.serializeRgbColor(payload.color);
   };
 
   private _onWorldSetAmbientLightIntensity = (payload: EventPayloads[WorldEvent.SET_AMBIENT_LIGHT_INTENSITY]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, ai: payload.intensity })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.ai = payload.intensity;
   };
 
   private _onWorldSetDirectionalLightColor = (payload: EventPayloads[WorldEvent.SET_DIRECTIONAL_LIGHT_COLOR]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, dc: Serializer.serializeRgbColor(payload.color) })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.dc = Serializer.serializeRgbColor(payload.color);
   };
 
   private _onWorldSetDirectionalLightIntensity = (payload: EventPayloads[WorldEvent.SET_DIRECTIONAL_LIGHT_INTENSITY]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, di: payload.intensity })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.di = payload.intensity;
   };
 
   private _onWorldSetDirectionalLightPosition = (payload: EventPayloads[WorldEvent.SET_DIRECTIONAL_LIGHT_POSITION]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, dp: Serializer.serializeVector(payload.position) })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.dp = Serializer.serializeVector(payload.position);
   };
 
   private _onWorldSetFogColor = (payload: EventPayloads[WorldEvent.SET_FOG_COLOR]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, fc: Serializer.serializeRgbColor(payload.color) })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.fc = Serializer.serializeRgbColor(payload.color);
   };
 
   private _onWorldSetFogFar = (payload: EventPayloads[WorldEvent.SET_FOG_FAR]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, ff: payload.far })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.ff = payload.far;
   };
 
   private _onWorldSetFogNear = (payload: EventPayloads[WorldEvent.SET_FOG_NEAR]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, fn: payload.near })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.fn = payload.near;
   };
 
   private _onWorldSetSkyboxIntensity = (payload: EventPayloads[WorldEvent.SET_SKYBOX_INTENSITY]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, si: payload.intensity })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.si = payload.intensity;
   };
 
   private _onWorldSetSkyboxUri = (payload: EventPayloads[WorldEvent.SET_SKYBOX_URI]) => {
+    if (this._mirrorWorldStatePatch({ i: payload.world.id, s: payload.uri })) {
+      return;
+    }
+
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.s = payload.uri;
   };
@@ -1376,11 +2171,6 @@ export default class NetworkSynchronizer {
     }
 
     return entityModelNodeOverrideSync;
-  }
-
-  private _createNotificationPermissionRequestSync = () => null;
-  private _createOrGetQueuedNotificationPermissionRequestSync(forPlayer?: Player): protocol.NotificationPermissionRequestSchema {
-    return this._createOrGetQueuedSingletonSync(this._queuedNotificationPermissionRequestSyncs, this._createNotificationPermissionRequestSync, undefined, forPlayer);
   }
 
   private _createParticleEmitterSync = (particleEmitter: ParticleEmitter) => ({ i: particleEmitter.id! });
@@ -1498,102 +2288,63 @@ export default class NetworkSynchronizer {
 
   private _buildPacketPlan(currentTick: number): PacketPlan {
     const packetPlan: PacketPlan = {
-      reliableSlots: [],
+      postPlayerUIAfterChatReliableSlots: [],
+      postPlayerUIBeforeWorldAndPlayersReliableSlots: [],
+      prePlayerUIReliableSlots: [],
+      prePlayerUISpecialReliableSlots: [],
       sharedUnreliablePackets: [],
     };
 
     const entitySlot = this._buildEntityPacketSlot(currentTick, packetPlan.sharedUnreliablePackets);
     if (entitySlot) {
-      packetPlan.reliableSlots.push(entitySlot);
+      packetPlan.prePlayerUISpecialReliableSlots.push(entitySlot);
     }
 
-    // 2. Camera
+    // 2. Audios
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
-      this._buildSingletonSyncPacketSlot(this._queuedCameraSyncs, protocol.outboundPackets.cameraPacketDefinition, currentTick),
-    );
-
-    // 3. Audios
-    this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.prePlayerUIReliableSlots,
       this._buildSyncPacketSlot(this._queuedAudioSyncs, protocol.outboundPackets.audiosPacketDefinition, currentTick),
     );
 
-    // 4. block types
+    // 3. block types
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.prePlayerUIReliableSlots,
       this._buildSyncPacketSlot(this._queuedBlockTypeSyncs, protocol.outboundPackets.blockTypesPacketDefinition, currentTick),
     );
 
-    // 5. chunks
+    // 4. chunks
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.prePlayerUIReliableSlots,
       this._buildSyncPacketSlot(this._queuedChunkSyncs, protocol.outboundPackets.chunksPacketDefinition, currentTick),
     );
 
-    // 6. blocks
+    // 5. blocks
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.prePlayerUIReliableSlots,
       this._buildSyncPacketSlot(this._queuedBlockSyncs, protocol.outboundPackets.blocksPacketDefinition, currentTick),
     );
 
-    // 7. particle emitters
+    // 6. particle emitters
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.prePlayerUIReliableSlots,
       this._buildSyncPacketSlot(this._queuedParticleEmitterSyncs, protocol.outboundPackets.particleEmittersPacketDefinition, currentTick),
     );
 
-    // 8. player UIs
+    // 7. scene UIs
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
-      this._buildSingletonSyncPacketSlot(this._queuedUISyncs, protocol.outboundPackets.uiPacketDefinition, currentTick),
-    );
-
-    // 9. player UI datas
-    this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
-      this._buildSingletonSyncPacketSlot(this._queuedUIDatasSyncs, protocol.outboundPackets.uiDatasPacketDefinition, currentTick),
-    );
-
-    // 10. scene UIs
-    this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.postPlayerUIBeforeWorldAndPlayersReliableSlots,
       this._buildSyncPacketSlot(this._queuedSceneUISyncs, protocol.outboundPackets.sceneUIsPacketDefinition, currentTick),
     );
 
-    // 11. world
+    // 8. debug renders
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
-      this._buildSingletonSyncPacketSlot(this._queuedWorldSyncs, protocol.outboundPackets.worldPacketDefinition, currentTick),
-    );
-
-    // 12. players
-    this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
-      this._buildSyncPacketSlot(this._queuedPlayerSyncs, protocol.outboundPackets.playersPacketDefinition, currentTick),
-    );
-
-    // 13. chat messages
-    this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
-      this._buildSingletonSyncPacketSlot(this._queuedChatMessagesSyncs, protocol.outboundPackets.chatMessagesPacketDefinition, currentTick),
-    );
-
-    // 14. notification permission request
-    this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
-      this._buildSingletonSyncPacketSlot(this._queuedNotificationPermissionRequestSyncs, protocol.outboundPackets.notificationPermissionRequestPacketDefinition, currentTick),
-    );
-
-    // 15. debug renders
-    this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.postPlayerUIAfterChatReliableSlots,
       this._buildSingletonSyncPacketSlot(this._queuedDebugRenderSyncs, protocol.outboundPackets.physicsDebugRenderPacketDefinition, currentTick),
     );
 
-    // 16. debug raycasts
+    // 9. debug raycasts
     this._pushReliablePacketSlot(
-      packetPlan.reliableSlots,
+      packetPlan.postPlayerUIAfterChatReliableSlots,
       this._buildSingletonSyncPacketSlot(this._queuedDebugRaycastsSyncs, protocol.outboundPackets.physicsDebugRaycastsPacketDefinition, currentTick),
     );
 
@@ -1602,6 +2353,7 @@ export default class NetworkSynchronizer {
 
   private _buildEntityPacketSlot(currentTick: number, sharedUnreliablePackets: AnyPacket[]): ReliablePacketSlot | undefined {
     const slot: ReliablePacketSlot = {};
+    const hostOwnsDerivedState = WorldHostManager.instance.client.ownsDerivedState(this._world);
 
     /**
      * Entity synchronizations specific to rotational and positional updates
@@ -1640,7 +2392,7 @@ export default class NetworkSynchronizer {
       }
     }
 
-    if (this._queuedEntitySyncs.perPlayer.size > 0) {
+    if (!hostOwnsDerivedState && this._queuedEntitySyncs.perPlayer.size > 0) {
       for (const [ player, entitySyncs ] of this._queuedEntitySyncs.perPlayer.entries()) {
         for (const entitySync of entitySyncs.valuesArray) {
           this._sanitizeEntitySync(entitySync);
@@ -1719,7 +2471,7 @@ export default class NetworkSynchronizer {
     }
   }
 
-  private _sendPacketPlan(packetPlan: PacketPlan): void {
+  private _sendPacketPlan(packetPlan: PacketPlan, currentTick: number): void {
     Telemetry.startSpan({ operation: TelemetrySpanOperation.SEND_ALL_PACKETS }, () => {
       for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
         const session = GatewayPlayerSessionManager.instance.getSessionByPlayer(player);
@@ -1727,24 +2479,216 @@ export default class NetworkSynchronizer {
           continue;
         }
 
-        for (let i = 0; i < packetPlan.reliableSlots.length; i++) {
-          const slot = packetPlan.reliableSlots[i];
-
-          if (slot.sharedPackets && slot.sharedPackets.length > 0) {
-            WorldHostManager.instance.client.sendPacketsToPlayer(session, slot.sharedPackets);
-          }
-
-          const perPlayerPackets = slot.perPlayerPackets?.get(player);
-          if (perPlayerPackets && perPlayerPackets.length > 0) {
-            WorldHostManager.instance.client.sendPacketsToPlayer(session, perPlayerPackets);
-          }
-        }
+        this._sendHostedEntitiesToPlayer(session, player, currentTick);
+        this._sendReliableSlotsToPlayer(session, player, packetPlan.prePlayerUISpecialReliableSlots);
+        this._sendHostedCameraToPlayer(session, player, currentTick);
+        this._sendReliableSlotsToPlayer(session, player, packetPlan.prePlayerUIReliableSlots);
+        this._sendHostedUIToPlayer(session, player, currentTick);
+        this._sendReliableSlotsToPlayer(session, player, packetPlan.postPlayerUIBeforeWorldAndPlayersReliableSlots);
+        this._sendHostedWorldToPlayer(session, player, currentTick);
+        this._sendHostedPlayersToPlayer(session, player, currentTick);
+        this._sendHostedChatToPlayer(session, player, currentTick);
+        this._sendReliableSlotsToPlayer(session, player, packetPlan.postPlayerUIAfterChatReliableSlots);
 
         if (packetPlan.sharedUnreliablePackets.length > 0) {
           WorldHostManager.instance.client.sendPacketsToPlayer(session, packetPlan.sharedUnreliablePackets, false);
         }
       }
     });
+  }
+
+  private _sendHostedCameraToPlayer(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+  ): void {
+    this._sendHostedSingletonSyncToPlayer(
+      session,
+      player,
+      currentTick,
+      this._queuedCameraSyncs,
+      (targetSession, sync, tick) => WorldHostManager.instance.client.sendCameraToPlayer(targetSession, sync, tick),
+    );
+  }
+
+  private _sendHostedEntitiesToPlayer(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+  ): void {
+    if (!WorldHostManager.instance.client.ownsDerivedState(this._world)) {
+      return;
+    }
+
+    this._sendHostedSyncQueueToPlayer(
+      session,
+      player,
+      currentTick,
+      this._queuedEntitySyncs,
+      (targetSession, sync, tick) => {
+        for (let i = 0; i < sync.length; i++) {
+          this._sanitizeEntitySync(sync[i]);
+        }
+
+        WorldHostManager.instance.client.sendEntitiesToPlayer(targetSession, sync, tick);
+      },
+    );
+  }
+
+  private _sendHostedUIToPlayer(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+  ): void {
+    this._sendHostedSingletonSyncToPlayer(
+      session,
+      player,
+      currentTick,
+      this._queuedUISyncs,
+      (targetSession, sync, tick) => WorldHostManager.instance.client.sendUIToPlayer(targetSession, sync, tick),
+    );
+    this._sendHostedSingletonSyncToPlayer(
+      session,
+      player,
+      currentTick,
+      this._queuedUIDatasSyncs,
+      (targetSession, sync, tick) => WorldHostManager.instance.client.sendUIDataToPlayer(targetSession, sync, tick),
+    );
+  }
+
+  private _sendHostedPlayersToPlayer(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+  ): void {
+    this._sendHostedSyncQueueToPlayer(
+      session,
+      player,
+      currentTick,
+      this._queuedPlayerSyncs,
+      (targetSession, sync, tick) => WorldHostManager.instance.client.sendPlayersToPlayer(targetSession, sync, tick),
+    );
+  }
+
+  private _sendHostedWorldToPlayer(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+  ): void {
+    this._sendHostedSingletonSyncToPlayer(
+      session,
+      player,
+      currentTick,
+      this._queuedWorldSyncs,
+      (targetSession, sync, tick) => WorldHostManager.instance.client.sendWorldToPlayer(targetSession, sync, tick),
+    );
+  }
+
+  private _sendHostedChatToPlayer(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+  ): void {
+    this._sendHostedSingletonSyncToPlayer(
+      session,
+      player,
+      currentTick,
+      this._queuedChatMessagesSyncs,
+      (targetSession, sync, tick) => WorldHostManager.instance.client.sendChatMessagesToPlayer(targetSession, sync, tick),
+    );
+  }
+
+  private _sendHostedSingletonSyncToPlayer<TSchema extends object | null>(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+    syncQueue: SingletonSyncQueue<TSchema>,
+    sendSync: (session: GatewayPlayerSession, sync: TSchema, currentTick: number) => void,
+  ): void {
+    if (syncQueue.broadcast !== undefined) {
+      sendSync(session, syncQueue.broadcast, currentTick);
+    }
+
+    const perPlayerSync = syncQueue.perPlayer.get(player);
+    if (perPlayerSync !== undefined) {
+      sendSync(session, perPlayerSync, currentTick);
+    }
+  }
+
+  private _sendHostedSyncQueueToPlayer<TKey, TSchema extends object | null>(
+    session: GatewayPlayerSession,
+    player: Player,
+    currentTick: number,
+    syncQueue: SyncQueue<TKey, TSchema>,
+    sendSync: (session: GatewayPlayerSession, sync: TSchema[], currentTick: number) => void,
+  ): void {
+    if (syncQueue.broadcast.size > 0) {
+      sendSync(session, Array.from(syncQueue.broadcast.valuesArray), currentTick);
+    }
+
+    const perPlayerSync = syncQueue.perPlayer.get(player);
+    if (perPlayerSync && perPlayerSync.size > 0) {
+      sendSync(session, Array.from(perPlayerSync.valuesArray), currentTick);
+    }
+  }
+
+  private _sendReliableSlotsToPlayer(
+    session: GatewayPlayerSession,
+    player: Player,
+    slots: ReliablePacketSlot[],
+  ): void {
+    for (let i = 0; i < slots.length; i++) {
+      const slot = slots[i];
+
+      if (slot.sharedPackets && slot.sharedPackets.length > 0) {
+        WorldHostManager.instance.client.sendPacketsToPlayer(session, slot.sharedPackets);
+      }
+
+      const perPlayerPackets = slot.perPlayerPackets?.get(player);
+      if (perPlayerPackets && perPlayerPackets.length > 0) {
+        WorldHostManager.instance.client.sendPacketsToPlayer(session, perPlayerPackets);
+      }
+    }
+  }
+
+  private _mirrorWorldStatePatch(world: protocol.WorldSchema): boolean {
+    return WorldHostManager.instance.client.updateWorldState(this._world, world, this._world.loop.currentTick);
+  }
+
+  private _mirrorSceneUIStatePatch(sceneUI: protocol.SceneUISchema): boolean {
+    return WorldHostManager.instance.client.updateSceneUIState(this._world, sceneUI, this._world.loop.currentTick);
+  }
+
+  private _mirrorBlockTypeStatePatch(blockType: protocol.BlockTypeSchema): boolean {
+    return WorldHostManager.instance.client.updateBlockTypeState(this._world, blockType, this._world.loop.currentTick);
+  }
+
+  private _mirrorChunkStatePatch(chunk: protocol.ChunkSchema): boolean {
+    return WorldHostManager.instance.client.updateChunkState(this._world, chunk, this._world.loop.currentTick);
+  }
+
+  private _mirrorBlockStatePatch(block: protocol.BlockSchema): boolean {
+    return WorldHostManager.instance.client.updateBlockState(this._world, block, this._world.loop.currentTick);
+  }
+
+  private _mirrorEntityStatePatch(entity: protocol.EntitySchema): boolean {
+    return WorldHostManager.instance.client.updateEntityState(this._world, entity, this._world.loop.currentTick);
+  }
+
+  private _mirrorParticleEmitterStatePatch(particleEmitter: protocol.ParticleEmitterSchema): boolean {
+    return WorldHostManager.instance.client.updateParticleEmitterState(
+      this._world,
+      particleEmitter,
+      this._world.loop.currentTick,
+    );
+  }
+
+  private _mirrorAudioStatePatch(audio: protocol.AudioSchema): boolean {
+    return WorldHostManager.instance.client.updateAudioState(this._world, audio, this._world.loop.currentTick);
+  }
+
+  private _removeMirroredAudioState(audioId: number): boolean {
+    return WorldHostManager.instance.client.removeAudioState(this._world, audioId);
   }
 
   private _sanitizeEntitySync(entitySync: protocol.EntitySchema): void {

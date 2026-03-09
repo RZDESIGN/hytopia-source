@@ -1,4 +1,5 @@
 import ErrorHandler from '@/errors/ErrorHandler';
+import { AudioEvent } from '@/worlds/audios/Audio';
 import type Audio from '@/worlds/audios/Audio';
 import type Entity from '@/worlds/entities/Entity';
 import type World from '@/worlds/World';
@@ -141,6 +142,9 @@ export default class AudioManager {
     audio.pause();
 
     this._audios.delete(audio.id);
+    if (audio.world) {
+      audio.emitWithWorld(audio.world, AudioEvent.UNLOAD, { audio });
+    }
   }
 
   /**

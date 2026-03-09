@@ -109,6 +109,30 @@ export default class PerformanceBaseline {
     }
   }
 
+  public static recordForwardedPacketBatch(options: {
+    packetCount: number;
+    rawBytes: number;
+    reliable: boolean;
+    wireBytes: number;
+  }): void {
+    if (options.packetCount <= 0) {
+      return;
+    }
+
+    const { rawBytes, reliable, wireBytes } = options;
+    PerformanceBaseline._packetBatchCounters.totalBatches++;
+    PerformanceBaseline._packetBatchCounters.rawBytes += rawBytes;
+    PerformanceBaseline._packetBatchCounters.wireBytes += wireBytes;
+    if (reliable) {
+      PerformanceBaseline._packetBatchCounters.reliableBatches++;
+    } else {
+      PerformanceBaseline._packetBatchCounters.unreliableBatches++;
+    }
+    if (wireBytes < rawBytes) {
+      PerformanceBaseline._packetBatchCounters.compressedBatches++;
+    }
+  }
+
   public static recordSpan(
     operation: string,
     durationMs: number,

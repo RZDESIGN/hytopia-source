@@ -77,6 +77,7 @@ export enum AudioEvent {
   SET_PLAYBACK_RATE      = 'AUDIO.SET_PLAYBACK_RATE',
   SET_REFERENCE_DISTANCE = 'AUDIO.SET_REFERENCE_DISTANCE',
   SET_VOLUME             = 'AUDIO.SET_VOLUME',
+  UNLOAD                 = 'AUDIO.UNLOAD',
 }
 
 /**
@@ -118,6 +119,9 @@ export interface AudioEventPayloads {
 
   /** Emitted when the audio's volume is set. */
   [AudioEvent.SET_VOLUME]:             { audio: Audio, volume: number }
+
+  /** Emitted when the audio is removed from the world audio manager. */
+  [AudioEvent.UNLOAD]:                 { audio: Audio }
 }
 
 /**

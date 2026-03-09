@@ -1,6 +1,21 @@
 import type GatewayPlayerSession from '@/networking/GatewayPlayerSession';
 import type World from '@/worlds/World';
-import type { AnyPacket } from '@hytopia.com/server-protocol';
+import type {
+  AudioSchema,
+  AnyPacket,
+  BlockSchema,
+  BlockTypeSchema,
+  CameraSchema,
+  ChatMessagesSchema,
+  ChunkSchema,
+  EntitySchema,
+  ParticleEmitterSchema,
+  PlayersSchema,
+  SceneUISchema,
+  UIDatasSchema,
+  UISchema,
+  WorldSchema,
+} from '@hytopia.com/server-protocol';
 import type {
   HostedPlayerDetachReason,
   HostedPlayerPacketEnvelope,
@@ -61,6 +76,13 @@ export default interface WorldHostClient {
   getLocalWorldById(worldId: number): World | undefined;
 
   /**
+   * Returns whether the host currently owns derived world/player state for the target world.
+   *
+   * **Category:** Networking
+   */
+  ownsDerivedState(targetWorld: World | HostedWorldDescriptor): boolean;
+
+  /**
    * Assigns the player to a hosted world.
    *
    * **Category:** Networking
@@ -80,6 +102,147 @@ export default interface WorldHostClient {
    * **Category:** Networking
    */
   sendPacketsToPlayer(session: GatewayPlayerSession, packets: AnyPacket[], reliable?: boolean): void;
+
+  /**
+   * Requests browser notification permission for a player through the active host.
+   *
+   * **Category:** Networking
+  */
+  requestNotificationPermission(session: GatewayPlayerSession): void;
+
+  /**
+   * Applies an audio-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for owning future bootstrap state.
+   *
+   * **Category:** Networking
+   */
+  updateAudioState(targetWorld: World | HostedWorldDescriptor, audio: AudioSchema, worldTick: number): boolean;
+
+  /**
+   * Removes an audio instance from the active host's derived bootstrap state.
+   *
+   * Returns `true` if the host accepted responsibility for the removal.
+   *
+   * **Category:** Networking
+   */
+  removeAudioState(targetWorld: World | HostedWorldDescriptor, audioId: number): boolean;
+
+  /**
+   * Sends a coalesced player camera update through the active host.
+   *
+   * **Category:** Networking
+   */
+  sendCameraToPlayer(session: GatewayPlayerSession, camera: CameraSchema, worldTick: number): void;
+
+  /**
+   * Sends a coalesced per-player entity update through the active host.
+   *
+   * **Category:** Networking
+   */
+  sendEntitiesToPlayer(session: GatewayPlayerSession, entities: EntitySchema[], worldTick: number): void;
+
+  /**
+   * Sends coalesced chat messages through the active host.
+   *
+   * **Category:** Networking
+   */
+  sendChatMessagesToPlayer(session: GatewayPlayerSession, chatMessages: ChatMessagesSchema, worldTick: number): void;
+
+  /**
+   * Sends coalesced player state updates through the active host.
+   *
+   * **Category:** Networking
+   */
+  sendPlayersToPlayer(session: GatewayPlayerSession, players: PlayersSchema, worldTick: number): void;
+
+  /**
+   * Sends a coalesced player UI update through the active host.
+   *
+   * **Category:** Networking
+   */
+  sendUIToPlayer(session: GatewayPlayerSession, ui: UISchema, worldTick: number): void;
+
+  /**
+   * Sends coalesced player UI data payloads through the active host.
+   *
+   * **Category:** Networking
+   */
+  sendUIDataToPlayer(session: GatewayPlayerSession, uiDatas: UIDatasSchema, worldTick: number): void;
+
+  /**
+   * Sends coalesced world state through the active host.
+   *
+   * **Category:** Networking
+   */
+  sendWorldToPlayer(session: GatewayPlayerSession, world: WorldSchema, worldTick: number): void;
+
+  /**
+   * Applies a world-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for broadcasting the patch.
+   *
+   * **Category:** Networking
+   */
+  updateWorldState(targetWorld: World | HostedWorldDescriptor, world: WorldSchema, worldTick: number): boolean;
+
+  /**
+   * Applies a scene-UI-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for broadcasting the patch.
+   *
+   * **Category:** Networking
+  */
+  updateSceneUIState(targetWorld: World | HostedWorldDescriptor, sceneUI: SceneUISchema, worldTick: number): boolean;
+
+  /**
+   * Applies a block-type-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for broadcasting the patch.
+   *
+   * **Category:** Networking
+   */
+  updateBlockTypeState(targetWorld: World | HostedWorldDescriptor, blockType: BlockTypeSchema, worldTick: number): boolean;
+
+  /**
+   * Applies a chunk-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for broadcasting the patch.
+   *
+   * **Category:** Networking
+   */
+  updateChunkState(targetWorld: World | HostedWorldDescriptor, chunk: ChunkSchema, worldTick: number): boolean;
+
+  /**
+   * Applies a block-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for broadcasting the patch.
+   *
+   * **Category:** Networking
+   */
+  updateBlockState(targetWorld: World | HostedWorldDescriptor, block: BlockSchema, worldTick: number): boolean;
+
+  /**
+   * Applies an entity-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for broadcasting the patch.
+   *
+   * **Category:** Networking
+   */
+  updateEntityState(targetWorld: World | HostedWorldDescriptor, entity: EntitySchema, worldTick: number): boolean;
+
+  /**
+   * Applies a particle-emitter-scoped state patch in the active host.
+   *
+   * Returns `true` if the host accepted responsibility for broadcasting the patch.
+   *
+   * **Category:** Networking
+   */
+  updateParticleEmitterState(
+    targetWorld: World | HostedWorldDescriptor,
+    particleEmitter: ParticleEmitterSchema,
+    worldTick: number,
+  ): boolean;
 
   /**
    * Detaches a player from a hosted world.

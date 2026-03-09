@@ -413,8 +413,8 @@ export default class Connection extends EventRouter {
       return;
     }
 
-    const wsConnected = this._ws && this._ws.readyState === WebSocket.OPEN;
-    const wtConnected = this._wt && this._wt.state === 'connected';
+    const wsConnected = !!this._ws && this._ws.readyState === WebSocket.OPEN;
+    const wtConnected = !!this._wt && this._wt.state === 'connected';
 
     if (!wsConnected && !wtConnected) {
       return; // Connection is not connected, don't send packets.
@@ -429,21 +429,7 @@ export default class Connection extends EventRouter {
         if (!serializedPackets) return; // failed to serialize.
 
         const serializedBuffer = serializedPackets.buffer;
-
-        if (wtConnected) {
-          if (reliable || serializedBuffer.byteLength > 1200) { // Unreliable Datagram cannot handle > 1200 bytes, we should make this dynamic based on session.
-            // Webtransport reliable streams don't frame and will chunk data we MUST frame packets ourselves.
-            this._wtReliableWriter?.write(protocol.framePacketBuffer(serializedBuffer)).catch(() => {
-              ErrorHandler.error('Connection.send(): WebTransport reliable write failed, connection closing?');
-            });
-          } else {
-            this._wtUnreliableWriter?.write(serializedBuffer).catch(() => {
-              ErrorHandler.error('Connection.send(): WebTransport unreliable write failed, connection closing?');
-            });
-          }
-        } else {
-          this._ws!.send(serializedBuffer);
-        }
+        this._writeSerializedBuffer(serializedBuffer, reliable, wtConnected);
 
         PerformanceBaseline.recordPackets(packets, {
           rawBytes: serializedPackets.rawBytes,
@@ -457,6 +443,54 @@ export default class Connection extends EventRouter {
         });
       } catch (error) {
         ErrorHandler.error(`Connection.send(): Packet send failed. Error: ${error as Error}`);
+      }
+    });
+  }
+
+  /**
+   * Sends a pre-serialized packet batch to the client transport.
+   *
+   * Use for: forwarding already-encoded packet batches from a hosted world
+   * process through the gateway without re-encoding them.
+   *
+   * **Category:** Networking
+   */
+  public sendSerializedBuffer(
+    buffer: Uint8Array,
+    reliable: boolean = true,
+    options?: { packetCount?: number; rawBytes?: number },
+  ): void {
+    if (this._closeTimeout || this._wsBinding || this._wtBinding) {
+      return;
+    }
+
+    if (!this._ws && !this._wt) {
+      return;
+    }
+
+    const wsConnected = !!this._ws && this._ws.readyState === WebSocket.OPEN;
+    const wtConnected = !!this._wt && this._wt.state === 'connected';
+
+    if (!wsConnected && !wtConnected) {
+      return;
+    }
+
+    Telemetry.startSpan({
+      operation: TelemetrySpanOperation.SEND_PACKETS,
+    }, () => {
+      try {
+        this._writeSerializedBuffer(buffer, reliable, wtConnected);
+
+        if (options?.packetCount !== undefined && options.rawBytes !== undefined) {
+          PerformanceBaseline.recordForwardedPacketBatch({
+            packetCount: options.packetCount,
+            rawBytes: options.rawBytes,
+            reliable,
+            wireBytes: buffer.byteLength,
+          });
+        }
+      } catch (error) {
+        ErrorHandler.error(`Connection.sendSerializedBuffer(): Packet send failed. Error: ${error as Error}`);
       }
     });
   }
@@ -527,6 +561,22 @@ export default class Connection extends EventRouter {
     this._wtReliableWriter = undefined;
     this._wtUnreliableReader = undefined;
     this._wtUnreliableWriter = undefined;
+  }
+
+  private _writeSerializedBuffer(buffer: Uint8Array, reliable: boolean, wtConnected: boolean): void {
+    if (wtConnected) {
+      if (reliable || buffer.byteLength > 1200) {
+        this._wtReliableWriter?.write(protocol.framePacketBuffer(buffer)).catch(() => {
+          ErrorHandler.error('Connection._writeSerializedBuffer(): WebTransport reliable write failed, connection closing?');
+        });
+      } else {
+        this._wtUnreliableWriter?.write(buffer).catch(() => {
+          ErrorHandler.error('Connection._writeSerializedBuffer(): WebTransport unreliable write failed, connection closing?');
+        });
+      }
+    } else {
+      this._ws!.send(buffer);
+    }
   }
 
   private _deserialize(data: Buffer): AnyPacket | void {

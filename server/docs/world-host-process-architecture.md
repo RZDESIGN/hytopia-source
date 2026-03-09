@@ -165,6 +165,26 @@ Status:
 - `ProcessWorldHostClient` now exists and can be enabled with `HYTOPIA_WORLD_HOST_MODE=process_shadow`
 - the active host client is selected at server startup through `WorldHostManager`
 - selected worlds can be mirrored to a child process for lifecycle/session traffic while inline simulation remains authoritative
+- the gateway can now forward pre-serialized packet batches from a child host directly to client transports
+- `SYNC_REQUEST -> SYNC_RESPONSE` is now the first gameplay packet slice produced remotely by the child host instead of inline for mirrored worlds
+- notification permission prompts are now host-owned targeted sends, and mirrored worlds have the child host serialize that packet instead of relying on `NetworkSynchronizer` tick queues
+- `UI` and `UI_DATAS` now stay coalesced per tick inside `NetworkSynchronizer`, but packet construction is host-owned and mirrored worlds have the child host serialize those per-player UI batches
+- `CAMERA` now follows the same model: `NetworkSynchronizer` still coalesces camera state per player, but final packet construction is host-owned and mirrored worlds have the child host serialize it
+- `CHAT_MESSAGES` now follows the same model too: chat is still coalesced per tick with broadcast entries sent before player-specific entries, but final packet construction is host-owned and mirrored worlds have the child host serialize it
+- mirrored worlds now have a child-owned per-world runtime that tracks attached players and batches those targeted packet families into outbound packet batches before handing them back to the gateway
+- `WORLD` and `PLAYERS` now also go through that child-owned runtime, so a broader player/world state family is batched and serialized in the child instead of the inline host path
+- initial `WORLD` and `PLAYERS` state for mirrored-world attach/detach is now derived directly from child-owned runtime data and player descriptors instead of being fully planned by the inline `NetworkSynchronizer`
+- ongoing mirrored-world `WORLD` property updates are now sent as world-scoped patches to the child runtime, which updates its own world state and broadcasts those patches to attached players
+- derived `WORLD` and `PLAYERS` ownership now falls back cleanly to inline behavior when the mirrored child process is unavailable, instead of suppressing inline bootstrap/removal solely because a world descriptor is marked `process`
+- mirrored-world `SceneUI` state is now maintained in the child runtime too, with child-owned bootstrap for newly attached players and ongoing `SceneUI` load/update/unload patches mirrored from `NetworkSynchronizer`
+- mirrored-world block type registration and chunk/block terrain state are now maintained in the child runtime too, with child-owned bootstrap for newly attached players and ongoing register/add/remove/set-block patches mirrored from `NetworkSynchronizer`
+- mirrored-world audio state is now maintained in the child runtime too, with child-owned bootstrap for newly attached players, ongoing play/pause/property patches mirrored from `NetworkSynchronizer`, and an internal unload signal to keep the child bootstrap roster accurate for future joins
+- mirrored-world particle emitter state is now maintained in the child runtime too, with child-owned bootstrap for newly attached players and ongoing spawn/despawn/property patches mirrored from `NetworkSynchronizer`
+- mirrored-world broadcast entity state is now maintained in the child runtime too, with child-owned bootstrap for newly attached players and ongoing spawn/despawn/property/model-animation/model-node-override patches mirrored from `NetworkSynchronizer`, while per-player prediction/outline exceptions stay inline for now
+- mirrored-world per-player entity batches now also cross the host boundary for child-side packet construction, so owner-prediction and other player-specific entity exceptions are still derived inline for now but no longer require inline entity packet serialization
+- if the shadow host child exits, `ProcessWorldHostClient` now respawns it and replays mirrored-world bootstrap state plus attached player sessions, so child-owned derived state can recover instead of waiting for future incremental patches
+- child rebootstrap now also replays recoverable player-local entity state for attached sessions, specifically owner-prediction sync fields and camera/viewmodel-driven entity model overrides, so mirrored worlds recover those client-visible states after shadow-host restart too
+- `ProcessWorldHostClient` now keeps a replayable cache of per-player entity overlay state that crosses the host boundary, so player-specific entity exceptions such as owner-prediction batches and per-player outlines can be restored into a restarted child host instead of existing only in flight
 
 ### Phase 5: Full world-per-process
 
@@ -183,8 +203,8 @@ Once the protocol is stable:
 
 ## Next implementation step
 
-The next code change should move outbound and inbound gameplay traffic behind the same boundary:
+The next code change should start moving world-owned state planning itself into the child runtime:
 
-- replace direct `player.connection.send(...)` calls in world-local systems with a host-owned packet sink
-- forward client gameplay packets through a gateway-facing router before they reach `Player`
-- keep inline mode as the execution path while matching the process-host contract
+- introduce child-side player/world runtime objects that can own more than packet batching
+- choose the next authoritative planning slice beyond world-state patches, such as child-owned player-state derivation or another piece of sync planning instead of forwarding already-planned sync objects from the inline `World`
+- continue shrinking the set of gameplay decisions that require the gateway to keep a live local `World` authoritative

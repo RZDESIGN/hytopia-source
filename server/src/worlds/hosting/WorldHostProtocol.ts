@@ -1,4 +1,19 @@
-import type { AnyPacket } from '@hytopia.com/server-protocol';
+import type {
+  AudioSchema,
+  AnyPacket,
+  BlockSchema,
+  BlockTypeSchema,
+  CameraSchema,
+  ChatMessagesSchema,
+  ChunkSchema,
+  EntitySchema,
+  ParticleEmitterSchema,
+  PlayersSchema,
+  SceneUISchema,
+  UIDatasSchema,
+  UISchema,
+  WorldSchema,
+} from '@hytopia.com/server-protocol';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 
 /**
@@ -47,6 +62,7 @@ export interface HostedPlayerDescriptor {
   connectionId: string;
   id: string;
   isGuest: boolean;
+  profilePictureUrl?: string;
   sessionToken?: string;
   username: string;
 }
@@ -159,6 +175,113 @@ export type GatewayToWorldHostMessage =
     packets: HostedPlayerPacketEnvelope[];
     playerId: string;
     worldId: number;
+  }
+  | {
+    type: 'player_request_notification_permission';
+    playerId: string;
+    worldId: number;
+  }
+  | {
+    type: 'audio_state_patch';
+    audio: AudioSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'audio_state_remove';
+    audioId: number;
+    worldId: number;
+  }
+  | {
+    type: 'player_camera';
+    camera: CameraSchema;
+    playerId: string;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'player_entities';
+    entities: EntitySchema[];
+    playerId: string;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'player_chat_messages';
+    chatMessages: ChatMessagesSchema;
+    playerId: string;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'player_players';
+    playerId: string;
+    players: PlayersSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'player_ui';
+    playerId: string;
+    ui: UISchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'player_ui_datas';
+    playerId: string;
+    uiDatas: UIDatasSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'player_world';
+    playerId: string;
+    world: WorldSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'world_state_patch';
+    world: WorldSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'scene_ui_state_patch';
+    sceneUI: SceneUISchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'block_type_state_patch';
+    blockType: BlockTypeSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'chunk_state_patch';
+    chunk: ChunkSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'block_state_patch';
+    block: BlockSchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'entity_state_patch';
+    entity: EntitySchema;
+    worldId: number;
+    worldTick: number;
+  }
+  | {
+    type: 'particle_emitter_state_patch';
+    particleEmitter: ParticleEmitterSchema;
+    worldId: number;
+    worldTick: number;
   };
 
 /**

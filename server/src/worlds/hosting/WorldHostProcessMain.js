@@ -1,16 +1,650 @@
+import { gzipSync } from 'node:zlib';
+import { Packr, FLOAT32_OPTIONS } from 'msgpackr';
+
+const msgpackr = new Packr({ useFloat32: FLOAT32_OPTIONS.ALWAYS });
+const PROCESS_ID = `child-${process.pid}`;
+const SYNC_REQUEST_PACKET_ID = 0;
+const SYNC_RESPONSE_PACKET_ID = 32;
+const AUDIOS_PACKET_ID = 33;
+const BLOCKS_PACKET_ID = 34;
+const BLOCK_TYPES_PACKET_ID = 35;
+const CHAT_MESSAGES_PACKET_ID = 36;
+const CHUNKS_PACKET_ID = 37;
+const ENTITIES_PACKET_ID = 38;
+const WORLD_PACKET_ID = 39;
+const CAMERA_PACKET_ID = 40;
+const PLAYERS_PACKET_ID = 45;
+const PARTICLE_EMITTERS_PACKET_ID = 46;
+const UI_PACKET_ID = 41;
+const UI_DATAS_PACKET_ID = 42;
+const SCENE_UIS_PACKET_ID = 43;
+const NOTIFICATION_PERMISSION_REQUEST_PACKET_ID = 47;
+const DEFAULT_TICK_RATE = 20;
+const CHUNK_AXES_RANGE = 15;
+const CHUNK_SIZE_BITS = 4;
 const worlds = new Map();
 
-const log = (level, message, worldId) => {
+const serializePackets = packets => {
+  const rawBuffer = msgpackr.pack(packets);
+  let wireBuffer = rawBuffer;
+
+  if (rawBuffer.byteLength > 64 * 1024) {
+    wireBuffer = gzipSync(rawBuffer, { level: 1 });
+  }
+
+  return {
+    rawBytes: rawBuffer.byteLength,
+    wireBytes: wireBuffer,
+  };
+};
+
+const sendToGateway = message => {
   if (typeof process.send === 'function') {
-    process.send({
-      type: 'world_log',
-      level,
-      message,
-      worldId,
-      processId: `child-${process.pid}`,
-    });
+    process.send(message);
   }
 };
+
+const toRgbSchema = color => color ? [ color.r, color.g, color.b ] : undefined;
+const toVectorSchema = vector => vector ? [ vector.x, vector.y, vector.z ] : undefined;
+const toPlayerSchema = playerDescriptor => ({
+  i: playerDescriptor.id,
+  p: playerDescriptor.profilePictureUrl,
+  u: playerDescriptor.username,
+});
+const toRemovedPlayerSchema = playerId => ({
+  i: playerId,
+  rm: true,
+});
+const toWorldSchema = (worldDescriptor, options) => ({
+  i: Number(worldDescriptor?.id ?? options?.id),
+  ac: toRgbSchema(options?.ambientLightColor),
+  ai: options?.ambientLightIntensity,
+  dc: toRgbSchema(options?.directionalLightColor),
+  di: options?.directionalLightIntensity,
+  dp: toVectorSchema(options?.directionalLightPosition),
+  fc: toRgbSchema(options?.fogColor),
+  ff: options?.fogFar,
+  fn: options?.fogNear,
+  n: options?.name ?? worldDescriptor?.name,
+  s: options?.skyboxUri,
+  si: options?.skyboxIntensity,
+  t: options?.tickRate ? 1 / options.tickRate : 1 / DEFAULT_TICK_RATE,
+});
+const packCoordinate = coordinate => Array.isArray(coordinate) && coordinate.length === 3
+  ? `${coordinate[0]},${coordinate[1]},${coordinate[2]}`
+  : undefined;
+const packOriginForGlobalCoordinate = coordinate => Array.isArray(coordinate) && coordinate.length === 3
+  ? `${(coordinate[0] | 0) - (coordinate[0] & CHUNK_AXES_RANGE)},${(coordinate[1] | 0) - (coordinate[1] & CHUNK_AXES_RANGE)},${(coordinate[2] | 0) - (coordinate[2] & CHUNK_AXES_RANGE)}`
+  : undefined;
+const toLocalCoordinate = coordinate => ({
+  x: coordinate[0] & CHUNK_AXES_RANGE,
+  y: coordinate[1] & CHUNK_AXES_RANGE,
+  z: coordinate[2] & CHUNK_AXES_RANGE,
+});
+const localCoordinateToBlockIndex = localCoordinate => (
+  localCoordinate.x + (localCoordinate.y << CHUNK_SIZE_BITS) + (localCoordinate.z << (CHUNK_SIZE_BITS * 2))
+);
+const cloneChunkSchema = chunk => ({
+  ...chunk,
+  b: Array.isArray(chunk?.b) ? [ ...chunk.b ] : chunk?.b,
+  r: Array.isArray(chunk?.r) ? [ ...chunk.r ] : chunk?.r,
+});
+const cloneEntityModelAnimationSchema = entityModelAnimation => ({ ...entityModelAnimation });
+const cloneEntityModelNodeOverrideSchema = entityModelNodeOverride => ({
+  ...entityModelNodeOverride,
+  ec: Array.isArray(entityModelNodeOverride?.ec) ? [ ...entityModelNodeOverride.ec ] : entityModelNodeOverride?.ec,
+  p: Array.isArray(entityModelNodeOverride?.p) ? [ ...entityModelNodeOverride.p ] : entityModelNodeOverride?.p,
+  r: Array.isArray(entityModelNodeOverride?.r) ? [ ...entityModelNodeOverride.r ] : entityModelNodeOverride?.r,
+  s: Array.isArray(entityModelNodeOverride?.s) ? [ ...entityModelNodeOverride.s ] : entityModelNodeOverride?.s,
+});
+const mergeNamedSchemaList = (currentItems, patchItems, cloneItem) => {
+  const mergedItemsByName = new Map();
+
+  if (Array.isArray(currentItems)) {
+    for (const currentItem of currentItems) {
+      if (typeof currentItem?.n !== 'string') {
+        continue;
+      }
+
+      mergedItemsByName.set(currentItem.n, cloneItem(currentItem));
+    }
+  }
+
+  if (Array.isArray(patchItems)) {
+    for (const patchItem of patchItems) {
+      if (typeof patchItem?.n !== 'string') {
+        continue;
+      }
+
+      if (patchItem.rm) {
+        mergedItemsByName.delete(patchItem.n);
+        continue;
+      }
+
+      const existingItem = mergedItemsByName.get(patchItem.n);
+      mergedItemsByName.set(patchItem.n, cloneItem({
+        ...existingItem,
+        ...patchItem,
+      }));
+    }
+  }
+
+  return Array.from(mergedItemsByName.values());
+};
+const cloneEntitySchema = entity => ({
+  ...entity,
+  bh: Array.isArray(entity?.bh) ? [ ...entity.bh ] : entity?.bh,
+  ec: Array.isArray(entity?.ec) ? [ ...entity.ec ] : entity?.ec,
+  ma: Array.isArray(entity?.ma) ? entity.ma.map(cloneEntityModelAnimationSchema) : entity?.ma,
+  mo: Array.isArray(entity?.mo) ? entity.mo.map(cloneEntityModelNodeOverrideSchema) : entity?.mo,
+  ol: entity?.ol ? {
+    ...entity.ol,
+    c: Array.isArray(entity.ol.c) ? [ ...entity.ol.c ] : entity.ol.c,
+  } : entity?.ol,
+  p: Array.isArray(entity?.p) ? [ ...entity.p ] : entity?.p,
+  r: Array.isArray(entity?.r) ? [ ...entity.r ] : entity?.r,
+  sv: Array.isArray(entity?.sv) ? [ ...entity.sv ] : entity?.sv,
+  t: Array.isArray(entity?.t) ? [ ...entity.t ] : entity?.t,
+});
+const mergeEntitySchema = (existingEntity, entityPatch) => {
+  const mergedEntity = {
+    ...existingEntity,
+    ...entityPatch,
+  };
+
+  if (Array.isArray(entityPatch?.ma)) {
+    mergedEntity.ma = mergeNamedSchemaList(existingEntity?.ma, entityPatch.ma, cloneEntityModelAnimationSchema);
+  }
+
+  if (Array.isArray(entityPatch?.mo)) {
+    mergedEntity.mo = mergeNamedSchemaList(existingEntity?.mo, entityPatch.mo, cloneEntityModelNodeOverrideSchema);
+  }
+
+  return cloneEntitySchema(mergedEntity);
+};
+const upsertBlockRotation = (chunk, blockIndex, blockRotation) => {
+  const rotations = Array.isArray(chunk.r) ? chunk.r : [];
+
+  for (let i = 0; i < rotations.length; i += 2) {
+    if (rotations[i] !== blockIndex) {
+      continue;
+    }
+
+    if (blockRotation === undefined) {
+      rotations.splice(i, 2);
+    } else {
+      rotations[i + 1] = blockRotation;
+    }
+
+    chunk.r = rotations;
+    return;
+  }
+
+  if (blockRotation !== undefined) {
+    rotations.push(blockIndex, blockRotation);
+    chunk.r = rotations;
+  }
+};
+
+const log = (level, message, worldId) => {
+  sendToGateway({
+    type: 'world_log',
+    level,
+    message,
+    worldId,
+    processId: PROCESS_ID,
+  });
+};
+
+class ShadowHostedWorldRuntime {
+  constructor(worldDescriptor, options) {
+    this.descriptor = worldDescriptor;
+    this.options = options;
+    this.bootedAtMonotonicMs = performance.now();
+    this.currentAudioStateById = new Map();
+    this.currentBlockTypeStateById = new Map();
+    this.currentChunkStateByKey = new Map();
+    this.currentEntityStateById = new Map();
+    this.currentParticleEmitterStateById = new Map();
+    this.currentWorldState = toWorldSchema(worldDescriptor, options);
+    this.currentSceneUIStateById = new Map();
+    this.packetsReceived = 0;
+    this.players = new Map();
+    this.pendingPacketsByPlayer = new Map();
+    this.flushScheduled = false;
+  }
+
+  get id() {
+    return Number(this.descriptor?.id ?? this.options?.id);
+  }
+
+  attachPlayer(playerDescriptor) {
+    const existingPlayers = Array.from(this.players.values());
+    this.players.set(playerDescriptor.id, playerDescriptor);
+
+    this.queuePacket(playerDescriptor.id, [
+      WORLD_PACKET_ID,
+      { ...this.currentWorldState },
+      this.getTickMetrics().currentTick,
+    ]);
+    if (this.currentAudioStateById.size > 0) {
+      this.queuePacket(playerDescriptor.id, [
+        AUDIOS_PACKET_ID,
+        Array.from(this.currentAudioStateById.values(), audio => ({ ...audio })),
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+    if (this.currentBlockTypeStateById.size > 0) {
+      this.queuePacket(playerDescriptor.id, [
+        BLOCK_TYPES_PACKET_ID,
+        Array.from(this.currentBlockTypeStateById.values(), blockType => ({ ...blockType })),
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+    if (this.currentChunkStateByKey.size > 0) {
+      this.queuePacket(playerDescriptor.id, [
+        CHUNKS_PACKET_ID,
+        Array.from(this.currentChunkStateByKey.values(), cloneChunkSchema),
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+    if (this.currentEntityStateById.size > 0) {
+      this.queuePacket(playerDescriptor.id, [
+        ENTITIES_PACKET_ID,
+        Array.from(this.currentEntityStateById.values(), cloneEntitySchema),
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+    if (this.currentParticleEmitterStateById.size > 0) {
+      this.queuePacket(playerDescriptor.id, [
+        PARTICLE_EMITTERS_PACKET_ID,
+        Array.from(this.currentParticleEmitterStateById.values(), particleEmitter => ({ ...particleEmitter })),
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+    this.queuePacket(playerDescriptor.id, [
+      PLAYERS_PACKET_ID,
+      Array.from(this.players.values(), toPlayerSchema),
+      this.getTickMetrics().currentTick,
+    ]);
+    if (this.currentSceneUIStateById.size > 0) {
+      this.queuePacket(playerDescriptor.id, [
+        SCENE_UIS_PACKET_ID,
+        Array.from(this.currentSceneUIStateById.values(), sceneUI => ({ ...sceneUI })),
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+
+    const newPlayerSync = toPlayerSchema(playerDescriptor);
+    for (const existingPlayer of existingPlayers) {
+      this.queuePacket(existingPlayer.id, [
+        PLAYERS_PACKET_ID,
+        [ newPlayerSync ],
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+  }
+
+  detachPlayer(playerId) {
+    const existingPlayer = this.players.get(playerId);
+    this.players.delete(playerId);
+    this.pendingPacketsByPlayer.delete(playerId);
+
+    if (!existingPlayer) {
+      return;
+    }
+
+    const removedPlayerSync = toRemovedPlayerSchema(playerId);
+    for (const remainingPlayerId of this.players.keys()) {
+      this.queuePacket(remainingPlayerId, [
+        PLAYERS_PACKET_ID,
+        [ removedPlayerSync ],
+        this.getTickMetrics().currentTick,
+      ]);
+    }
+  }
+
+  handlePlayerPackets(playerId, envelopes) {
+    this.packetsReceived += envelopes.length;
+
+    for (const envelope of envelopes) {
+      if (!Array.isArray(envelope?.packet)) {
+        continue;
+      }
+
+      if (envelope.packet[0] === SYNC_REQUEST_PACKET_ID) {
+        this.queuePacket(playerId, [
+          SYNC_RESPONSE_PACKET_ID,
+          {
+            r: envelope.receivedAtUnixMs,
+            s: Date.now(),
+            p: performance.now() - envelope.receivedAtMonotonicMs,
+            n: this.getTickMetrics().nextTickAtMs,
+          },
+          this.getTickMetrics().currentTick,
+        ]);
+      }
+    }
+  }
+
+  requestNotificationPermission(playerId) {
+    this.queuePacket(playerId, [
+      NOTIFICATION_PERMISSION_REQUEST_PACKET_ID,
+      null,
+      this.getTickMetrics().currentTick,
+    ]);
+  }
+
+  queueCamera(playerId, camera, worldTick) {
+    this.queuePacket(playerId, [
+      CAMERA_PACKET_ID,
+      camera,
+      this.resolveWorldTick(worldTick),
+    ]);
+  }
+
+  queueEntities(playerId, entities, worldTick) {
+    this.queuePacket(playerId, [
+      ENTITIES_PACKET_ID,
+      entities.map(cloneEntitySchema),
+      this.resolveWorldTick(worldTick),
+    ]);
+  }
+
+  queueChatMessages(playerId, chatMessages, worldTick) {
+    this.queuePacket(playerId, [
+      CHAT_MESSAGES_PACKET_ID,
+      chatMessages,
+      this.resolveWorldTick(worldTick),
+    ]);
+  }
+
+  queueUI(playerId, ui, worldTick) {
+    this.queuePacket(playerId, [
+      UI_PACKET_ID,
+      ui,
+      this.resolveWorldTick(worldTick),
+    ]);
+  }
+
+  queueUIDatas(playerId, uiDatas, worldTick) {
+    this.queuePacket(playerId, [
+      UI_DATAS_PACKET_ID,
+      uiDatas,
+      this.resolveWorldTick(worldTick),
+    ]);
+  }
+
+  queuePlayers(playerId, players, worldTick) {
+    this.queuePacket(playerId, [
+      PLAYERS_PACKET_ID,
+      players,
+      this.resolveWorldTick(worldTick),
+    ]);
+  }
+
+  queueWorld(playerId, world, worldTick) {
+    this.currentWorldState = {
+      ...this.currentWorldState,
+      ...world,
+    };
+
+    this.queuePacket(playerId, [
+      WORLD_PACKET_ID,
+      world,
+      this.resolveWorldTick(worldTick),
+    ]);
+  }
+
+  applyWorldStatePatch(world, worldTick) {
+    this.currentWorldState = {
+      ...this.currentWorldState,
+      ...world,
+    };
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        WORLD_PACKET_ID,
+        world,
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  applySceneUIStatePatch(sceneUI, worldTick) {
+    const sceneUIId = Number(sceneUI?.i);
+    if (!Number.isFinite(sceneUIId)) {
+      return;
+    }
+
+    if (sceneUI.rm) {
+      this.currentSceneUIStateById.delete(sceneUIId);
+    } else {
+      const existingSceneUI = this.currentSceneUIStateById.get(sceneUIId);
+      this.currentSceneUIStateById.set(sceneUIId, {
+        ...existingSceneUI,
+        ...sceneUI,
+      });
+    }
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        SCENE_UIS_PACKET_ID,
+        [ sceneUI ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  applyAudioStatePatch(audio, worldTick) {
+    const audioId = Number(audio?.i);
+    if (!Number.isFinite(audioId)) {
+      return;
+    }
+
+    const existingAudio = this.currentAudioStateById.get(audioId);
+    this.currentAudioStateById.set(audioId, {
+      ...existingAudio,
+      ...audio,
+    });
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        AUDIOS_PACKET_ID,
+        [ audio ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  removeAudioState(audioId) {
+    this.currentAudioStateById.delete(audioId);
+  }
+
+  applyBlockTypeStatePatch(blockType, worldTick) {
+    const blockTypeId = Number(blockType?.i);
+    if (!Number.isFinite(blockTypeId)) {
+      return;
+    }
+
+    this.currentBlockTypeStateById.set(blockTypeId, { ...blockType });
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        BLOCK_TYPES_PACKET_ID,
+        [ blockType ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  applyChunkStatePatch(chunk, worldTick) {
+    const chunkKey = packCoordinate(chunk?.c);
+    if (!chunkKey) {
+      return;
+    }
+
+    if (chunk.rm) {
+      this.currentChunkStateByKey.delete(chunkKey);
+    } else {
+      this.currentChunkStateByKey.set(chunkKey, cloneChunkSchema(chunk));
+    }
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        CHUNKS_PACKET_ID,
+        [ chunk ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  applyBlockStatePatch(block, worldTick) {
+    const chunkKey = packOriginForGlobalCoordinate(block?.c);
+    const currentChunk = chunkKey ? this.currentChunkStateByKey.get(chunkKey) : undefined;
+    if (currentChunk?.b && Array.isArray(currentChunk.b)) {
+      const localCoordinate = toLocalCoordinate(block.c);
+      const blockIndex = localCoordinateToBlockIndex(localCoordinate);
+      currentChunk.b[blockIndex] = block.i;
+      upsertBlockRotation(currentChunk, blockIndex, block.r);
+    }
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        BLOCKS_PACKET_ID,
+        [ block ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  applyEntityStatePatch(entity, worldTick) {
+    const entityId = Number(entity?.i);
+    if (!Number.isFinite(entityId)) {
+      return;
+    }
+
+    if (entity.rm) {
+      this.currentEntityStateById.delete(entityId);
+    } else {
+      const existingEntity = this.currentEntityStateById.get(entityId);
+      this.currentEntityStateById.set(entityId, mergeEntitySchema(existingEntity, entity));
+    }
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        ENTITIES_PACKET_ID,
+        [ cloneEntitySchema(entity) ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  applyParticleEmitterStatePatch(particleEmitter, worldTick) {
+    const particleEmitterId = Number(particleEmitter?.i);
+    if (!Number.isFinite(particleEmitterId)) {
+      return;
+    }
+
+    if (particleEmitter.rm) {
+      this.currentParticleEmitterStateById.delete(particleEmitterId);
+    } else {
+      const existingParticleEmitter = this.currentParticleEmitterStateById.get(particleEmitterId);
+      this.currentParticleEmitterStateById.set(particleEmitterId, {
+        ...existingParticleEmitter,
+        ...particleEmitter,
+      });
+    }
+
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    for (const playerId of this.players.keys()) {
+      this.queuePacket(playerId, [
+        PARTICLE_EMITTERS_PACKET_ID,
+        [ particleEmitter ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  queuePacket(playerId, packet) {
+    if (!this.players.has(playerId)) {
+      return false;
+    }
+
+    const queuedPackets = this.pendingPacketsByPlayer.get(playerId);
+    if (queuedPackets) {
+      queuedPackets.push(packet);
+    } else {
+      this.pendingPacketsByPlayer.set(playerId, [ packet ]);
+    }
+
+    this.scheduleFlush();
+    return true;
+  }
+
+  scheduleFlush() {
+    if (this.flushScheduled) {
+      return;
+    }
+
+    this.flushScheduled = true;
+    setImmediate(() => {
+      this.flushScheduled = false;
+      this.flushPendingPackets();
+    });
+  }
+
+  flushPendingPackets() {
+    if (this.pendingPacketsByPlayer.size === 0) {
+      return;
+    }
+
+    for (const [playerId, packets] of this.pendingPacketsByPlayer.entries()) {
+      this.pendingPacketsByPlayer.delete(playerId);
+
+      if (!this.players.has(playerId) || packets.length === 0) {
+        continue;
+      }
+
+      const serialized = serializePackets(packets);
+      sendToGateway({
+        type: 'player_packet_batch',
+        packetCount: packets.length,
+        playerId,
+        processId: PROCESS_ID,
+        rawBytes: serialized.rawBytes,
+        reliable: true,
+        wireBytes: serialized.wireBytes,
+        worldId: this.id,
+      });
+    }
+  }
+
+  resolveWorldTick(worldTick) {
+    return typeof worldTick === 'number'
+      ? worldTick
+      : this.getTickMetrics().currentTick;
+  }
+
+  getTickMetrics() {
+    const tickRate = Math.max(1, Number(this.options?.tickRate ?? DEFAULT_TICK_RATE));
+    const tickDurationMs = 1000 / tickRate;
+    const elapsedMs = Math.max(0, performance.now() - this.bootedAtMonotonicMs);
+    const currentTick = Math.floor(elapsedMs / tickDurationMs);
+
+    return {
+      currentTick,
+      nextTickAtMs: this.bootedAtMonotonicMs + ((currentTick + 1) * tickDurationMs),
+    };
+  }
+}
 
 process.on('message', message => {
   if (!message || typeof message !== 'object') {
@@ -19,62 +653,144 @@ process.on('message', message => {
 
   switch (message.type) {
     case 'world_boot': {
-      const worldId = Number(message.world?.id ?? message.options?.id);
-      worlds.set(worldId, {
-        descriptor: message.world,
-        options: message.options,
-        players: new Set(),
-        packetsReceived: 0,
+      const runtime = new ShadowHostedWorldRuntime(message.world, message.options);
+      worlds.set(runtime.id, runtime);
+
+      sendToGateway({
+        type: 'world_ready',
+        processId: PROCESS_ID,
+        world: message.world,
       });
 
-      if (typeof process.send === 'function') {
-        process.send({
-          type: 'world_ready',
-          processId: `child-${process.pid}`,
-          world: message.world,
-        });
-      }
-
-      log('info', `booted shadow host for world ${worldId}`, worldId);
+      log('info', `booted shadow host for world ${runtime.id}`, runtime.id);
       break;
     }
     case 'world_stop': {
-      worlds.delete(message.worldId);
-      if (typeof process.send === 'function') {
-        process.send({
-          type: 'world_stopped',
-          processId: `child-${process.pid}`,
-          reason: message.reason,
-          worldId: message.worldId,
-        });
+      const runtime = worlds.get(message.worldId);
+      if (runtime) {
+        runtime.flushPendingPackets();
       }
+
+      worlds.delete(message.worldId);
+      sendToGateway({
+        type: 'world_stopped',
+        processId: PROCESS_ID,
+        reason: message.reason,
+        worldId: message.worldId,
+      });
 
       log('info', `stopped shadow host for world ${message.worldId}`, message.worldId);
       break;
     }
     case 'player_attach': {
-      const world = worlds.get(message.worldId);
-      if (world) {
-        world.players.add(message.player.id);
+      const runtime = worlds.get(message.worldId);
+      if (runtime) {
+        runtime.attachPlayer(message.player);
       }
 
       log('debug', `attached player ${message.player.id}`, message.worldId);
       break;
     }
     case 'player_detach': {
-      const world = worlds.get(message.worldId);
-      if (world) {
-        world.players.delete(message.playerId);
+      const runtime = worlds.get(message.worldId);
+      if (runtime) {
+        runtime.detachPlayer(message.playerId);
       }
 
       log('debug', `detached player ${message.playerId} (${message.reason})`, message.worldId);
       break;
     }
     case 'player_packets': {
-      const world = worlds.get(message.worldId);
-      if (world) {
-        world.packetsReceived += Array.isArray(message.packets) ? message.packets.length : 0;
+      const runtime = worlds.get(message.worldId);
+      if (runtime) {
+        const packets = Array.isArray(message.packets) ? message.packets : [];
+        runtime.handlePlayerPackets(message.playerId, packets);
       }
+      break;
+    }
+    case 'player_request_notification_permission': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.requestNotificationPermission(message.playerId);
+      break;
+    }
+    case 'audio_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applyAudioStatePatch(message.audio, message.worldTick);
+      break;
+    }
+    case 'audio_state_remove': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.removeAudioState(message.audioId);
+      break;
+    }
+    case 'player_camera': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.queueCamera(message.playerId, message.camera, message.worldTick);
+      break;
+    }
+    case 'player_entities': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.queueEntities(message.playerId, message.entities, message.worldTick);
+      break;
+    }
+    case 'player_chat_messages': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.queueChatMessages(message.playerId, message.chatMessages, message.worldTick);
+      break;
+    }
+    case 'player_ui': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.queueUI(message.playerId, message.ui, message.worldTick);
+      break;
+    }
+    case 'player_ui_datas': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.queueUIDatas(message.playerId, message.uiDatas, message.worldTick);
+      break;
+    }
+    case 'player_players': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.queuePlayers(message.playerId, message.players, message.worldTick);
+      break;
+    }
+    case 'player_world': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.queueWorld(message.playerId, message.world, message.worldTick);
+      break;
+    }
+    case 'world_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applyWorldStatePatch(message.world, message.worldTick);
+      break;
+    }
+    case 'scene_ui_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applySceneUIStatePatch(message.sceneUI, message.worldTick);
+      break;
+    }
+    case 'block_type_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applyBlockTypeStatePatch(message.blockType, message.worldTick);
+      break;
+    }
+    case 'chunk_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applyChunkStatePatch(message.chunk, message.worldTick);
+      break;
+    }
+    case 'block_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applyBlockStatePatch(message.block, message.worldTick);
+      break;
+    }
+    case 'entity_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applyEntityStatePatch(message.entity, message.worldTick);
+      break;
+    }
+    case 'particle_emitter_state_patch': {
+      const runtime = worlds.get(message.worldId);
+      runtime?.applyParticleEmitterStatePatch(message.particleEmitter, message.worldTick);
       break;
     }
     default:
@@ -84,6 +800,10 @@ process.on('message', message => {
 });
 
 process.on('SIGTERM', () => {
+  for (const runtime of worlds.values()) {
+    runtime.flushPendingPackets();
+  }
+
   log('info', 'shadow host shutting down');
   process.exit(0);
 });
