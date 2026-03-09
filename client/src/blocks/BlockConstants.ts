@@ -40,7 +40,7 @@ export type BlockFaceGeometry = {
 export type BlocksBufferGeometryData = {
   colors: Float32Array;
   indices: Uint32Array | Uint16Array;
-  normals: Float32Array;
+  normals?: Float32Array;
   positions: Float32Array;
   uvs: Float32Array;
   lightLevels?: Float32Array;

@@ -2963,6 +2963,9 @@ export default class Entity {
     if (!this._blockHalfExtents) {
       throw new Error('Entity.buildBlockModel(): Block entity must have blockHalfExtents to build a block model.');
     }
+    if (!normals) {
+      throw new Error('Entity.buildBlockModel(): Block entity geometry requires normals.');
+    }
 
     this._clearBlockModelResources();
 

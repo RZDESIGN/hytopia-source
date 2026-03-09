@@ -31,6 +31,9 @@ import {
   type BlockId,
   type BlockTextureUri,
   BLOCK_ROTATION_MATRICES,
+  FACE_SHADE_BOTTOM,
+  FACE_SHADE_SIDE,
+  FACE_SHADE_TOP,
   DEFAULT_BLOCK_COLOR,
   DEFAULT_BLOCK_FACE_GEOMETRIES,
   DEFAULT_BLOCK_FACES,
@@ -81,6 +84,7 @@ type TrimeshOcclusionProfile = {
 };
 
 // working variables
+const aoNeighborCoord = { x: 0, y: 0, z: 0 };
 const globalToLocalResult = { x: 0, y: 0, z: 0 };
 const globalToOriginResult = { x: 0, y: 0, z: 0 };
 const localCoord = { x: 0, y: 0, z: 0 };
@@ -107,7 +111,8 @@ const skylightCoords: { x: number, y: number, z: number }[] = [
   { x: 0, y: 0, z: 0 },
   { x: 0, y: 0, z: 0 },
 ];
-const SURFACE_GRASS_BLADE_COUNT = 72;
+const SURFACE_GRASS_CLUMP_COUNT = 6;
+const SURFACE_GRASS_CARDS_PER_CLUMP = 3;
 const SURFACE_GRASS_EDGE_OVERDRAW = 0.08;
 
 // Constructing the geometry for chunk blocks is CPU-intensive, so it is offloaded from the
@@ -538,7 +543,9 @@ class ChunkWorker {
       const data = array[i];
       transferables.push(data.colors.buffer);
       transferables.push(data.indices.buffer);
-      transferables.push(data.normals.buffer);
+      if (data.normals) {
+        transferables.push(data.normals.buffer);
+      }
       transferables.push(data.positions.buffer);
       transferables.push(data.uvs.buffer);
       if (data.lightLevels) {
@@ -786,10 +793,8 @@ class ChunkWorker {
     // Batch mesh arrays (combined for all chunks in batch)
     const foliageMeshColors: number[] = [];
     const foliageMeshIndices: number[] = [];
-    const foliageMeshNormals: number[] = [];
     const foliageMeshPositions: number[] = [];
     const foliageMeshUvs: number[] = [];
-    const foliageMeshLightLevels: number[] = [];
     const foliageMeshWindData: number[] = [];
 
     const liquidMeshColors: number[] = [];
@@ -893,13 +898,10 @@ class ChunkWorker {
                   globalY,
                   globalZ,
                   blockType,
-                  lightLevel / MAX_LIGHT_LEVEL,
                   foliageMeshColors,
                   foliageMeshIndices,
-                  foliageMeshNormals,
                   foliageMeshPositions,
                   foliageMeshUvs,
-                  foliageMeshLightLevels,
                   foliageMeshWindData,
                 );
               }
@@ -1297,10 +1299,8 @@ class ChunkWorker {
       foliageGeometry: foliageMeshPositions.length > 0 ? {
         colors: new Float32Array(foliageMeshColors),
         indices: this._createIndicesTypedArray(foliageMeshIndices, foliageMeshIndices[foliageMeshIndices.length - 1]),
-        normals: new Float32Array(foliageMeshNormals),
         positions: new Float32Array(foliageMeshPositions),
         uvs: new Float32Array(foliageMeshUvs),
-        lightLevels: new Float32Array(foliageMeshLightLevels),
         windData: new Float32Array(foliageMeshWindData),
       } : undefined,
       liquidGeometry: liquidMeshPositions.length > 0 ? {
@@ -1355,13 +1355,10 @@ class ChunkWorker {
     globalY: number,
     globalZ: number,
     blockType: BlockType,
-    normalizedLightLevel: number,
     colors: number[],
     indices: number[],
-    normals: number[],
     positions: number[],
     uvs: number[],
-    lightLevels: number[],
     windData: number[],
   ): void {
     const textureUri = blockType.textureUris.top;
@@ -1369,19 +1366,22 @@ class ChunkWorker {
     const blockSeedX = this._hashToUnit(globalX, globalY, globalZ, 91);
     const blockSeedZ = this._hashToUnit(globalX, globalY, globalZ, 137);
     const spread = 1 + SURFACE_GRASS_EDGE_OVERDRAW * 2;
+    const rootLeftUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.47, 0.0]);
+    const rootRightUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.53, 0.0]);
+    const tipLeftUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.48, 1.0]);
+    const tipRightUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.52, 1.0]);
 
-    for (let bladeIndex = 0; bladeIndex < SURFACE_GRASS_BLADE_COUNT; bladeIndex++) {
-      // Low-discrepancy placement keeps the block densely covered without revealing a rigid lattice.
-      const sampleX = this._fract(blockSeedX + bladeIndex * 0.7548776662466927);
-      const sampleZ = this._fract(blockSeedZ + bladeIndex * 0.5698402909980532);
-      const orientation = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 1) * Math.PI;
-      const placementJitterAngle = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 2) * Math.PI * 2;
-      const placementJitterRadius = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 3) * 0.028;
-      const width = 0.022 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 4) * 0.014;
-      const height = 0.24 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 5) * 0.12;
-      const lean = 0.05 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 6) * 0.07;
-      const swayStrength = 0.95 + this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 7) * 0.65;
-      const swayPhase = this._hashToUnit(globalX, globalY, globalZ, bladeIndex * 13 + 8) * Math.PI * 2;
+    for (let clumpIndex = 0; clumpIndex < SURFACE_GRASS_CLUMP_COUNT; clumpIndex++) {
+      const sampleX = this._fract(blockSeedX + clumpIndex * 0.6180339887498949);
+      const sampleZ = this._fract(blockSeedZ + clumpIndex * 0.41421356237309503);
+      const orientationBase = this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 1) * Math.PI;
+      const placementJitterAngle = this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 2) * Math.PI * 2;
+      const placementJitterRadius = this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 3) * 0.055;
+      const baseWidth = 0.075 + this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 4) * 0.04;
+      const height = 0.34 + this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 5) * 0.14;
+      const lean = 0.06 + this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 6) * 0.08;
+      const swayStrength = 0.9 + this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 7) * 0.55;
+      const swayPhaseBase = this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 8) * Math.PI * 2;
       const centerX =
         globalX
         + sampleX * spread
@@ -1392,58 +1392,54 @@ class ChunkWorker {
         + sampleZ * spread
         - SURFACE_GRASS_EDGE_OVERDRAW
         + Math.sin(placementJitterAngle) * placementJitterRadius;
-      const halfWidthX = Math.cos(orientation) * width * 0.5;
-      const halfWidthZ = Math.sin(orientation) * width * 0.5;
-      const halfTopWidthX = halfWidthX * 0.26;
-      const halfTopWidthZ = halfWidthZ * 0.26;
-      const tipX = centerX + Math.cos(orientation + 0.8) * lean;
-      const tipZ = centerZ + Math.sin(orientation + 0.8) * lean;
-      const vertexOffset = positions.length / 3;
+      const rootShade = 0.64 + this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 17 + 9) * 0.08;
 
-      positions.push(
-        centerX - halfWidthX, baseY, centerZ - halfWidthZ,
-        centerX + halfWidthX, baseY, centerZ + halfWidthZ,
-        tipX - halfTopWidthX, baseY + height, tipZ - halfTopWidthZ,
-        tipX + halfTopWidthX, baseY + height, tipZ + halfTopWidthZ,
-      );
+      for (let cardIndex = 0; cardIndex < SURFACE_GRASS_CARDS_PER_CLUMP; cardIndex++) {
+        const orientation = orientationBase + (cardIndex * Math.PI) / SURFACE_GRASS_CARDS_PER_CLUMP;
+        const width = baseWidth * (0.88 + this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 31 + cardIndex * 5 + 10) * 0.24);
+        const halfWidthX = Math.cos(orientation) * width * 0.5;
+        const halfWidthZ = Math.sin(orientation) * width * 0.5;
+        const halfTopWidthX = halfWidthX * 0.28;
+        const halfTopWidthZ = halfWidthZ * 0.28;
+        const tipOrientation = orientation + 0.7 + this._hashToUnit(globalX, globalY, globalZ, clumpIndex * 31 + cardIndex * 5 + 11) * 0.45;
+        const tipX = centerX + Math.cos(tipOrientation) * lean;
+        const tipZ = centerZ + Math.sin(tipOrientation) * lean;
+        const swayPhase = swayPhaseBase + cardIndex * 1.173;
+        const vertexOffset = positions.length / 3;
 
-      normals.push(
-        0, 1, 0,
-        0, 1, 0,
-        0, 1, 0,
-        0, 1, 0,
-      );
+        positions.push(
+          centerX - halfWidthX, baseY, centerZ - halfWidthZ,
+          centerX + halfWidthX, baseY, centerZ + halfWidthZ,
+          tipX - halfTopWidthX, baseY + height, tipZ - halfTopWidthZ,
+          tipX + halfTopWidthX, baseY + height, tipZ + halfTopWidthZ,
+        );
 
-      const rootLeftUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.47, 0.0]);
-      const rootRightUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.53, 0.0]);
-      const tipLeftUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.48, 1.0]);
-      const tipRightUv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [0.52, 1.0]);
-      uvs.push(
-        rootLeftUv[0], rootLeftUv[1],
-        rootRightUv[0], rootRightUv[1],
-        tipLeftUv[0], tipLeftUv[1],
-        tipRightUv[0], tipRightUv[1],
-      );
+        uvs.push(
+          rootLeftUv[0], rootLeftUv[1],
+          rootRightUv[0], rootRightUv[1],
+          tipLeftUv[0], tipLeftUv[1],
+          tipRightUv[0], tipRightUv[1],
+        );
 
-      colors.push(
-        0.68, 0.68, 0.68, 1,
-        0.72, 0.72, 0.72, 1,
-        1, 1, 1, 1,
-        1, 1, 1, 1,
-      );
+        colors.push(
+          rootShade, rootShade, rootShade, 0,
+          rootShade + 0.03, rootShade + 0.03, rootShade + 0.03, 0,
+          1, 1, 1, 1,
+          1, 1, 1, 1,
+        );
 
-      lightLevels.push(normalizedLightLevel, normalizedLightLevel, normalizedLightLevel, normalizedLightLevel);
-      windData.push(
-        swayStrength, swayPhase, 0,
-        swayStrength, swayPhase, 0,
-        swayStrength, swayPhase, 1,
-        swayStrength, swayPhase, 1,
-      );
+        windData.push(
+          swayStrength, swayPhase,
+          swayStrength, swayPhase,
+          swayStrength, swayPhase,
+          swayStrength, swayPhase,
+        );
 
-      indices.push(
-        vertexOffset, vertexOffset + 1, vertexOffset + 2,
-        vertexOffset + 2, vertexOffset + 1, vertexOffset + 3,
-      );
+        indices.push(
+          vertexOffset, vertexOffset + 1, vertexOffset + 2,
+          vertexOffset + 2, vertexOffset + 1, vertexOffset + 3,
+        );
+      }
     }
   }
 
@@ -1599,20 +1595,40 @@ class ChunkWorker {
     skyBoundaryVolume: BoundaryVolume,
     faceContactAOOpacity: number,
   ): [number, number, number, number] {
-    void vertexCoordinate;
-    void blockX;
-    void blockY;
-    void blockZ;
-    void blockFaceAO;
-    void faceNormal;
-    void chunk;
-    void skyDistanceVolume;
-    void skyBoundaryVolume;
-    void faceContactAOOpacity;
+    const vx = vertexCoordinate.x;
+    const vy = vertexCoordinate.y;
+    const vz = vertexCoordinate.z;
     const baseColor = blockType.color;
-    vertexColorResult[0] = baseColor[0];
-    vertexColorResult[1] = baseColor[1];
-    vertexColorResult[2] = baseColor[2];
+
+    const ny = faceNormal[1];
+    const faceShade = ny > 0 ? FACE_SHADE_TOP : ny < 0 ? FACE_SHADE_BOTTOM : FACE_SHADE_SIDE;
+    const skyLight = this._calculateSkyLight(vx, vy, vz, blockX, blockY, blockZ, faceNormal, chunk, skyDistanceVolume, skyBoundaryVolume);
+
+    let aoIntensityLevel = faceContactAOOpacity;
+
+    aoNeighborCoord.x = Math.floor(vx + blockFaceAO.corner[0]);
+    aoNeighborCoord.y = Math.floor(vy + blockFaceAO.corner[1]);
+    aoNeighborCoord.z = Math.floor(vz + blockFaceAO.corner[2]);
+    aoIntensityLevel += this._sampleAOOpacity(aoNeighborCoord.x, aoNeighborCoord.y, aoNeighborCoord.z);
+
+    aoNeighborCoord.x = Math.floor(vx + blockFaceAO.side1[0]);
+    aoNeighborCoord.y = Math.floor(vy + blockFaceAO.side1[1]);
+    aoNeighborCoord.z = Math.floor(vz + blockFaceAO.side1[2]);
+    aoIntensityLevel += this._sampleAOOpacity(aoNeighborCoord.x, aoNeighborCoord.y, aoNeighborCoord.z);
+
+    aoNeighborCoord.x = Math.floor(vx + blockFaceAO.side2[0]);
+    aoNeighborCoord.y = Math.floor(vy + blockFaceAO.side2[1]);
+    aoNeighborCoord.z = Math.floor(vz + blockFaceAO.side2[2]);
+    aoIntensityLevel += this._sampleAOOpacity(aoNeighborCoord.x, aoNeighborCoord.y, aoNeighborCoord.z);
+
+    const clampedAo = Math.min(3, aoIntensityLevel);
+    const aoFloor = Math.floor(clampedAo);
+    const ao = blockType.aoIntensity[aoFloor]
+      + (blockType.aoIntensity[Math.min(3, aoFloor + 1)] - blockType.aoIntensity[aoFloor]) * (clampedAo - aoFloor);
+
+    vertexColorResult[0] = (baseColor[0] - ao) * faceShade * skyLight;
+    vertexColorResult[1] = (baseColor[1] - ao) * faceShade * skyLight;
+    vertexColorResult[2] = (baseColor[2] - ao) * faceShade * skyLight;
     vertexColorResult[3] = baseColor[3];
 
     return vertexColorResult;

@@ -17,6 +17,29 @@ import { applyDirectionalShadowEdgeFade } from '../three/directionalShadowFade';
 
 const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
 const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
+const BLOCK_OUTGOING_LIGHT_LINE = 'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + reflectedLight.directSpecular + reflectedLight.indirectSpecular + totalEmissiveRadiance;';
+
+function applyBlockColorPunch(fragmentShader: string): string {
+  if (fragmentShader.includes('blockHighlight') || !fragmentShader.includes(BLOCK_OUTGOING_LIGHT_LINE)) {
+    return fragmentShader;
+  }
+
+  return fragmentShader.replace(
+    BLOCK_OUTGOING_LIGHT_LINE,
+    `
+      vec3 outgoingLight = reflectedLight.directDiffuse * 1.06
+        + reflectedLight.indirectDiffuse * 0.9
+        + reflectedLight.directSpecular * 0.92
+        + reflectedLight.indirectSpecular * 0.85
+        + totalEmissiveRadiance;
+
+      float blockLuma = dot( outgoingLight, vec3( 0.2126, 0.7152, 0.0722 ) );
+      float blockHighlight = smoothstep( 0.24, 0.95, blockLuma );
+      outgoingLight = mix( vec3( blockLuma ), outgoingLight, 1.08 + blockHighlight * 0.06 );
+      outgoingLight *= 1.02 + blockHighlight * 0.05;
+    `,
+  );
+}
 
 class MeshBlockMaterial extends MeshPhongMaterial {
   constructor(_game: Game, transparent: boolean, hasLightLevel: boolean = true) {
@@ -35,7 +58,7 @@ class MeshBlockMaterial extends MeshPhongMaterial {
 
   public override onBeforeCompile(params: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer): void {
     super.onBeforeCompile(params, renderer);
-    params.fragmentShader = applyDirectionalShadowEdgeFade(params.fragmentShader);
+    params.fragmentShader = applyBlockColorPunch(applyDirectionalShadowEdgeFade(params.fragmentShader));
   }
 }
 
@@ -326,21 +349,20 @@ class MeshFoliageMaterial extends ShaderMaterial {
         uniform float ${UNIFORM_TIME};
         uniform vec3 ${UNIFORM_INTERACTION_CENTER};
 
-        attribute float lightLevel;
         attribute vec4 color;
-        attribute vec3 ${ATTRIBUTE_WIND_DATA};
+        attribute vec2 ${ATTRIBUTE_WIND_DATA};
 
         varying vec2 vUv;
         varying vec4 vColor;
-        varying float vLightLevel;
+        varying float vTipWeight;
 
         void main() {
           vUv = uv;
           vColor = color;
-          vLightLevel = lightLevel;
+          vTipWeight = color.a;
 
           vec3 pos = position;
-          float tipWeight = ${ATTRIBUTE_WIND_DATA}.z;
+          float tipWeight = vTipWeight;
           float tipWeightSq = tipWeight * tipWeight;
           vec4 worldPos = modelMatrix * vec4(position, 1.0);
           vec2 windDir = normalize(vec2(1.0, 0.32));
@@ -375,7 +397,7 @@ class MeshFoliageMaterial extends ShaderMaterial {
 
         varying vec2 vUv;
         varying vec4 vColor;
-        varying float vLightLevel;
+        varying float vTipWeight;
 
         void main() {
           vec4 texColor = texture2D(${UNIFORM_TEXTURE_ATLAS}, vUv);
@@ -384,9 +406,10 @@ class MeshFoliageMaterial extends ShaderMaterial {
           }
 
           vec3 ambientLight = ${UNIFORM_RAW_AMBIENT_LIGHT_COLOR} * ${UNIFORM_AMBIENT_LIGHT_INTENSITY};
-          vec3 litColor = texColor.rgb * vColor.rgb * ambientLight;
+          float bladeGradient = mix(0.72, 1.0, clamp(vTipWeight, 0.0, 1.0));
+          vec3 litColor = texColor.rgb * vColor.rgb * ambientLight * bladeGradient;
 
-          gl_FragColor = vec4(litColor, texColor.a * vColor.a);
+          gl_FragColor = vec4(litColor, texColor.a);
         }
       `,
       side: DoubleSide,
