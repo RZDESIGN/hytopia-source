@@ -41,7 +41,6 @@ import { GameplayDistanceBlurPass } from '../three/postprocessing/GameplayDistan
 import { WhiteCoreBloomPass } from '../three/postprocessing/WhiteCoreBloomPass';
 import { SelectiveOutlinePass } from '../three/postprocessing/SelectiveOutlinePass';
 import { WATER_SURFACE_Y_OFFSET } from '../blocks/BlockConstants';
-import DebugPanel from './DebugPanel';
 import Chunk from '../chunks/Chunk';
 import Assets from '../network/Assets';
 import EventRouter from '../events/EventRouter';
@@ -53,6 +52,7 @@ import { getTransparentSortKey, lerpColor } from '../three/utils';
 import { CSS2DObject, CSS2DRenderer } from '../three/CSS2DRenderer';
 import type Entity from '../entities/Entity';
 import { type ClientSettingsEventPayload, ClientSettingsEventType } from '../settings/SettingsManager';
+import type DebugPanel from './DebugPanel';
 
 const MISSING_SKYBOX_TEXTURE_PATH = '/textures/missing-skybox';
 // Cap internal render target pixel count to avoid severe fullscreen slowdowns on
@@ -245,7 +245,8 @@ export default class Renderer {
   private _lastWaterReflectionViewDir: Vector3 = new Vector3();
   private _pendingSkyboxTexture: Promise<CubeTexture> | null = null;
   private _debugVisible: boolean = false;
-  private _debugPanel: DebugPanel;
+  private _debugPanel: DebugPanel | null = null;
+  private _debugPanelLoadPromise: Promise<DebugPanel | null> | null = null;
   private _effectComposer: EffectComposer;
   private _renderPass: RenderPass;
   private _viewModelRenderPass: RenderPass;
@@ -344,11 +345,8 @@ export default class Renderer {
     this._setupPostProcessing();
     this._setupEventListeners();
 
-    this._debugPanel = new DebugPanel(game);
-
     if (game.inDebugMode) {
-      this._debugVisible = true;
-      this._debugPanel.setVisibility(true);
+      void this.toggleDebug();
     }
   }
 
@@ -444,9 +442,17 @@ export default class Renderer {
     this._animate();
   }
 
-  public toggleDebug(): void {
-    this._debugVisible = !this._debugVisible;
-    this._debugPanel.setVisibility(this._debugVisible);
+  public async toggleDebug(): Promise<void> {
+    const nextVisible = !this._debugVisible;
+    this._debugVisible = nextVisible;
+
+    const debugPanel = await this._ensureDebugPanelLoaded();
+    if (!debugPanel) {
+      this._debugVisible = false;
+      return;
+    }
+
+    debugPanel.setVisibility(nextVisible);
   }
 
   private _animate = (): void => {
@@ -540,7 +546,30 @@ export default class Renderer {
     }
     this._renderScreenOverlays();
 
-    this._debugPanel.update();
+    this._debugPanel?.update();
+  }
+
+  private async _ensureDebugPanelLoaded(): Promise<DebugPanel | null> {
+    if (this._debugPanel) {
+      return this._debugPanel;
+    }
+
+    if (!this._debugPanelLoadPromise) {
+      this._debugPanelLoadPromise = import('./DebugPanel')
+        .then(({ default: DebugPanel }) => {
+          this._debugPanel = new DebugPanel(this._game);
+          return this._debugPanel;
+        })
+        .catch((error) => {
+          console.error('Renderer: Failed to load debug panel.', error);
+          return null;
+        })
+        .finally(() => {
+          this._debugPanelLoadPromise = null;
+        });
+    }
+
+    return this._debugPanelLoadPromise;
   }
 
   private _loadSkyboxTexture(skyboxBaseUrl: string): Promise<CubeTexture> {
@@ -727,13 +756,13 @@ export default class Renderer {
 
   private _onKeyDown = (event: KeyboardEvent): void => {
     if (event.key === '`' || event.key === 'F3') {
-      this.toggleDebug();
+      void this.toggleDebug();
     }
   }
 
   private _onTouchStart = (event: TouchEvent): void => {
     if (event.touches.length >= 5) {
-      this.toggleDebug();
+      void this.toggleDebug();
     }
   }
 

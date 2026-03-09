@@ -2,9 +2,6 @@
  * Simple modal system to replace browser alert() and prompt() calls.
  * Returns Promises to handle async user interactions properly.
  */
-
-import QRCode from 'qrcode';
-
 let container: HTMLDivElement | null = null;
 const DEFAULT_LOCAL_SERVER_HOSTNAMES = [ 'local.hytopiahosting.com:8080' ];
 const DEFAULT_LOCAL_SERVER_PORT = 8080;
@@ -445,6 +442,7 @@ export function modalPrompt(message: string, defaultValue = '', options: ModalPr
       };
 
       const renderQr = async (joinTarget: string): Promise<void> => {
+        const { default: QRCode } = await import('qrcode');
         const mobileJoinUrl = createMobileJoinUrl(joinTarget, localPort);
 
         await QRCode.toCanvas(qrCanvas, mobileJoinUrl, {

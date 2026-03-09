@@ -1,16 +1,15 @@
 import Game from './Game';
 import PerformanceMetricsManager from './core/PerformanceMetricsManager';
 
-// Start mathcmaking heartbeat
-import './services/hytopia/heartbeat';
-
-// Load UI Library Global, for dev-provided UI
-import './ui/globals/hytopia';
-
-// Initialize profanity filter
-import './services/hytopia/profanityFilter';
-
 (async () => {
+  const params = new URLSearchParams(window.location.search);
+
+  if (params.has('sessionToken') && params.has('lobbyId')) {
+    void import('./services/hytopia/heartbeat').catch((error) => {
+      console.error('Failed to start HYTOPIA heartbeat.', error);
+    });
+  }
+
   // To measure a more accurate refresh rate, we do so before starting the game.
   // Concerns:
   // * This may delay the game start slightly — will it affect user experience? The delay is likely

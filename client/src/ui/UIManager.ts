@@ -2,7 +2,6 @@ import Assets from '../network/Assets';
 import { DeserializedSceneUI } from '../network/Deserializer';
 import Game from '../Game';
 import EventRouter from '../events/EventRouter';
-import Nametag from './templates/Nametag';
 import { NetworkManagerEventType } from '../network/NetworkManager';
 import SceneUI from './SceneUI';
 import SceneUIStats from './SceneUIStats';
@@ -37,6 +36,7 @@ export default class UIManager {
   private _sceneUIRefreshRequested: boolean = true;
   private _uiDiv: HTMLDivElement;
   private _uiLoadPromise: Promise<void>;
+  private _uiRuntimeReadyPromise: Promise<void> | null = null;
 
   public constructor(game: Game) {
     this._game = game;
@@ -46,7 +46,6 @@ export default class UIManager {
 
     this._setupEventListeners();
     this._setupReliableClicks();
-    this._initializeTemplates();
   }
 
   public get uiDiv(): HTMLDivElement {
@@ -135,8 +134,22 @@ export default class UIManager {
     window.addEventListener('click', reset, true); // We must use "true" to ensure we capture the event even if another listener uses stopPropagation()
   }
 
-  private _initializeTemplates(): void {
-    Nametag.initialize();
+  private _ensureUIRuntimeReady(): Promise<void> {
+    if (!this._uiRuntimeReadyPromise) {
+      this._uiRuntimeReadyPromise = import('./globals/hytopia')
+        .then(() => import('./templates/Nametag'))
+        .then(({ default: Nametag }) => {
+          Nametag.initialize();
+          this._processPendingSceneUIs();
+        })
+        .catch((error) => {
+          this._uiRuntimeReadyPromise = null;
+          console.error('UIManager: Failed to initialize UI runtime.', error);
+          throw error;
+        });
+    }
+
+    return this._uiRuntimeReadyPromise;
   }
 
   public update = (): void => {
@@ -149,16 +162,20 @@ export default class UIManager {
   }
 
   private _onSceneUIsPacket = (payload: NetworkManagerEventPayload.ISceneUIsPacket): void => {
-    for (const deserializedSceneUI of payload.deserializedSceneUIs) {
-      this._updateSceneUI(deserializedSceneUI);
-    }
+    void this._ensureUIRuntimeReady().then(() => {
+      for (const deserializedSceneUI of payload.deserializedSceneUIs) {
+        this._updateSceneUI(deserializedSceneUI);
+      }
+    });
   }
 
   private _onUIPacket = (payload: NetworkManagerEventPayload.IUIPacket): void => {
     const { deserializedUI } = payload;
 
     if (deserializedUI.htmlUri) {
-      this._uiLoadPromise = fetch(Assets.toAssetUri(deserializedUI.htmlUri, import.meta.env.DEV))
+      const htmlUri = deserializedUI.htmlUri;
+      this._uiLoadPromise = this._ensureUIRuntimeReady()
+        .then(() => fetch(Assets.toAssetUri(htmlUri, import.meta.env.DEV)))
         .then(response => response.text())
         .then(html => {
           // cleanup for any previously loaded UI.
@@ -167,8 +184,8 @@ export default class UIManager {
           // as nametags or other future client data handlers we ship ourselves.
           // Refactoring our pattern for things like nametags or if we use
           // our own .on UI data handlers in the future would be wise.
-          hytopia.offAllData();
-          hytopia.unregisterLoadedSceneUITemplates();
+          globalThis.hytopia?.offAllData();
+          globalThis.hytopia?.unregisterLoadedSceneUITemplates();
 
           html = html.replace(/\{\{CDN_ASSETS_URL\}\}/g, Assets.getCdnBaseUrl());
 
@@ -188,6 +205,8 @@ export default class UIManager {
       const appendHtmlUris = deserializedUI.appendHtmlUris; // scoped for promise
 
       this._uiLoadPromise = this._uiLoadPromise.then(async () => {
+        await this._ensureUIRuntimeReady();
+
         for (const htmlUri of appendHtmlUris) {
           const html = await fetch(Assets.toAssetUri(htmlUri, import.meta.env.DEV)).then(response => response.text());
           const wrapper = document.createElement('div');
@@ -221,7 +240,13 @@ export default class UIManager {
   }
 
   private _onUIDatasPacket = async (payload: NetworkManagerEventPayload.IUIDatasPacket): Promise<void> => {
+    await this._ensureUIRuntimeReady();
     await this._uiLoadPromise;
+
+    const hytopia = globalThis.hytopia;
+    if (!hytopia) {
+      return;
+    }
 
     for (const data of payload.deserializedUIDatas) {
       hytopia.emitData(data);
@@ -230,6 +255,16 @@ export default class UIManager {
   }
 
   private _updateSceneUI = (deserializedSceneUI: DeserializedSceneUI): void => {
+    const hytopia = globalThis.hytopia;
+
+    if (!hytopia) {
+      if (deserializedSceneUI.id !== undefined) {
+        this._pendingSceneUIs.set(deserializedSceneUI.id, { ...deserializedSceneUI });
+        this._sceneUIRefreshRequested = true;
+      }
+      return;
+    }
+
     let sceneUI = this._sceneUIs.get(deserializedSceneUI.id);
 
     if (!sceneUI) {
@@ -314,6 +349,11 @@ export default class UIManager {
 
   /** Process pending SceneUIs whose templates are now registered. FIFO order. */
   private _processPendingSceneUIs(): void {
+    const hytopia = globalThis.hytopia;
+    if (!hytopia) {
+      return;
+    }
+
     for (const [id, pending] of this._pendingSceneUIs) {
       if (!pending.templateId) continue;
       if (hytopia.hasSceneUITemplateRenderer(pending.templateId)) {

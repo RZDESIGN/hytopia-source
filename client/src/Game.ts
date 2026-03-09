@@ -10,7 +10,6 @@ import ChunkMeshManager from './chunks/ChunkMeshManager';
 import LightLevelManager from './chunks/LightLevelManager';
 import SkyDistanceVolumeManager from './chunks/SkyDistanceVolumeManager';
 import CustomTextureManager from './textures/CustomTextureManager';
-import DebugRenderer from './core/DebugRenderer';
 import EntityManager from './entities/EntityManager';
 import GLTFManager from './gltf/GLTFManager';
 import InputManager from './input/InputManager';
@@ -25,6 +24,7 @@ import Renderer from './core/Renderer';
 import SettingsManager from './settings/SettingsManager';
 import UIManager from './ui/UIManager';
 import ChunkWorkerClient from './workers/ChunkWorkerClient';
+import type DebugRenderer from './core/DebugRenderer';
 
 const DEBUG_QUERY_STRINGS = 'debug';
 
@@ -43,7 +43,7 @@ export default class Game {
   private _chunkMeshManager: ChunkMeshManager;
   private _chunkWorkerClient: ChunkWorkerClient;
   private _customTextureManager: CustomTextureManager;
-  private _debugRenderer: DebugRenderer;
+  private _debugRenderer: DebugRenderer | null = null;
   private _entityManager: EntityManager;
   private _gltfManager: GLTFManager;
   private _inputManager: InputManager;
@@ -80,7 +80,6 @@ export default class Game {
     this._chunkManager = new ChunkManager(this);
     this._chunkMeshManager = new ChunkMeshManager(this);
     this._customTextureManager = new CustomTextureManager();
-    this._debugRenderer = new DebugRenderer(this);
     this._entityManager = new EntityManager(this);    
     this._lightManager = new LightManager(this);
     this._gltfManager = new GLTFManager(this);
@@ -111,7 +110,7 @@ export default class Game {
   public get chunkMeshManager(): ChunkMeshManager { return this._chunkMeshManager; }
   public get chunkWorkerClient(): ChunkWorkerClient { return this._chunkWorkerClient; }
   public get customTextureManager(): CustomTextureManager { return this._customTextureManager; }
-  public get debugRenderer(): DebugRenderer { return this._debugRenderer; }
+  public get debugRenderer(): DebugRenderer | null { return this._debugRenderer; }
   public get entityManager(): EntityManager { return this._entityManager; }
   public get gltfManager(): GLTFManager { return this._gltfManager; }
   public get inputManager(): InputManager { return this._inputManager; }
@@ -129,6 +128,16 @@ export default class Game {
   public get uiManager(): UIManager { return this._uiManager; }
 
   public async start(): Promise<void> {
+    if (this.inDebugMode) {
+      void import('./core/DebugRenderer')
+        .then(({ default: DebugRenderer }) => {
+          this._debugRenderer = new DebugRenderer(this);
+        })
+        .catch((error) => {
+          console.error('Game: Failed to load debug renderer.', error);
+        });
+    }
+
     this._renderer.start();
     await this._networkManager.connect();
     this._blockTextureAtlasManager.init();

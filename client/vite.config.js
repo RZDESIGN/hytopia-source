@@ -65,6 +65,66 @@ const localIpEndpointPlugin = () => ({
 
 const assetProxyTarget = process.env.VITE_ASSET_PROXY_TARGET;
 
+const manualChunks = (id) => {
+  if (!id.includes('node_modules')) {
+    return undefined;
+  }
+
+  if (
+    id.includes('lil-gui')
+    || id.includes('stats.module.js')
+  ) {
+    return 'debug-tools';
+  }
+
+  if (id.includes('nipplejs')) {
+    return 'mobile-controls';
+  }
+
+  if (id.includes('qrcode')) {
+    return 'qr-tools';
+  }
+
+  if (
+    id.includes('msgpackr')
+    || id.includes('@msgpack')
+    || id.includes('fflate')
+  ) {
+    return 'network-codecs';
+  }
+
+  if (id.includes('obscenity')) {
+    return 'text-safety';
+  }
+
+  if (
+    id.includes('@hytopia.com/lib')
+    || id.includes('@hytopia.com/server-protocol')
+    || id.includes('@hytopia.com/translations')
+  ) {
+    return 'hytopia-sdk';
+  }
+
+  if (
+    id.includes('three/addons/loaders')
+    || id.includes('three/examples/jsm/loaders')
+    || id.includes('three/examples/jsm/libs/draco')
+    || id.includes('three/examples/jsm/libs/basis')
+  ) {
+    return 'three-loaders';
+  }
+
+  if (id.includes('three/examples/jsm/postprocessing') || id.includes('three/examples/jsm/shaders')) {
+    return 'three-postprocessing';
+  }
+
+  if (id.includes('three')) {
+    return 'three-core';
+  }
+
+  return 'vendor';
+};
+
 export default {
   resolve: {
     alias: {
@@ -88,7 +148,12 @@ export default {
     'import.meta.env.VITE_VERCEL_GIT_COMMIT_SHA': JSON.stringify(process.env.VERCEL_GIT_COMMIT_SHA),
   },
   build: {
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks,
+      },
+    },
   },
   worker: {
     format: 'es'
