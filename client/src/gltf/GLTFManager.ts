@@ -60,8 +60,6 @@ const TRANSPARENT_SORT_VIEW_ALIGNMENT_DOT_THRESHOLD = 0.9995;
 // repeated creating and deleting, negatively impacting performance.
 // Using different thresholds helps prevent this issue from occurring frequently.
 const INSTANCED_MESH_RESIZE_INCREASE_FACTOR = 4;
-const INSTANCED_MESH_RESIZE_DECREASE_FACTOR = 8;
-
 // Similar to InstancedTexture depth
 const INSTANCED_TEXTURE_RESIZE_INCREASE_FACTOR = 4;
 const INSTANCED_TEXTURE_RESIZE_DECREASE_FACTOR = 8;
@@ -683,7 +681,7 @@ export default class GLTFManager {
   private _registerClonedMesh(entry: GLTFEntry, sourceMesh: Mesh, clonedMesh: Mesh): SourceMeshCloneBuckets {
     const cloneBuckets = this._getOrCreateCloneBuckets(entry, sourceMesh);
     cloneBuckets.all.add(clonedMesh);
-    if ((clonedMesh.material as EmissiveMeshBasicMaterial).transparent) {
+    if (this._isMeshTransparent(clonedMesh)) {
       cloneBuckets.transparent.add(clonedMesh);
     } else {
       cloneBuckets.opaque.add(clonedMesh);
@@ -707,6 +705,201 @@ export default class GLTFManager {
       cloneBuckets.opaque.add(clonedMesh);
     }
     return cloneBuckets;
+  }
+
+  private _getMeshMaterials(mesh: Mesh): EmissiveMeshBasicMaterial[] {
+    return (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as EmissiveMeshBasicMaterial[];
+  }
+
+  private _isMeshTransparent(mesh: Mesh): boolean {
+    const materials = this._getMeshMaterials(mesh);
+    for (let i = 0; i < materials.length; i++) {
+      if (materials[i].transparent) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private _getMaterialPair(
+    clonedMesh: Mesh,
+    materialIndex: number,
+  ): {
+    sourceMesh: Mesh;
+    sourceMaterial: EmissiveMeshBasicMaterial;
+    clonedMaterial: EmissiveMeshBasicMaterial;
+  } {
+    const sourceMesh = this._clonedMeshToSourceMesh.get(clonedMesh);
+    if (!sourceMesh) {
+      throw new Error(`GLTFManager: Unknown cloned mesh ${clonedMesh.uuid}.`);
+    }
+
+    const sourceMaterials = this._getMeshMaterials(sourceMesh);
+    const clonedMaterials = this._getMeshMaterials(clonedMesh);
+    const sourceMaterial = sourceMaterials[materialIndex];
+    const clonedMaterial = clonedMaterials[materialIndex];
+
+    if (!sourceMaterial || !clonedMaterial) {
+      throw new Error(
+        `GLTFManager: Material index ${materialIndex} is out of range for cloned mesh ${clonedMesh.uuid}.`,
+      );
+    }
+
+    return { sourceMesh, sourceMaterial, clonedMaterial };
+  }
+
+  private _replaceClonedMaterialAt(
+    clonedMesh: Mesh,
+    materialIndex: number,
+    material: EmissiveMeshBasicMaterial,
+  ): void {
+    if (!Array.isArray(clonedMesh.material)) {
+      clonedMesh.material = material;
+      return;
+    }
+
+    const nextMaterials = clonedMesh.material.slice() as EmissiveMeshBasicMaterial[];
+    nextMaterials[materialIndex] = material;
+    clonedMesh.material = nextMaterials;
+  }
+
+  private _createInstancedMeshUsageState(): InstancedMeshUsageState {
+    return {
+      lastTransparentSortCameraPosX: Number.NaN,
+      lastTransparentSortCameraPosY: Number.NaN,
+      lastTransparentSortCameraPosZ: Number.NaN,
+      prevOpaqueIndex: -1,
+      prevTransparentIndex: -1,
+      lastTransparentSortFrame: -1,
+      lastTransparentSortCount: -1,
+      lastTransparentSortViewDirX: Number.NaN,
+      lastTransparentSortViewDirY: Number.NaN,
+      lastTransparentSortViewDirZ: Number.NaN,
+    };
+  }
+
+  private _getInstancedMeshCapacity(cloneCount: number): number {
+    if (cloneCount <= USE_INSTANCED_MESH_THRESHOLD) {
+      return 0;
+    }
+
+    let capacity = USE_INSTANCED_MESH_THRESHOLD * INSTANCED_MESH_RESIZE_INCREASE_FACTOR;
+    while (cloneCount > capacity) {
+      capacity *= INSTANCED_MESH_RESIZE_INCREASE_FACTOR;
+    }
+
+    return capacity;
+  }
+
+  private _createInstancedMeshPair(
+    sourceMesh: Mesh,
+    opaqueMaterial: InstancedMeshBasicMaterial,
+    transparentMaterial: InstancedMeshBasicMaterial,
+    count: number,
+  ): InstancedMeshPair {
+    return {
+      opaque: new InstancedMeshEx(sourceMesh.geometry.clone(), opaqueMaterial, count),
+      transparent: new InstancedMeshEx(sourceMesh.geometry.clone(), transparentMaterial, count),
+    };
+  }
+
+  private _disposeInstancedMeshPair(pair: InstancedMeshPair, disposeMaterials: boolean): void {
+    this._game.renderer.removeFromScene(pair.opaque);
+    this._game.renderer.removeFromScene(pair.transparent);
+    pair.opaque.dispose();
+    pair.opaque.geometry.dispose();
+    pair.transparent.dispose();
+    pair.transparent.geometry.dispose();
+
+    if (disposeMaterials) {
+      pair.opaque.material.dispose();
+      pair.transparent.material.dispose();
+    }
+  }
+
+  private _replaceInstancedMeshPair(
+    entry: GLTFEntry,
+    sourceMesh: Mesh,
+    count: number,
+    opaqueMaterial: InstancedMeshBasicMaterial,
+    transparentMaterial: InstancedMeshBasicMaterial,
+  ): void {
+    const existingPairs = entry.sourceToInstancedMeshes.get(sourceMesh) ?? [];
+    for (let i = 0; i < existingPairs.length; i++) {
+      this._disposeInstancedMeshPair(existingPairs[i], false);
+    }
+
+    existingPairs.length = 0;
+    existingPairs.push(this._createInstancedMeshPair(sourceMesh, opaqueMaterial, transparentMaterial, count));
+    entry.sourceToInstancedMeshes.set(sourceMesh, existingPairs);
+
+    const usage = entry.sourceToInstancedMeshUsageState.get(sourceMesh);
+    if (usage) {
+      usage.prevOpaqueIndex = -1;
+      usage.prevTransparentIndex = -1;
+      usage.lastTransparentSortFrame = -1;
+      usage.lastTransparentSortCount = -1;
+    }
+  }
+
+  private _materialMatchesSource(
+    clonedMaterial: EmissiveMeshBasicMaterial,
+    sourceMaterial: EmissiveMeshBasicMaterial,
+  ): boolean {
+    return clonedMaterial.transparent === sourceMaterial.transparent
+      && clonedMaterial.opacity === sourceMaterial.opacity
+      && clonedMaterial.alphaTest === sourceMaterial.alphaTest
+      && clonedMaterial.color.equals(sourceMaterial.color)
+      && clonedMaterial.customEmissive.equals(sourceMaterial.customEmissive)
+      && clonedMaterial.customEmissiveIntensity === sourceMaterial.customEmissiveIntensity
+      && clonedMaterial.map === sourceMaterial.map;
+  }
+
+  private _tryRestoreSharedMaterial(clonedMesh: Mesh, materialIndex: number = 0): boolean {
+    const { sourceMesh, sourceMaterial, clonedMaterial } = this._getMaterialPair(clonedMesh, materialIndex);
+
+    if (clonedMaterial === sourceMaterial) {
+      return false;
+    }
+
+    if (!this._materialMatchesSource(clonedMaterial, sourceMaterial)) {
+      return false;
+    }
+
+    if (!Array.isArray(clonedMesh.material) || !Array.isArray(sourceMesh.material)) {
+      clonedMesh.material = sourceMesh.material;
+      clonedMaterial.dispose();
+      return true;
+    }
+
+    const nextMaterials = clonedMesh.material.slice() as EmissiveMeshBasicMaterial[];
+    nextMaterials[materialIndex] = sourceMaterial;
+    const sourceMaterials = sourceMesh.material as EmissiveMeshBasicMaterial[];
+    const allShared = nextMaterials.length === sourceMaterials.length
+      && nextMaterials.every((material, index) => material === sourceMaterials[index]);
+
+    clonedMesh.material = allShared ? sourceMesh.material : nextMaterials;
+    clonedMaterial.dispose();
+    return true;
+  }
+
+  public ensureOwnMaterial(clonedMesh: Mesh, materialIndex: number = 0): EmissiveMeshBasicMaterial {
+    const { sourceMaterial, clonedMaterial } = this._getMaterialPair(clonedMesh, materialIndex);
+
+    if (clonedMaterial !== sourceMaterial) {
+      return clonedMaterial;
+    }
+
+    const uniqueMaterial = sourceMaterial.clone();
+
+    // Preserve non-serializable default material metadata for copy-on-write clones.
+    uniqueMaterial.userData = {
+      ...sourceMaterial.userData,
+    };
+
+    this._replaceClonedMaterialAt(clonedMesh, materialIndex, uniqueMaterial);
+    return uniqueMaterial;
   }
 
   private _createEntry(uri: string): void {
@@ -799,12 +992,17 @@ export default class GLTFManager {
     gltf.scene.traverse(obj => {
       if (obj instanceof Mesh) {
         obj.geometry.dispose();
-        obj.material.dispose();
+        const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
 
-        for (const key in obj.material) {
-          const value = obj.material[key];
-          if (value instanceof Texture) {
-            value.dispose();
+        for (let i = 0; i < materials.length; i++) {
+          const material = materials[i];
+          material.dispose();
+
+          for (const key in material) {
+            const value = material[key];
+            if (value instanceof Texture) {
+              value.dispose();
+            }
           }
         }
       }
@@ -840,69 +1038,44 @@ export default class GLTFManager {
 
         const cloneBuckets = this._getOrCreateCloneBuckets(entry, sourceMesh);
 
-        let instancedMeshPairs = entry.sourceToInstancedMeshes.get(sourceMesh);
-        const threshold = instancedMeshPairs?.[instancedMeshPairs.length - 1].opaque.instanceMatrix.count || USE_INSTANCED_MESH_THRESHOLD;
+        const skipInstancing = Array.isArray(sourceMesh.material) || Array.isArray(clonedMesh.material);
 
-        if (cloneBuckets.all.size + 1 > threshold) {
-          let opaqueMaterial: InstancedMeshBasicMaterial;
-          let transparentMaterial: InstancedMeshBasicMaterial;
-          const createdInstancedMeshes = !instancedMeshPairs;
+        if (!skipInstancing) {
+          const desiredCapacity = this._getInstancedMeshCapacity(cloneBuckets.all.size + 1);
+          const instancedMeshPairs = entry.sourceToInstancedMeshes.get(sourceMesh);
+          const currentCapacity = instancedMeshPairs?.[0]?.opaque.instanceMatrix.count ?? 0;
 
-          if (createdInstancedMeshes) {
-            // Layer management is handled in update() method
-            instancedMeshPairs = [];
-            entry.sourceToInstancedMeshes.set(sourceMesh, instancedMeshPairs);
-            entry.sourceToInstancedMeshUsageState.set(sourceMesh, {
-              lastTransparentSortCameraPosX: Number.NaN,
-              lastTransparentSortCameraPosY: Number.NaN,
-              lastTransparentSortCameraPosZ: Number.NaN,
-              prevOpaqueIndex: -1,
-              prevTransparentIndex: -1,
-              lastTransparentSortFrame: -1,
-              lastTransparentSortCount: -1,
-              lastTransparentSortViewDirX: Number.NaN,
-              lastTransparentSortViewDirY: Number.NaN,
-              lastTransparentSortViewDirZ: Number.NaN,
-            });
+          if (desiredCapacity > 0 && desiredCapacity !== currentCapacity) {
+            let opaqueMaterial: InstancedMeshBasicMaterial;
+            let transparentMaterial: InstancedMeshBasicMaterial;
+            const createdInstancedMeshes = !instancedMeshPairs;
 
-            opaqueMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as EmissiveMeshBasicMaterial, this._game);
-            opaqueMaterial.transparent = false;
-            transparentMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as EmissiveMeshBasicMaterial, this._game);
-            transparentMaterial.transparent = true;
+            if (createdInstancedMeshes) {
+              opaqueMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as EmissiveMeshBasicMaterial, this._game);
+              opaqueMaterial.transparent = false;
+              transparentMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as EmissiveMeshBasicMaterial, this._game);
+              transparentMaterial.transparent = true;
+              entry.sourceToInstancedMeshUsageState.set(sourceMesh, this._createInstancedMeshUsageState());
+              GLTFStats.instancedMeshCount++;
+            } else {
+              opaqueMaterial = instancedMeshPairs[0].opaque.material;
+              transparentMaterial = instancedMeshPairs[0].transparent.material;
+            }
 
-            GLTFStats.instancedMeshCount++;
-          } else {
-            const existingInstancedMeshPairs = instancedMeshPairs!;
-            opaqueMaterial = existingInstancedMeshPairs[0].opaque.material;
-            transparentMaterial = existingInstancedMeshPairs[0].transparent.material;
-          }
+            this._replaceInstancedMeshPair(entry, sourceMesh, desiredCapacity, opaqueMaterial, transparentMaterial);
+            this._updateShaderDefines(entry, sourceMesh);
 
-          const ensuredInstancedMeshPairs = instancedMeshPairs!;
-
-          // Ideally, the geometry instance should be reused, but in that case, there is no way to
-          // release the instanceOpacity WebGL buffer unless the geometry instance itself is disposed of.
-          // Since the geometry instance might still be used even after this InstancedMesh instance is disposed of,
-          // cloning was chosen as the best option.
-          // This issue stems from Three.js’s WebGL resource management constraints related to BufferAttribute,
-          // so it might be worth sending feedback to Three.js to explore potential improvements.
-          const newSize = threshold * INSTANCED_MESH_RESIZE_INCREASE_FACTOR;
-          const newPair: InstancedMeshPair = {
-            opaque: new InstancedMeshEx(sourceMesh.geometry.clone(), opaqueMaterial, newSize),
-            transparent: new InstancedMeshEx(sourceMesh.geometry.clone(), transparentMaterial, newSize)
-          };
-          ensuredInstancedMeshPairs.push(newPair);
-          this._updateShaderDefines(entry, sourceMesh);
-
-          if (createdInstancedMeshes) {
-            cloneBuckets.opaque.forEach(existingClonedMesh => {
-              this._setClonedMeshDefaultLayerEnabled(existingClonedMesh, false);
-            });
+            if (createdInstancedMeshes) {
+              cloneBuckets.opaque.forEach(existingClonedMesh => {
+                this._setClonedMeshDefaultLayerEnabled(existingClonedMesh, false);
+              });
+            }
           }
         }
 
         this._registerClonedMesh(entry, sourceMesh, clonedMesh);
 
-        if (entry.sourceToInstancedMeshes.has(sourceMesh) && !(clonedMesh.material as EmissiveMeshBasicMaterial).transparent) {
+        if (!skipInstancing && entry.sourceToInstancedMeshes.has(sourceMesh) && !(clonedMesh.material as EmissiveMeshBasicMaterial).transparent) {
           this._setClonedMeshDefaultLayerEnabled(clonedMesh, false);
         }
       }
@@ -935,48 +1108,47 @@ export default class GLTFManager {
         return;
       }
 
-      const clonedMaterial = clonedMesh.material as EmissiveMeshBasicMaterial;
-      const sourceMaterial = sourceMesh.material as EmissiveMeshBasicMaterial;
+      const sourceMaterials = this._getMeshMaterials(sourceMesh);
+      for (let materialIndex = 0; materialIndex < sourceMaterials.length; materialIndex++) {
+        const sourceMaterial = sourceMaterials[materialIndex];
 
-      if (!sourceMaterial.map) {
-        return;
+        if (!sourceMaterial.map) {
+          continue;
+        }
+
+        if (sourceMaterial.map.image === null || texture.image === null) {
+          throw new Error(`GLTFManager: Source texture ${sourceMaterial.map.uuid} or Custom texture ${texture.uuid} is not ready yet.`);
+        }
+
+        const sourceSize = getTextureSize(sourceMaterial.map);
+        const customSize = getTextureSize(texture);
+
+        if (sourceSize.width !== customSize.width || sourceSize.height !== customSize.height) {
+          throw new Error(`GLTFManager: Custom texture size ${customSize.width}x${customSize.height} doesn't match the original one ${sourceSize.width}x${sourceSize.height}, Custom texture: ${texture.uuid}.`);
+        }
+
+        if (!entry.sourceTextureToCustomTextures.has(sourceMaterial.map)) {
+          entry.sourceTextureToCustomTextures.set(sourceMaterial.map, new Map());
+        }
+        const clonedCustomTextures = entry.sourceTextureToCustomTextures.get(sourceMaterial.map)!;
+
+        if (!clonedCustomTextures.has(texture)) {
+          const clonedTexture = texture.clone();
+          clonedTexture.mapping = sourceMaterial.map.mapping;
+          clonedTexture.wrapS = sourceMaterial.map.wrapS;
+          clonedTexture.wrapT = sourceMaterial.map.wrapT;
+          clonedTexture.magFilter = sourceMaterial.map.magFilter;
+          clonedTexture.minFilter = sourceMaterial.map.minFilter;
+          clonedTexture.flipY = sourceMaterial.map.flipY;
+          clonedTexture.colorSpace = sourceMaterial.map.colorSpace;
+          clonedCustomTextures.set(texture, { referenceCount: 0, texture: clonedTexture });
+        }
+
+        const clonedCustomTextureEntry = clonedCustomTextures.get(texture)!;
+        const clonedMaterial = this.ensureOwnMaterial(clonedMesh, materialIndex);
+        clonedMaterial.map = clonedCustomTextureEntry.texture;
+        clonedCustomTextureEntry.referenceCount++;
       }
-
-      if (sourceMaterial.map.image === null || texture.image === null) {
-        // The promises for loading glTF model and custom texture should resolve only after they are ready
-        // but check just in case.
-        throw new Error(`GLTFManager: Source texture ${sourceMaterial.map.uuid} or Custom texture ${texture.uuid} is not ready yet.`);
-      }
-
-      const sourceSize = getTextureSize(sourceMaterial.map);
-      const customSize = getTextureSize(texture);
-
-      // Assumes that original texture size and custom texture size are same.
-      if (sourceSize.width !== customSize.width || sourceSize.height !== customSize.height) {
-        throw new Error(`GLTFManager: Custom texture size ${customSize.width}x${customSize.height} doesn't match the original one ${sourceSize.width}x${sourceSize.height}, Custom texture: ${texture.uuid}.`);
-      }
-
-      if (!entry.sourceTextureToCustomTextures.has(sourceMaterial.map)) {
-        entry.sourceTextureToCustomTextures.set(sourceMaterial.map, new Map());
-      }
-      const clonedCustomTextures = entry.sourceTextureToCustomTextures.get(sourceMaterial.map)!;
-
-      if (!clonedCustomTextures.has(texture)) {
-        const clonedTexture = texture.clone();
-        // CustomTexture is assumed to use the same texture parameters as the original.
-        clonedTexture.mapping = sourceMaterial.map.mapping;
-        clonedTexture.wrapS = sourceMaterial.map.wrapS;
-        clonedTexture.wrapT = sourceMaterial.map.wrapT;
-        clonedTexture.magFilter = sourceMaterial.map.magFilter;
-        clonedTexture.minFilter = sourceMaterial.map.minFilter;
-        clonedTexture.flipY = sourceMaterial.map.flipY;
-        clonedTexture.colorSpace = sourceMaterial.map.colorSpace;
-        clonedCustomTextures.set(texture, { referenceCount: 0, texture: clonedTexture });
-      }
-
-      const clonedCustomTextureEntry = clonedCustomTextures.get(texture)!;
-      clonedMaterial.map = clonedCustomTextureEntry.texture;
-      clonedCustomTextureEntry.referenceCount++;
     });
 
     entry.needsInstancedTextureRefresh = true;
@@ -1000,37 +1172,41 @@ export default class GLTFManager {
         return;
       }
 
-      const clonedMaterial = clonedMesh.material as EmissiveMeshBasicMaterial;
-      const sourceMaterial = sourceMesh.material as EmissiveMeshBasicMaterial;
+      const sourceMaterials = this._getMeshMaterials(sourceMesh);
+      for (let materialIndex = 0; materialIndex < sourceMaterials.length; materialIndex++) {
+        const sourceMaterial = sourceMaterials[materialIndex];
 
-      if (!sourceMaterial.map) {
-        return;
-      }
-
-      const clonedCustomTextures = entry.sourceTextureToCustomTextures.get(sourceMaterial.map);
-
-      if (!clonedCustomTextures) {
-        throw new Error(`GLTFManager.detachCustomTexture(): Source Texture ${sourceMaterial.map.uuid} has no custom textures.`);
-      }
-
-      const clonedCustomTextureEntry = clonedCustomTextures.get(texture);
-
-      if (!clonedCustomTextureEntry) {
-        throw new Error(`GLTFManager.detachCustomTexture(): Custom Texture ${texture.uuid} is not found for Source Texture ${sourceMaterial.map.uuid}.`);
-      }
-
-      clonedCustomTextureEntry.referenceCount--;
-
-      if (clonedCustomTextureEntry.referenceCount === 0) {
-        clonedCustomTextureEntry.texture.dispose();
-        clonedCustomTextures.delete(texture);
-
-        if (clonedCustomTextures.size === 0) {
-          entry.sourceTextureToCustomTextures.delete(sourceMaterial.map);
+        if (!sourceMaterial.map) {
+          continue;
         }
-      }
 
-      clonedMaterial.map = sourceMaterial.map;
+        const clonedCustomTextures = entry.sourceTextureToCustomTextures.get(sourceMaterial.map);
+
+        if (!clonedCustomTextures) {
+          throw new Error(`GLTFManager.detachCustomTexture(): Source Texture ${sourceMaterial.map.uuid} has no custom textures.`);
+        }
+
+        const clonedCustomTextureEntry = clonedCustomTextures.get(texture);
+
+        if (!clonedCustomTextureEntry) {
+          throw new Error(`GLTFManager.detachCustomTexture(): Custom Texture ${texture.uuid} is not found for Source Texture ${sourceMaterial.map.uuid}.`);
+        }
+
+        clonedCustomTextureEntry.referenceCount--;
+
+        if (clonedCustomTextureEntry.referenceCount === 0) {
+          clonedCustomTextureEntry.texture.dispose();
+          clonedCustomTextures.delete(texture);
+
+          if (clonedCustomTextures.size === 0) {
+            entry.sourceTextureToCustomTextures.delete(sourceMaterial.map);
+          }
+        }
+
+        const clonedMaterial = this.ensureOwnMaterial(clonedMesh, materialIndex);
+        clonedMaterial.map = sourceMaterial.map;
+        this._tryRestoreSharedMaterial(clonedMesh, materialIndex);
+      }
     });
 
     entry.needsInstancedTextureRefresh = true;
@@ -1063,12 +1239,8 @@ export default class GLTFManager {
 
       let meshCount = 0;
 
-      // In Scene.clone(), materials are not cloned; instead, the same material instances are reused.
-      // As a result, any changes made to one entity model would be applied to all entity models
-      // referencing the same model. To prevent this, materials are explicitly cloned here.
       clonedGltf.scene.traverse(obj => {
         if (obj instanceof Mesh) {
-          obj.material = obj.material.clone();
           meshCount++;
         }
       });
@@ -1155,50 +1327,59 @@ export default class GLTFManager {
           return;
         }
 
-        const clonedMaterial = clonedMesh.material as EmissiveMeshBasicMaterial;
-        const sourceMaterial = sourceMesh.material as EmissiveMeshBasicMaterial;
         const counters = entry.sourceToAttributeCounters.get(sourceMesh);
 
         if (!counters) {
           console.warn(`GLTFManager.release(): Client implementation error. counters not found for sourceMesh.`);
         } else {
-          if (clonedMaterial.opacity !== sourceMaterial.opacity) {
-            if (counters.nonDefaultOpacity > 0) {
-              counters.nonDefaultOpacity--;
-              if (counters.nonDefaultOpacity === 0) {
-                this._updateShaderDefines(entry, sourceMesh);
-              }
-            } else {
-              console.warn(`GLTFManager.release(): Client implementation error. nonDefaultOpacity counter is already 0.`);
-            }
-          }
+          const sourceMaterials = this._getMeshMaterials(sourceMesh);
+          const clonedMaterials = this._getMeshMaterials(clonedMesh);
 
-          if (!clonedMaterial.color.equals(sourceMaterial.color)) {
-            if (counters.nonDefaultColor > 0) {
-              counters.nonDefaultColor--;
-              if (counters.nonDefaultColor === 0) {
-                this._updateShaderDefines(entry, sourceMesh);
-              }
-            } else {
-              console.warn(`GLTFManager.release(): Client implementation error. nonDefaultColor counter is already 0.`);
+          for (let materialIndex = 0; materialIndex < clonedMaterials.length; materialIndex++) {
+            const clonedMaterial = clonedMaterials[materialIndex];
+            const sourceMaterial = sourceMaterials[materialIndex];
+            if (!sourceMaterial || clonedMaterial === sourceMaterial) {
+              continue;
             }
-          }
 
-          const emissiveColorDiffers = !clonedMaterial.customEmissive.equals(sourceMaterial.customEmissive);
-          const emissiveIntensityDiffers = clonedMaterial.customEmissiveIntensity !== sourceMaterial.customEmissiveIntensity;
-          if (emissiveColorDiffers || emissiveIntensityDiffers) {
-            if (counters.nonDefaultEmissive > 0) {
-              counters.nonDefaultEmissive--;
-              if (counters.nonDefaultEmissive === 0) {
-                this._updateShaderDefines(entry, sourceMesh);
+            if (clonedMaterial.opacity !== sourceMaterial.opacity) {
+              if (counters.nonDefaultOpacity > 0) {
+                counters.nonDefaultOpacity--;
+                if (counters.nonDefaultOpacity === 0) {
+                  this._updateShaderDefines(entry, sourceMesh);
+                }
+              } else {
+                console.warn(`GLTFManager.release(): Client implementation error. nonDefaultOpacity counter is already 0.`);
               }
-            } else {
-              console.warn(`GLTFManager.release(): Client implementation error. nonDefaultEmissive counter is already 0.`);
             }
+
+            if (!clonedMaterial.color.equals(sourceMaterial.color)) {
+              if (counters.nonDefaultColor > 0) {
+                counters.nonDefaultColor--;
+                if (counters.nonDefaultColor === 0) {
+                  this._updateShaderDefines(entry, sourceMesh);
+                }
+              } else {
+                console.warn(`GLTFManager.release(): Client implementation error. nonDefaultColor counter is already 0.`);
+              }
+            }
+
+            const emissiveColorDiffers = !clonedMaterial.customEmissive.equals(sourceMaterial.customEmissive);
+            const emissiveIntensityDiffers = clonedMaterial.customEmissiveIntensity !== sourceMaterial.customEmissiveIntensity;
+            if (emissiveColorDiffers || emissiveIntensityDiffers) {
+              if (counters.nonDefaultEmissive > 0) {
+                counters.nonDefaultEmissive--;
+                if (counters.nonDefaultEmissive === 0) {
+                  this._updateShaderDefines(entry, sourceMesh);
+                }
+              } else {
+                console.warn(`GLTFManager.release(): Client implementation error. nonDefaultEmissive counter is already 0.`);
+              }
+            }
+
+            clonedMaterial.dispose();
           }
         }
-
-        clonedMaterial.dispose();
 
         const cloneBuckets = entry.sourceToCloneBuckets.get(sourceMesh)!;
         cloneBuckets.all.delete(clonedMesh);
@@ -1208,32 +1389,31 @@ export default class GLTFManager {
 
         if (entry.sourceToInstancedMeshes.has(sourceMesh)) {
           const instancedMeshPairs = entry.sourceToInstancedMeshes.get(sourceMesh)!;
-          const threshold = instancedMeshPairs[instancedMeshPairs.length - 1].opaque.instanceMatrix.count / INSTANCED_MESH_RESIZE_DECREASE_FACTOR;
+          const currentPair = instancedMeshPairs[0];
+          const desiredCapacity = this._getInstancedMeshCapacity(cloneBuckets.all.size);
 
-          if (cloneBuckets.all.size <= threshold) {
-            const removedPair = instancedMeshPairs.pop()!;
-
-            removedPair.opaque.dispose();
-            removedPair.opaque.geometry.dispose();
-            removedPair.transparent.dispose();
-            removedPair.transparent.geometry.dispose();
-
-            this._game.renderer.removeFromScene(removedPair.opaque);
-            this._game.renderer.removeFromScene(removedPair.transparent);
-
-            if (instancedMeshPairs.length === 0) {
-              (removedPair.opaque.material as EmissiveMeshBasicMaterial).dispose();
-              (removedPair.transparent.material as EmissiveMeshBasicMaterial).dispose();
-
-              entry.sourceToInstancedMeshes.delete(sourceMesh);
-              cloneBuckets.all.forEach(clonedMesh => {
-                this._setClonedMeshDefaultLayerEnabled(clonedMesh, true);
-              });
-
-              entry.needsInstancedTextureRefresh = true;
-
-              GLTFStats.instancedMeshCount--;
+          if (desiredCapacity === 0) {
+            this._disposeInstancedMeshPair(currentPair, true);
+            entry.sourceToInstancedMeshes.delete(sourceMesh);
+            const usage = entry.sourceToInstancedMeshUsageState.get(sourceMesh);
+            if (usage) {
+              usage.prevOpaqueIndex = -1;
+              usage.prevTransparentIndex = -1;
             }
+            cloneBuckets.all.forEach((remainingClonedMesh) => {
+              this._setClonedMeshDefaultLayerEnabled(remainingClonedMesh, true);
+            });
+            entry.needsInstancedTextureRefresh = true;
+            GLTFStats.instancedMeshCount--;
+          } else if (desiredCapacity !== currentPair.opaque.instanceMatrix.count) {
+            this._replaceInstancedMeshPair(
+              entry,
+              sourceMesh,
+              desiredCapacity,
+              currentPair.opaque.material,
+              currentPair.transparent.material,
+            );
+            this._updateShaderDefines(entry, sourceMesh);
           }
         }
       }
@@ -1879,6 +2059,7 @@ export default class GLTFManager {
     newValue: number,
     oldTransparent: boolean,
     newTransparent: boolean,
+    materialIndex: number = 0,
   ): void {
     const sourceMesh = this._clonedMeshToSourceMesh.get(clonedMesh);
     if (!sourceMesh) {
@@ -1898,11 +2079,15 @@ export default class GLTFManager {
       return;
     }
 
-    const sourceMaterial = sourceMesh.material as MeshBasicMaterial;
+    const sourceMaterial = this._getMeshMaterials(sourceMesh)[materialIndex];
+    if (!sourceMaterial) {
+      console.warn(`GLTFManager.onMeshOpacityChanged(): Client implementation error. source material not found for materialIndex ${materialIndex}.`);
+      return;
+    }
     const wasDefault = oldValue === sourceMaterial.opacity;
     const isDefault = newValue === sourceMaterial.opacity;
 
-    if (oldTransparent !== newTransparent) {
+    if (!Array.isArray(sourceMesh.material) && !Array.isArray(clonedMesh.material) && oldTransparent !== newTransparent) {
       this._moveClonedMeshTransparencyBucket(entry, sourceMesh, clonedMesh, newTransparent);
       if (entry.sourceToInstancedMeshes.has(sourceMesh)) {
         this._setClonedMeshDefaultLayerEnabled(clonedMesh, newTransparent);
@@ -1924,9 +2109,13 @@ export default class GLTFManager {
         console.warn(`GLTFManager.onMeshOpacityChanged(): Client implementation error. nonDefaultOpacity counter is already 0.`);
       }
     }
+
+    if (isDefault && newTransparent === sourceMaterial.transparent) {
+      this._tryRestoreSharedMaterial(clonedMesh, materialIndex);
+    }
   }
 
-  public onMeshColorChanged(clonedMesh: Mesh, oldColor: Color, newColor: Color): void {
+  public onMeshColorChanged(clonedMesh: Mesh, oldColor: Color, newColor: Color, materialIndex: number = 0): void {
     const sourceMesh = this._clonedMeshToSourceMesh.get(clonedMesh);
     if (!sourceMesh) {
       console.warn(`GLTFManager.onMeshColorChanged(): Client implementation error. sourceMesh not found for clonedMesh.`);
@@ -1945,7 +2134,11 @@ export default class GLTFManager {
       return;
     }
 
-    const sourceMaterial = sourceMesh.material as MeshBasicMaterial;
+    const sourceMaterial = this._getMeshMaterials(sourceMesh)[materialIndex];
+    if (!sourceMaterial) {
+      console.warn(`GLTFManager.onMeshColorChanged(): Client implementation error. source material not found for materialIndex ${materialIndex}.`);
+      return;
+    }
     const wasDefault = oldColor.equals(sourceMaterial.color);
     const isDefault = newColor.equals(sourceMaterial.color);
 
@@ -1964,12 +2157,17 @@ export default class GLTFManager {
         console.warn(`GLTFManager.onMeshColorChanged(): Client implementation error. nonDefaultColor counter is already 0.`);
       }
     }
+
+    if (isDefault) {
+      this._tryRestoreSharedMaterial(clonedMesh, materialIndex);
+    }
   }
 
   public onMeshEmissiveChanged(
     clonedMesh: Mesh,
     oldColor: Color, newColor: Color,
     oldIntensity: number, newIntensity: number,
+    materialIndex: number = 0,
   ): void {
     const sourceMesh = this._clonedMeshToSourceMesh.get(clonedMesh);
     if (!sourceMesh) {
@@ -1989,7 +2187,11 @@ export default class GLTFManager {
       return;
     }
 
-    const sourceMaterial = sourceMesh.material as EmissiveMeshBasicMaterial;
+    const sourceMaterial = this._getMeshMaterials(sourceMesh)[materialIndex];
+    if (!sourceMaterial) {
+      console.warn(`GLTFManager.onMeshEmissiveChanged(): Client implementation error. source material not found for materialIndex ${materialIndex}.`);
+      return;
+    }
     const wasDefault = oldColor.equals(sourceMaterial.customEmissive) &&
                        oldIntensity === sourceMaterial.customEmissiveIntensity;
     const isDefault = newColor.equals(sourceMaterial.customEmissive) &&
@@ -2009,6 +2211,10 @@ export default class GLTFManager {
       } else {
         console.warn(`GLTFManager.onMeshEmissiveChanged(): Client implementation error. nonDefaultEmissive counter is already 0.`);
       }
+    }
+
+    if (isDefault) {
+      this._tryRestoreSharedMaterial(clonedMesh, materialIndex);
     }
   }
 

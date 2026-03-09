@@ -29,7 +29,9 @@ export default class ChunkMeshManager {
   private _batchTransparentSolidMeshes: Map<BatchId, Mesh<BufferGeometry, Material>> = new Map();
   // Track all batch IDs for efficient iteration
   private _batchIds: Set<BatchId> = new Set();
+  private _foliageMeshesInScene: Mesh<BufferGeometry, ShaderMaterial>[] = [];
   private _liquidMeshesInScene: Mesh<BufferGeometry, ShaderMaterial>[] = [];
+  private _nearbyReflectionMeshes: Mesh<BufferGeometry, Material | ShaderMaterial>[] = [];
   private _nearbySolidMeshes: Mesh<BufferGeometry, Material>[] = [];
   private _solidMeshesInScene: Mesh<BufferGeometry, Material>[] = [];
   private _solidMeshesInSceneDirty: boolean = true;
@@ -361,6 +363,18 @@ export default class ChunkMeshManager {
     return this._liquidMeshesInScene;
   }
 
+  public get foliageMeshesInScene(): Mesh<BufferGeometry, ShaderMaterial>[] {
+    this._foliageMeshesInScene.length = 0;
+
+    for (const mesh of this._batchFoliageMeshes.values()) {
+      if (mesh.parent) {
+        this._foliageMeshesInScene.push(mesh);
+      }
+    }
+
+    return this._foliageMeshesInScene;
+  }
+
   public getSolidMeshesNear(worldPosition: { x: number, y: number, z: number }, maxDistance: number): Mesh<BufferGeometry, Material>[] {
     const nearbySolidMeshes = this._nearbySolidMeshes;
     nearbySolidMeshes.length = 0;
@@ -394,6 +408,47 @@ export default class ChunkMeshManager {
     }
 
     return nearbySolidMeshes;
+  }
+
+  public getReflectionCandidateMeshesNear(
+    worldPosition: { x: number, y: number, z: number },
+    maxDistance: number,
+  ): Mesh<BufferGeometry, Material | ShaderMaterial>[] {
+    const nearbyMeshes = this._nearbyReflectionMeshes;
+    nearbyMeshes.length = 0;
+
+    const searchPadding = BATCH_WORLD_SIZE;
+    const minX = Math.floor((worldPosition.x - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxX = Math.floor((worldPosition.x + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const minY = Math.floor((worldPosition.y - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxY = Math.floor((worldPosition.y + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const minZ = Math.floor((worldPosition.z - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxZ = Math.floor((worldPosition.z + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+
+    for (let x = minX; x <= maxX; x += BATCH_WORLD_SIZE) {
+      for (let y = minY; y <= maxY; y += BATCH_WORLD_SIZE) {
+        for (let z = minZ; z <= maxZ; z += BATCH_WORLD_SIZE) {
+          const batchId = `${x},${y},${z}` as BatchId;
+          const foliageMesh = this._batchFoliageMeshes.get(batchId);
+          const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
+          const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
+
+          if (foliageMesh?.parent) {
+            nearbyMeshes.push(foliageMesh);
+          }
+
+          if (opaqueSolidMesh?.parent) {
+            nearbyMeshes.push(opaqueSolidMesh);
+          }
+
+          if (transparentSolidMesh?.parent) {
+            nearbyMeshes.push(transparentSolidMesh);
+          }
+        }
+      }
+    }
+
+    return nearbyMeshes;
   }
 
   public get opaqueSolidMeshes(): IterableIterator<Mesh<BufferGeometry, Material>> {

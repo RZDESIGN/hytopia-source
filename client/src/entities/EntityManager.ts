@@ -178,6 +178,8 @@ export default class EntityManager {
   private _dynamicEntityListDirty: boolean = false;
   private _inViewDistanceDynamicEntityList: Entity[] = [];
   private _visibleDynamicEntityList: Entity[] = [];
+  private _reflectionObjectsInScene: Object3D[] = [];
+  private _nearbyReflectionObjects: Object3D[] = [];
   private _outlines: Map<EntityId, OutlineOptions> = new Map();
   private _outlineTargets: OutlineTarget[] = new Array(MAX_OUTLINES).fill(undefined).map(() => { return { object3d: null, options: null }; });
   private _staticEnvironmentEntityManager: StaticEntityManager;
@@ -253,9 +255,57 @@ export default class EntityManager {
   public get count(): number { return this._entities.size; }
   public get hasOutlines(): boolean { return this._outlines.size > 0; }
   public get hasLightLevelVolumeUpdatedOnce(): boolean { return this._hasLightLevelVolumeUpdatedOnce; }
+  public get reflectionObjectsInScene(): Object3D[] {
+    const reflectionObjects = this._reflectionObjectsInScene;
+    reflectionObjects.length = 0;
+
+    for (let i = 0; i < this._inViewDistanceDynamicEntityList.length; i++) {
+      const entity = this._inViewDistanceDynamicEntityList[i];
+      if (!entity.attached && entity.entityRoot.parent !== null && entity.entityRoot.visible) {
+        reflectionObjects.push(entity.entityRoot);
+      }
+    }
+
+    const staticMeshes = this._staticEnvironmentEntityManager.instancedMeshesInScene;
+    for (let i = 0; i < staticMeshes.length; i++) {
+      reflectionObjects.push(staticMeshes[i]);
+    }
+
+    return reflectionObjects;
+  }
 
   public getEntity(id: number): Entity | StaticEntity | undefined {
     return this._entities.get(id);
+  }
+
+  public getReflectionCandidateObjectsNear(
+    worldPosition: { x: number; y: number; z: number },
+    maxDistance: number,
+  ): Object3D[] {
+    const nearbyObjects = this._nearbyReflectionObjects;
+    nearbyObjects.length = 0;
+
+    for (let i = 0; i < this._inViewDistanceDynamicEntityList.length; i++) {
+      const entity = this._inViewDistanceDynamicEntityList[i];
+      if (entity.attached) {
+        continue;
+      }
+
+      const limit = maxDistance + entity.approximateRadius;
+      const dx = entity.position.x - worldPosition.x;
+      const dy = entity.position.y - worldPosition.y;
+      const dz = entity.position.z - worldPosition.z;
+      if (dx * dx + dy * dy + dz * dz <= limit * limit) {
+        nearbyObjects.push(entity.entityRoot);
+      }
+    }
+
+    const staticMeshes = this._staticEnvironmentEntityManager.getReflectionCandidateMeshesNear(worldPosition, maxDistance);
+    for (let i = 0; i < staticMeshes.length; i++) {
+      nearbyObjects.push(staticMeshes[i]);
+    }
+
+    return nearbyObjects;
   }
 
   // TODO: O(1) operation

@@ -257,7 +257,8 @@ export class Arrow {
   }
 
   private _areGroundShadowsEnabled(): boolean {
-    return this._game.settingsManager.qualityPerfTradeoff.blobShadows?.enabled ?? false;
+    const quality = this._game.settingsManager.qualityPerfTradeoff;
+    return (quality.blobShadows?.enabled ?? false) && !(quality.shadows?.enabled ?? false);
   }
 
   public update(deltaTimeS: number): void {

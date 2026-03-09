@@ -489,8 +489,8 @@ export default class BlockMaterialManager {
     );
   }
 
-  public cloneTransparentNonLitMaterial(): MeshBlockMaterial {
-    const clonedMaterial = this._transparentNonLitMaterial.clone();
+  public cloneNonLitMaterial(transparent: boolean): MeshBlockMaterial {
+    const clonedMaterial = (transparent ? this._transparentNonLitMaterial : this._opaqueNonLitMaterial).clone();
 
     // If the texture is not ready yet, it must be set once it becomes available.
     // If we could create the BlockTextureAtlas texture instance synchronously,
@@ -500,5 +500,13 @@ export default class BlockMaterialManager {
     }
 
     return clonedMaterial;
+  }
+
+  public cloneTransparentNonLitMaterial(): MeshBlockMaterial {
+    return this.cloneNonLitMaterial(true);
+  }
+
+  public isSharedNonLitMaterial(material: unknown): boolean {
+    return material === this._opaqueNonLitMaterial || material === this._transparentNonLitMaterial;
   }
 }

@@ -96,6 +96,7 @@ const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_HIGH = 0.9992;
 const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_MEDIUM = 0.9984;
 const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_LOW = 0.9972;
 const WATER_REFLECTION_MAX_DISTANCE = 84;
+const WATER_REFLECTION_MIN_SCENE_COVERAGE = 0.18;
 
 // Working variables
 const color = new Color();
@@ -116,6 +117,9 @@ const waterReflectionView = new Vector3();
 const waterReflectionTarget = new Vector3();
 const waterReflectionLookAtPosition = new Vector3(0, 0, -1);
 const waterReflectionRotationMatrix = new Matrix4();
+const waterReflectionVisibleObjectSet: Set<Object3D> = new Set();
+const waterReflectionTemporarilyHiddenObjects: Object3D[] = [];
+const waterReflectionTemporarilyAddedObjects: Array<{ object: Object3D; wasVisible: boolean }> = [];
 const waterReflectionTextureMatrixBias = new Matrix4().set(
   0.5, 0.0, 0.0, 0.5,
   0.0, 0.5, 0.0, 0.5,
@@ -484,14 +488,15 @@ export default class Renderer {
     this._renderer.info.reset();
     const pp = this._game.settingsManager.qualityPerfTradeoff.postProcessing ?? {};
     const hasGameplayDistanceBlur = this._gameplayDistanceBlurPass.enabled;
-    if (pp?.outline || pp?.bloom || pp?.smaa || hasGameplayDistanceBlur) {
-      const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
+    const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
+    const shouldUsePostProcessing = hasOutlineTargets || !!pp.bloom || !!pp.smaa || hasGameplayDistanceBlur;
+    if (shouldUsePostProcessing) {
       this._renderPass.camera = this._game.camera.activeCamera;
       // Keep the first-person view model out of the full-screen post stack so
       // weapon/hand motion does not pay for bloom/SMAA passes every frame.
       this._viewModelRenderPass.enabled = false;
       this._gameplayDistanceBlurPass.enabled = hasGameplayDistanceBlur;
-      this._outlinePass.enabled = !!pp.outline;
+      this._outlinePass.enabled = hasOutlineTargets;
       this._bloomPass.enabled = !!pp.bloom;
       this._smaaPass.enabled = !!pp.smaa;
       if (hasOutlineTargets) {
@@ -1117,6 +1122,96 @@ export default class Renderer {
     this._game.blockMaterialManager.setLiquidReflection(null, this._waterReflectionTextureMatrix.identity(), false);
   }
 
+  private _hideDistantSceneObjectsForWaterReflection(activeCamera: PerspectiveCamera): void {
+    const nearbyChunkMeshes = this._game.chunkMeshManager.getReflectionCandidateMeshesNear(
+      activeCamera.position,
+      WATER_REFLECTION_MAX_DISTANCE,
+    );
+    const nearbyEntityObjects = this._game.entityManager.getReflectionCandidateObjectsNear(
+      activeCamera.position,
+      WATER_REFLECTION_MAX_DISTANCE,
+    );
+
+    waterReflectionVisibleObjectSet.clear();
+    for (let i = 0; i < nearbyChunkMeshes.length; i++) {
+      waterReflectionVisibleObjectSet.add(nearbyChunkMeshes[i]);
+    }
+    for (let i = 0; i < nearbyEntityObjects.length; i++) {
+      waterReflectionVisibleObjectSet.add(nearbyEntityObjects[i]);
+    }
+
+    waterReflectionTemporarilyHiddenObjects.length = 0;
+    waterReflectionTemporarilyAddedObjects.length = 0;
+
+    const frameCount = this._game.performanceMetricsManager.frameCount;
+    for (let i = 0; i < nearbyEntityObjects.length; i++) {
+      const object = nearbyEntityObjects[i];
+      if (object.parent !== null) {
+        continue;
+      }
+
+      const wasVisible = object.visible;
+      object.visible = true;
+      this._scene.add(object);
+
+      const entity = object.userData.entityRef as Entity | undefined;
+      if (entity) {
+        entity.updateAnimationAndLocalMatrix(0, frameCount);
+        entity.updateWorldMatrices(this._game.entityManager.hasLightLevelVolumeUpdatedOnce, false);
+        entity.applyShadowCasterLod();
+      } else {
+        object.updateMatrixWorld(true);
+      }
+
+      waterReflectionTemporarilyAddedObjects.push({ object, wasVisible });
+    }
+
+    const solidMeshes = this._game.chunkMeshManager.solidMeshesInScene;
+    for (let i = 0; i < solidMeshes.length; i++) {
+      const mesh = solidMeshes[i];
+      if (!waterReflectionVisibleObjectSet.has(mesh) && mesh.visible) {
+        mesh.visible = false;
+        waterReflectionTemporarilyHiddenObjects.push(mesh);
+      }
+    }
+
+    const foliageMeshes = this._game.chunkMeshManager.foliageMeshesInScene;
+    for (let i = 0; i < foliageMeshes.length; i++) {
+      const mesh = foliageMeshes[i];
+      if (!waterReflectionVisibleObjectSet.has(mesh) && mesh.visible) {
+        mesh.visible = false;
+        waterReflectionTemporarilyHiddenObjects.push(mesh);
+      }
+    }
+
+    const reflectionObjects = this._game.entityManager.reflectionObjectsInScene;
+    for (let i = 0; i < reflectionObjects.length; i++) {
+      const object = reflectionObjects[i];
+      if (!waterReflectionVisibleObjectSet.has(object) && object.visible) {
+        object.visible = false;
+        waterReflectionTemporarilyHiddenObjects.push(object);
+      }
+    }
+  }
+
+  private _restoreHiddenSceneObjectsForWaterReflection(): void {
+    for (let i = 0; i < waterReflectionTemporarilyHiddenObjects.length; i++) {
+      waterReflectionTemporarilyHiddenObjects[i].visible = true;
+    }
+
+    for (let i = 0; i < waterReflectionTemporarilyAddedObjects.length; i++) {
+      const { object, wasVisible } = waterReflectionTemporarilyAddedObjects[i];
+      if (object.parent === this._scene) {
+        this._scene.remove(object);
+      }
+      object.visible = wasVisible;
+    }
+
+    waterReflectionTemporarilyHiddenObjects.length = 0;
+    waterReflectionTemporarilyAddedObjects.length = 0;
+    waterReflectionVisibleObjectSet.clear();
+  }
+
   private _renderWaterReflection(
     activeCamera: PerspectiveCamera,
     planeY: number,
@@ -1183,22 +1278,28 @@ export default class Renderer {
     const currentAutoClear = this._renderer.autoClear;
 
     this._ensureWaterReflectionRenderTargetSize(textureSize);
+    this._hideDistantSceneObjectsForWaterReflection(activeCamera);
 
     for (const liquidMesh of liquidMeshes) {
       liquidMesh.visible = false;
     }
 
-    this._renderer.shadowMap.autoUpdate = false;
-    this._renderer.autoClear = true;
-    this._renderer.setRenderTarget(this._waterReflectionRenderTarget);
-    this._renderer.clear();
-    this._renderer.render(this._scene, this._waterReflectionCamera);
-    this._renderer.setRenderTarget(currentRenderTarget);
-    this._renderer.shadowMap.autoUpdate = currentShadowAutoUpdate;
-    this._renderer.autoClear = currentAutoClear;
+    try {
+      this._renderer.shadowMap.autoUpdate = false;
+      this._renderer.autoClear = true;
+      this._renderer.setRenderTarget(this._waterReflectionRenderTarget);
+      this._renderer.clear();
+      this._renderer.render(this._scene, this._waterReflectionCamera);
+    } finally {
+      this._renderer.setRenderTarget(currentRenderTarget);
+      this._renderer.shadowMap.autoUpdate = currentShadowAutoUpdate;
+      this._renderer.autoClear = currentAutoClear;
 
-    for (const liquidMesh of liquidMeshes) {
-      liquidMesh.visible = true;
+      for (const liquidMesh of liquidMeshes) {
+        liquidMesh.visible = true;
+      }
+
+      this._restoreHiddenSceneObjectsForWaterReflection();
     }
 
     this._game.blockMaterialManager.setLiquidReflection(
@@ -1227,6 +1328,11 @@ export default class Renderer {
 
     const reflectionPlaneInfo = this._resolveWaterReflectionPlaneInfo(activeCamera);
     if (reflectionPlaneInfo === null || activeCamera.position.y <= reflectionPlaneInfo.planeY + 0.15) {
+      this._disableWaterReflection();
+      return;
+    }
+
+    if (!reflectionPlaneInfo.centerHit && reflectionPlaneInfo.coverage < WATER_REFLECTION_MIN_SCENE_COVERAGE) {
       this._disableWaterReflection();
       return;
     }

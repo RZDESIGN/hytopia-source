@@ -449,6 +449,10 @@ export default class Entity {
     return this._tintColor;
   }
 
+  public get approximateRadius(): number {
+    return this._getShadowCasterRadius();
+  }
+
   private _getEffectiveLightLevel(): number {
     return this._attached && this.parent ? this.parent._getEffectiveLightLevel() : this._lightLevel;
   }
@@ -524,7 +528,8 @@ export default class Entity {
   }
 
   private _areBlobShadowsEnabled(): boolean {
-    return this._game.settingsManager.qualityPerfTradeoff.blobShadows?.enabled ?? false;
+    const quality = this._game.settingsManager.qualityPerfTradeoff;
+    return (quality.blobShadows?.enabled ?? false) && !(quality.shadows?.enabled ?? false);
   }
 
   private _ensureBlobShadow(): void {
@@ -1504,10 +1509,22 @@ export default class Entity {
   }
 
   private _applyOpacity(model: Object3D): void {
+    if (this.isBlockEntity) {
+      const usesSharedMaterial = this._usesSharedBlockEntityMaterial(model);
+      if (this._blockEntityNeedsUniqueMaterial()) {
+        this._ensureUniqueBlockEntityMaterial(model);
+      } else if (usesSharedMaterial) {
+        return;
+      }
+    }
+
     model.traverse((child) => {
       if (child instanceof Mesh) {
-        const materials = Array.isArray(child.material) ? child.material : [child.material];
-        materials.forEach(material => {
+        const materialCount = Array.isArray(child.material) ? child.material.length : 1;
+        for (let materialIndex = 0; materialIndex < materialCount; materialIndex++) {
+          const material = this._isGLTFEntity
+            ? this._game.gltfManager.ensureOwnMaterial(child, materialIndex)
+            : (Array.isArray(child.material) ? child.material[materialIndex] : child.material);
           const oldOpacity = material.opacity;
 
           // TODO: What should we do if a user wants to make a transparent material which originally
@@ -1553,9 +1570,10 @@ export default class Entity {
               material.opacity,
               oldTransparent,
               material.transparent,
+              materialIndex,
             );
           }
-        });
+        }
       }
     });
   }
@@ -1674,6 +1692,48 @@ export default class Entity {
   private _applyScale(): void {
     this._entityRoot.scale.copy(this._scale);
     this._needsMatrixUpdate.add(this._entityRoot);
+  }
+
+  private _blockEntityNeedsUniqueMaterial(): boolean {
+    return this._opacity !== DEFAULT_OPACITY
+      || this._tintColor !== null
+      || this._clientColorCorrection !== null;
+  }
+
+  private _usesSharedBlockEntityMaterial(model: Object3D): boolean {
+    let usesSharedMaterial = false;
+
+    model.traverse((child) => {
+      if (!(child instanceof Mesh) || usesSharedMaterial) {
+        return;
+      }
+
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (let i = 0; i < materials.length; i++) {
+        if (this._game.blockMaterialManager.isSharedNonLitMaterial(materials[i])) {
+          usesSharedMaterial = true;
+          break;
+        }
+      }
+    });
+
+    return usesSharedMaterial;
+  }
+
+  private _ensureUniqueBlockEntityMaterial(model: Object3D): void {
+    model.traverse((child) => {
+      if (!(child instanceof Mesh) || Array.isArray(child.material)) {
+        return;
+      }
+
+      if (!this._game.blockMaterialManager.isSharedNonLitMaterial(child.material)) {
+        return;
+      }
+
+      const clonedMaterial = this._game.blockMaterialManager.cloneNonLitMaterial(child.material.transparent);
+      this._storeOriginalMaterialData(clonedMaterial);
+      child.material = clonedMaterial;
+    });
   }
 
   public setTintColor(tintColor: Color | null | undefined) {
@@ -1852,10 +1912,24 @@ export default class Entity {
   }
 
   private _applyColorCorrections(model: Object3D): void {
+    if (this.isBlockEntity) {
+      const usesSharedMaterial = this._usesSharedBlockEntityMaterial(model);
+      if (this._blockEntityNeedsUniqueMaterial()) {
+        this._ensureUniqueBlockEntityMaterial(model);
+      } else if (usesSharedMaterial) {
+        return;
+      }
+    }
+
     model.traverse((child) => {
       if (child instanceof Mesh) {
-        const materials: MeshBasicMaterial[] = Array.isArray(child.material) ? child.material : [child.material];
-        materials.forEach(material => {
+        const materialCount = Array.isArray(child.material) ? child.material.length : 1;
+        for (let materialIndex = 0; materialIndex < materialCount; materialIndex++) {
+          const material = (
+            this._isGLTFEntity
+              ? this._game.gltfManager.ensureOwnMaterial(child, materialIndex)
+              : (Array.isArray(child.material) ? child.material[materialIndex] : child.material)
+          ) as MeshBasicMaterial;
           color.copy(material.color);
 
           const originalData = this._getOriginalMaterialData(material);
@@ -1870,9 +1944,9 @@ export default class Entity {
           }
 
           if (this._isGLTFEntity) {
-            this._game.gltfManager.onMeshColorChanged(child, color, material.color);
+            this._game.gltfManager.onMeshColorChanged(child, color, material.color, materialIndex);
           }
-        });
+        }
       }
     });
   }
@@ -2153,8 +2227,13 @@ export default class Entity {
 
     model.traverse((child) => {
       if (child instanceof Mesh) {
-        const materials: EmissiveMeshBasicMaterial[] = Array.isArray(child.material) ? child.material : [child.material];
-        materials.forEach(material => {
+        const materialCount = Array.isArray(child.material) ? child.material.length : 1;
+        for (let materialIndex = 0; materialIndex < materialCount; materialIndex++) {
+          const material = (
+            this._isGLTFEntity
+              ? this._game.gltfManager.ensureOwnMaterial(child, materialIndex)
+              : (Array.isArray(child.material) ? child.material[materialIndex] : child.material)
+          ) as EmissiveMeshBasicMaterial;
           color.copy(material.customEmissive);
           const oldIntensity = material.customEmissiveIntensity;
 
@@ -2199,9 +2278,16 @@ export default class Entity {
           }
 
           if (this._isGLTFEntity) {
-            this._game.gltfManager.onMeshEmissiveChanged(child, color, material.customEmissive, oldIntensity, material.customEmissiveIntensity);
+            this._game.gltfManager.onMeshEmissiveChanged(
+              child,
+              color,
+              material.customEmissive,
+              oldIntensity,
+              material.customEmissiveIntensity,
+              materialIndex,
+            );
           }
-        });
+        }
       }
     });
   }
@@ -2590,7 +2676,7 @@ export default class Entity {
   }
 
   // Fifth update Pass: Update world matrices
-  public updateWorldMatrices(needsLightLevelUpdateDetection: boolean): void {
+  public updateWorldMatrices(needsLightLevelUpdateDetection: boolean, updateBlobShadow: boolean = true): void {
     if (!this.visible) {
       // Do not update since it will not be visible anyway.
       if (this._blobShadow) {
@@ -2630,7 +2716,9 @@ export default class Entity {
       EntityStats.worldMatrixUpdateCount += updateCount;
     }
     this._needsMatrixWorldUpdate = false;
-    this._updateBlobShadow();
+    if (updateBlobShadow) {
+      this._updateBlobShadow();
+    }
   }
 
   // Sixth update pass: Update light level
@@ -2886,12 +2974,10 @@ export default class Entity {
     geometry.setIndex(new BufferAttribute(indices, 1));
 
     const model = new Group();
-    // Since the SDK API allows each Block Entity to have different material parameters, the
-    // material is cloned. To save memory and reduce material switching costs in the WebGLRenderer,
-    // it would be better to clone only when material parameters differ from the default.
-    // However, this approach increases complexity in resource management.
-    const mesh = new Mesh(geometry, this._game.blockMaterialManager.cloneTransparentNonLitMaterial());
-    mesh.material.transparent = transparent;
+    const mesh = new Mesh(
+      geometry,
+      transparent ? this._game.blockMaterialManager.transparentNonLitMaterial : this._game.blockMaterialManager.opaqueNonLitMaterial,
+    );
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     this._shadowCasterMeshes = [mesh];
@@ -2899,7 +2985,6 @@ export default class Entity {
     model.add(mesh);
 
     this._storeModelCenter(model, false);
-    this._storeOriginalMaterialData(mesh.material);
     model.scale.set(
       this._blockHalfExtents.x * 2 / dimensions.x,
       this._blockHalfExtents.y * 2 / dimensions.y,
@@ -2955,6 +3040,10 @@ export default class Entity {
 
         // Dispose textures & materials
         materials.forEach(material => {
+          if (this._game.blockMaterialManager.isSharedNonLitMaterial(material)) {
+            return;
+          }
+
           for (const key in material) {
             const value = (material as any)[key];
             if (value instanceof Texture && value !== Game.instance.blockTextureAtlasManager.texture) {
@@ -3008,16 +3097,19 @@ export default class Entity {
       node.userData[USER_DATA_ENTITY_REF] = this;
       node.userData[USER_DATA_EFFECTIVELY_VISIBLE] = true;
       if (node instanceof Mesh && node.material) {
-        const material = node.material as EmissiveMeshBasicMaterial;
+        const materials = Array.isArray(node.material) ? node.material : [node.material];
 
         // For performance reasons, two-pass rendering is disabled for DoubleSide materials.
         // It might be worth allowing this to be enabled via a quality-performance tradeoff setting.
-        material.forceSinglePass = true;
+        for (let i = 0; i < materials.length; i++) {
+          const material = materials[i] as EmissiveMeshBasicMaterial;
+          material.forceSinglePass = true;
+          this._storeOriginalMaterialData(material);
+        }
+
         node.castShadow = true;
         node.receiveShadow = true;
         this._shadowCasterMeshes.push(node);
-
-        this._storeOriginalMaterialData(material);
       }
     });
 

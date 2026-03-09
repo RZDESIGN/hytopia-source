@@ -1,5 +1,6 @@
 import {
   Box3,
+  BufferAttribute,
   BufferGeometry,
   Color,
   DynamicDrawUsage,
@@ -57,13 +58,67 @@ const sphere = new Sphere();
 
 const UNIFORM_VIEW_DISTANCE_SQUARED = 'viewDistanceSquared';
 
+type StaticEntityInstancedMaterial = EmissiveMeshBasicMaterial | EmissiveMeshBasicMaterial[];
+
+const getInstancedMaterialList = (material: StaticEntityInstancedMaterial): EmissiveMeshBasicMaterial[] => {
+  return Array.isArray(material) ? material : [material];
+};
+
+const cloneInstancedMaterial = (material: Mesh['material']): StaticEntityInstancedMaterial => {
+  const clonedMaterials = (Array.isArray(material) ? material : [material]).map(sourceMaterial => {
+    return (sourceMaterial as EmissiveMeshBasicMaterial).clone();
+  });
+
+  return Array.isArray(material) ? clonedMaterials : clonedMaterials[0];
+};
+
+const createReusableInstancedGeometry = (sourceGeometry: BufferGeometry): BufferGeometry => {
+  if (Object.keys(sourceGeometry.morphAttributes).length > 0) {
+    return sourceGeometry.clone();
+  }
+
+  const geometry = new BufferGeometry();
+
+  for (const name in sourceGeometry.attributes) {
+    const attribute = sourceGeometry.attributes[name];
+    if (!(attribute instanceof BufferAttribute)) {
+      return sourceGeometry.clone();
+    }
+
+    geometry.setAttribute(name, new BufferAttribute(attribute.array, attribute.itemSize, attribute.normalized));
+  }
+
+  const index = sourceGeometry.getIndex();
+  if (index) {
+    if (!(index instanceof BufferAttribute)) {
+      return sourceGeometry.clone();
+    }
+
+    geometry.setIndex(new BufferAttribute(index.array, index.itemSize, index.normalized));
+  }
+
+  geometry.groups = sourceGeometry.groups.map(group => ({ ...group }));
+  geometry.drawRange.start = sourceGeometry.drawRange.start;
+  geometry.drawRange.count = sourceGeometry.drawRange.count;
+  geometry.boundingBox = sourceGeometry.boundingBox?.clone() ?? null;
+  geometry.boundingSphere = sourceGeometry.boundingSphere?.clone() ?? null;
+
+  return geometry;
+};
+
 // There is a lot of duplicated code for shader hacks across other modules, so I
 // want to consolidate it and manage it in one place.
-class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMeshBasicMaterial> {
+class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEntityInstancedMaterial> {
   private _game: Game;
   private _uniforms: Record<string, { value: number | Color }>;
 
-  constructor(game: Game, geometry: BufferGeometry, material: EmissiveMeshBasicMaterial, count: number) {
+  constructor(
+    game: Game,
+    geometry: BufferGeometry,
+    material: StaticEntityInstancedMaterial,
+    count: number,
+    materialInitialized: boolean = false,
+  ) {
     super(geometry, material, count);
 
     this._game = game;
@@ -77,10 +132,21 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
       },
     };
 
-    this._setup();
+    this._setupGeometry();
+    if (!materialInitialized) {
+      this._installShaderProcessors();
+    }
   }
 
-  private _setup(): void {
+  private _getMaterials(): EmissiveMeshBasicMaterial[] {
+    return getInstancedMaterialList(this.material);
+  }
+
+  public get referenceMaterial(): EmissiveMeshBasicMaterial {
+    return this._getMaterials()[0];
+  }
+
+  private _setupGeometry(): void {
     this.matrixAutoUpdate = false;
     this.matrixWorldAutoUpdate = false;
     this.frustumCulled = true;
@@ -101,10 +167,12 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
     this.geometry.setAttribute(INSTANCE_EMISSIVE_ATTRIBUTE, instanceEmissive);
 
     // Initialize instanceColor using Three.js built-in support
-    this.setColorAt(0, this.material.color);
+    this.setColorAt(0, this.referenceMaterial.color);
     this.instanceColor!.setUsage(DynamicDrawUsage);
+  }
 
-    this.material.addShaderProcessor((params: WebGLProgramParametersWithUniforms) => {
+  private _installShaderProcessors(): void {
+    const lightingProcessor = (params: WebGLProgramParametersWithUniforms) => {
       for (const key in this._uniforms) {
         params.uniforms[key] = this._uniforms[key as keyof typeof this._uniforms];
       }
@@ -176,15 +244,20 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
             #include <opaque_fragment>
           `,
         );
-    });
+    };
 
-    this.material.addShaderProcessor((params: WebGLProgramParametersWithUniforms) => {
+    const emissiveProcessor = (params: WebGLProgramParametersWithUniforms) => {
       params.fragmentShader = params.fragmentShader
         .replace(
           'vec3 totalEmissiveRadiance = emissive;',
           `vec3 totalEmissiveRadiance = ${INSTANCE_EMISSIVE_VARYING}.rgb * ${INSTANCE_EMISSIVE_VARYING}.a;`,
         );
-    }, true);
+    };
+
+    for (const material of this._getMaterials()) {
+      material.addShaderProcessor(lightingProcessor);
+      material.addShaderProcessor(emissiveProcessor, true);
+    }
   }
 
   public updateShadowCasterLod(): void {
@@ -220,9 +293,13 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
       );
   }
 
-  public dispose(): this {
+  public dispose(disposeMaterial: boolean = true): this {
     this.geometry.dispose();
-    this.material.dispose();
+    if (disposeMaterial) {
+      for (const material of this._getMaterials()) {
+        material.dispose();
+      }
+    }
     return this;
   }
 }
@@ -230,6 +307,8 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, EmissiveMe
 export default class StaticEntityManager {
   private _game: Game;
   private _uriToEntry: Map<string, StaticEntityEntry> = new Map();
+  private _instancedMeshesInScene: StaticEntityInstancedMesh[] = [];
+  private _nearbyReflectionMeshes: StaticEntityInstancedMesh[] = [];
 
   constructor(game: Game) {
     this._game = game;
@@ -298,41 +377,41 @@ export default class StaticEntityManager {
 
       if (!instancedMesh || instanceIndex >= instancedMesh.instanceMatrix.count) {
         const newInstanceCount = instancedMesh ? instancedMesh.instanceMatrix.count * INSTANCE_COUNT_INCREASE_FACTOR : INITIAL_INSTANCE_COUNT;
-        const newInstancedMesh = new StaticEntityInstancedMesh(this._game, sourceMesh.geometry.clone(), sourceMesh.material.clone(), newInstanceCount);
+        const material = instancedMesh
+          ? instancedMesh.material
+          : cloneInstancedMaterial(sourceMesh.material);
+        const newInstancedMesh = new StaticEntityInstancedMesh(
+          this._game,
+          createReusableInstancedGeometry(sourceMesh.geometry),
+          material,
+          newInstanceCount,
+          !!instancedMesh,
+        );
 
         if (instancedMesh) {
-          for (let i = 0; i < instancedMesh.instanceMatrix.array.length; i++) {
-            newInstancedMesh.instanceMatrix.array[i] = instancedMesh.instanceMatrix.array[i];
-          }
+          (newInstancedMesh.instanceMatrix.array as Float32Array).set(instancedMesh.instanceMatrix.array as Float32Array);
 
           const oldLightLevelAttribute = instancedMesh.geometry.getAttribute(INSTANCE_LIGHT_LEVEL_ATTRIBUTE)!;
           const newLightLevelAttribute = newInstancedMesh.geometry.getAttribute(INSTANCE_LIGHT_LEVEL_ATTRIBUTE)!;
-          for (let i = 0; i < oldLightLevelAttribute.count; i++) {
-            newLightLevelAttribute.setX(i, oldLightLevelAttribute.getX(i));
-          }
+          (newLightLevelAttribute.array as Float32Array).set(oldLightLevelAttribute.array as Float32Array);
 
           const oldSkyLightAttribute = instancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE)!;
           const newSkyLightAttribute = newInstancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE)!;
-          for (let i = 0; i < oldSkyLightAttribute.count; i++) {
-            newSkyLightAttribute.setX(i, oldSkyLightAttribute.getX(i));
-          }
+          (newSkyLightAttribute.array as Float32Array).set(oldSkyLightAttribute.array as Float32Array);
 
           const oldEmissiveAttribute = instancedMesh.geometry.getAttribute(INSTANCE_EMISSIVE_ATTRIBUTE)!;
           const newEmissiveAttribute = newInstancedMesh.geometry.getAttribute(INSTANCE_EMISSIVE_ATTRIBUTE)!;
-          for (let i = 0; i < oldEmissiveAttribute.count; i++) {
-            newEmissiveAttribute.setXYZW(i, oldEmissiveAttribute.getX(i), oldEmissiveAttribute.getY(i), oldEmissiveAttribute.getZ(i), oldEmissiveAttribute.getW(i));
-          }
+          (newEmissiveAttribute.array as Float32Array).set(oldEmissiveAttribute.array as Float32Array);
 
-          for (let i = 0; i < instancedMesh.instanceColor!.count; i++) {
-            newInstancedMesh.instanceColor!.setXYZ(i, instancedMesh.instanceColor!.getX(i), instancedMesh.instanceColor!.getY(i), instancedMesh.instanceColor!.getZ(i));
-          }
+          (newInstancedMesh.instanceColor!.array as Float32Array).set(instancedMesh.instanceColor!.array as Float32Array);
+          newInstancedMesh.count = instancedMesh.count;
 
           // Preserve incremental frustum culling bounds across reallocation.
           if (instancedMesh.boundingSphere) {
             newInstancedMesh.boundingSphere = instancedMesh.boundingSphere.clone();
           }
 
-          instancedMesh.dispose();
+          instancedMesh.dispose(false);
           this._game.renderer.removeFromScene(instancedMesh);
           entry.sourceToInstancedMesh.delete(sourceMesh);
         }
@@ -359,8 +438,8 @@ export default class StaticEntityManager {
       skyLightAttribute.needsUpdate = true;
 
       const emissiveAttribute = instancedMesh.geometry.getAttribute(INSTANCE_EMISSIVE_ATTRIBUTE)!;
-      const emissiveColor = entity.emissiveColor ?? instancedMesh.material.customEmissive;
-      const emissiveIntensity = entity.emissiveIntensity ?? instancedMesh.material.customEmissiveIntensity;
+      const emissiveColor = entity.emissiveColor ?? instancedMesh.referenceMaterial.customEmissive;
+      const emissiveIntensity = entity.emissiveIntensity ?? instancedMesh.referenceMaterial.customEmissiveIntensity;
       emissiveAttribute.setXYZW(
         instanceIndex,
         emissiveColor.r,
@@ -386,6 +465,44 @@ export default class StaticEntityManager {
 
       instancedMesh.updateShadowCasterLod();
     });
+  }
+
+  public get instancedMeshesInScene(): StaticEntityInstancedMesh[] {
+    this._instancedMeshesInScene.length = 0;
+
+    for (const entry of this._uriToEntry.values()) {
+      for (const instancedMesh of entry.sourceToInstancedMesh.values()) {
+        if (instancedMesh.parent !== null && instancedMesh.visible && instancedMesh.count > 0) {
+          this._instancedMeshesInScene.push(instancedMesh);
+        }
+      }
+    }
+
+    return this._instancedMeshesInScene;
+  }
+
+  public getReflectionCandidateMeshesNear(
+    worldPosition: { x: number; y: number; z: number },
+    maxDistance: number,
+  ): StaticEntityInstancedMesh[] {
+    const nearbyMeshes = this._nearbyReflectionMeshes;
+    nearbyMeshes.length = 0;
+
+    for (const instancedMesh of this.instancedMeshesInScene) {
+      if (instancedMesh.boundingSphere === null) {
+        continue;
+      }
+
+      const limit = maxDistance + instancedMesh.boundingSphere.radius;
+      const dx = instancedMesh.boundingSphere.center.x - worldPosition.x;
+      const dy = instancedMesh.boundingSphere.center.y - worldPosition.y;
+      const dz = instancedMesh.boundingSphere.center.z - worldPosition.z;
+      if (dx * dx + dy * dy + dz * dz <= limit * limit) {
+        nearbyMeshes.push(instancedMesh);
+      }
+    }
+
+    return nearbyMeshes;
   }
 
   public updateLightLevel(): void {
