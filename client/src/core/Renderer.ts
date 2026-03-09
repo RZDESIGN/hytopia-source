@@ -146,6 +146,14 @@ type WaterReflectionQuality = {
   viewDirDotThreshold: number;
 };
 
+export type PostProcessingDebugState = {
+  bloom: boolean;
+  composer: boolean;
+  depthBlur: boolean;
+  outline: boolean;
+  smaa: boolean;
+};
+
 export enum RendererEventType {
   Animate = 'RENDERER.ANIMATE',
 }
@@ -259,6 +267,13 @@ export default class Renderer {
   private _lastAppliedPixelRatio: number = 0;
   private _lastAppliedViewportWidth: number = 0;
   private _lastAppliedViewportHeight: number = 0;
+  private _lastPostProcessingState: PostProcessingDebugState = {
+    bloom: false,
+    composer: false,
+    depthBlur: false,
+    outline: false,
+    smaa: false,
+  };
 
   public constructor(game: Game) {
     this._game = game;
@@ -347,6 +362,9 @@ export default class Renderer {
   public get directionalShadowFocusCenter(): Vector3 { return this._lastDirectionalShadowFocusCenter; }
   public get viewDistance(): number { return Math.min(this._game.settingsManager.qualityPerfTradeoff.viewDistance.distance, this._fogFar); }
   public get webGLRenderer(): WebGLRenderer { return this._renderer; }
+  public get adaptiveResolutionScale(): number { return this._adaptiveResolutionScale; }
+  public get effectivePixelRatio(): number { return this._lastAppliedPixelRatio || this._renderer.getPixelRatio(); }
+  public get postProcessingDebugState(): PostProcessingDebugState { return this._lastPostProcessingState; }
 
   private _getViewportSize(): { width: number; height: number } {
     return {
@@ -490,6 +508,11 @@ export default class Renderer {
     const hasGameplayDistanceBlur = this._gameplayDistanceBlurPass.enabled;
     const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
     const shouldUsePostProcessing = hasOutlineTargets || !!pp.bloom || !!pp.smaa || hasGameplayDistanceBlur;
+    this._lastPostProcessingState.composer = shouldUsePostProcessing;
+    this._lastPostProcessingState.depthBlur = hasGameplayDistanceBlur;
+    this._lastPostProcessingState.outline = hasOutlineTargets;
+    this._lastPostProcessingState.bloom = !!pp.bloom;
+    this._lastPostProcessingState.smaa = !!pp.smaa;
     if (shouldUsePostProcessing) {
       this._renderPass.camera = this._game.camera.activeCamera;
       // Keep the first-person view model out of the full-screen post stack so

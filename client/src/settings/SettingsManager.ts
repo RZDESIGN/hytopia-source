@@ -85,16 +85,16 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     shadows: {
       enabled: true,
       type: 'vsm',
-      directionalDistance: 96,
-      directionalMapSize: 2048,
+      directionalDistance: 88,
+      directionalMapSize: 1536,
       spotlightMapSize: 1024,
       maxSpotlightShadows: 2,
     },
-    resolution: { multiplier: 2.0 },
+    resolution: { multiplier: 1.3 },
     viewDistance: {
       enabled: true,
-      distance: 600,
-      fog: { enabled: true, far: 550, near: 500 },
+      distance: 420,
+      fog: { enabled: true, far: 380, near: 330 },
     },
     postProcessing: {
       outline: true,
@@ -105,9 +105,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         nearStartRatio: 0.03,
         focusNearRatio: 0.09,
         focusFarRatio: 0.28,
-        farEndRatio: 0.64,
-        maxNearRadiusPx: 1.45,
-        maxFarRadiusPx: 8.5,
+        farEndRatio: 0.58,
+        maxNearRadiusPx: 1.25,
+        maxFarRadiusPx: 6.5,
       },
     },
   },
@@ -119,29 +119,29 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     shadows: {
       enabled: true,
       type: 'vsm',
-      directionalDistance: 72,
+      directionalDistance: 64,
       directionalMapSize: 1024,
       spotlightMapSize: 512,
       maxSpotlightShadows: 1,
     },
-    resolution: { multiplier: 1.5 },
+    resolution: { multiplier: 1.05 },
     viewDistance: {
       enabled: true,
-      distance: 300,
-      fog: { enabled: true, far: 300, near: 250 },
+      distance: 220,
+      fog: { enabled: true, far: 210, near: 175 },
     },
     postProcessing: {
       outline: true,
       bloom: true,
       smaa: true,
       depthBlur: {
-        enabled: true,
+        enabled: false,
         nearStartRatio: 0.04,
         focusNearRatio: 0.11,
         focusFarRatio: 0.3,
-        farEndRatio: 0.68,
-        maxNearRadiusPx: 1.15,
-        maxFarRadiusPx: 6.75,
+        farEndRatio: 0.62,
+        maxNearRadiusPx: 0.9,
+        maxFarRadiusPx: 4.5,
       },
     },
   },
@@ -152,17 +152,17 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     },
     shadows: {
       enabled: true,
-      type: 'vsm',
-      directionalDistance: 48,
-      directionalMapSize: 1024,
-      spotlightMapSize: 512,
+      type: 'pcf',
+      directionalDistance: 40,
+      directionalMapSize: 768,
+      spotlightMapSize: 384,
       maxSpotlightShadows: 1,
     },
-    resolution: { multiplier: 1.0 },
+    resolution: { multiplier: 0.85 },
     viewDistance: {
       enabled: true,
-      distance: 150,
-      fog: { enabled: true, far: 150, near: 125 },
+      distance: 140,
+      fog: { enabled: true, far: 130, near: 108 },
     },
     environmentalAnimations: {
       enabled: false,
@@ -170,7 +170,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     postProcessing: {
       outline: true,
       bloom: true,
-      smaa: true,
+      smaa: false,
       depthBlur: {
         enabled: false,
         nearStartRatio: 0.06,
@@ -201,11 +201,11 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       spotlightMapSize: 256,
       maxSpotlightShadows: 0,
     },
-    resolution: { multiplier: 0.85 },
+    resolution: { multiplier: 0.7 },
     viewDistance: {
       enabled: true,
-      distance: 75,
-      fog: { enabled: true, far: 75, near: 65 },
+      distance: 90,
+      fog: { enabled: true, far: 82, near: 64 },
     },
     environmentalAnimations: {
       enabled: false,
@@ -270,7 +270,7 @@ const AUTOMATIC_QUALITY_LEVELS: (keyof typeof QUALITY_PRESETS)[] = ['HIGH', 'MED
 // it might also be a good idea to save the adjusted quality level to LocalStorage or
 // elsewhere, and load it when the client starts. This would allow the game to resume at an
 // appropriate quality level.
-const DEFAULT_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = MobileManager.isMobile ? 'MEDIUM' : 'HIGH';
+const DEFAULT_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = 'MEDIUM';
 
 // TODO: Introduce a Client settings UI or something similar to allow users to intuitively update the settings.
 const DEFAULT_CLIENT_SETTINGS: ClientSettings = {

@@ -9,8 +9,57 @@ import EntityStats from '../entities/EntityStats';
 import GLTFStats from '../gltf/GLTFStats';
 import LocalPredictionStats from '../entities/LocalPredictionStats';
 import SceneUIStats from '../ui/SceneUIStats';
+import type { DetailedPerformanceBaselineSnapshot } from './PerformanceBaselineManager';
 
 const DEBUG_PANEL_Z_INDEX = '100000';
+
+type FrameBudgetThresholds = {
+  drawCalls: number;
+  sceneUI: number;
+  transparentFaces: number;
+  triangles: number;
+  visibleChunks: number;
+};
+
+const DEFAULT_FRAME_BUDGETS: FrameBudgetThresholds = {
+  drawCalls: 900,
+  sceneUI: 10,
+  transparentFaces: 30000,
+  triangles: 1800000,
+  visibleChunks: 280,
+};
+
+const FRAME_BUDGETS_BY_PRESET: Record<string, FrameBudgetThresholds> = {
+  HIGH: {
+    drawCalls: 1200,
+    sceneUI: 12,
+    transparentFaces: 50000,
+    triangles: 2600000,
+    visibleChunks: 360,
+  },
+  LOW: {
+    drawCalls: 650,
+    sceneUI: 6,
+    transparentFaces: 15000,
+    triangles: 950000,
+    visibleChunks: 180,
+  },
+  MEDIUM: DEFAULT_FRAME_BUDGETS,
+  POWER_SAVING: {
+    drawCalls: 450,
+    sceneUI: 4,
+    transparentFaces: 10000,
+    triangles: 550000,
+    visibleChunks: 120,
+  },
+  ULTRA: {
+    drawCalls: 1500,
+    sceneUI: 14,
+    transparentFaces: 70000,
+    triangles: 3600000,
+    visibleChunks: 480,
+  },
+};
 
 // Working variables
 const vec3 = new Vector3();
@@ -33,6 +82,24 @@ export interface DebugPanelConfig {
     programs: number;
     textures: number;
     triangles: number;
+  };
+  performance: {
+    adaptiveResolution: number;
+    frameBudgetMs: number;
+    frameP95Ms: number;
+    fps: number;
+    renderResolution: string;
+    targetFps: number;
+    pressure: string;
+    worldPressure: string;
+  };
+  budget: {
+    drawCalls: string;
+    frameTime: string;
+    postFx: string;
+    sceneUI: string;
+    triangles: string;
+    visibility: string;
   };
   entity: {
     count: number;
@@ -118,6 +185,24 @@ export default class DebugPanel {
       sendProtocol: 'ws',
       receiveProtocol: 'ws',
       version: 'unknown',
+    },
+    performance: {
+      adaptiveResolution: 1,
+      frameBudgetMs: 0,
+      frameP95Ms: 0,
+      fps: 0,
+      renderResolution: '-',
+      targetFps: 60,
+      pressure: 'unknown',
+      worldPressure: 'unknown',
+    },
+    budget: {
+      drawCalls: '-',
+      frameTime: '-',
+      postFx: '-',
+      sceneUI: '-',
+      triangles: '-',
+      visibility: '-',
     },
     webgl: {
       drawCalls: 0,
@@ -238,6 +323,22 @@ export default class DebugPanel {
     // performance panel
     const performanceFolder = this._gui.addFolder('Performance');
     performanceFolder.add(this._game.settingsManager, 'qualityPresetLevel').name('Quality Preset');
+    performanceFolder.add(this._config.performance, 'fps').name('FPS');
+    performanceFolder.add(this._config.performance, 'targetFps').name('Target FPS');
+    performanceFolder.add(this._config.performance, 'frameBudgetMs').name('Budget (ms)');
+    performanceFolder.add(this._config.performance, 'frameP95Ms').name('P95 Frame (ms)');
+    performanceFolder.add(this._config.performance, 'adaptiveResolution').name('Adaptive Scale');
+    performanceFolder.add(this._config.performance, 'renderResolution').name('Render Res');
+    performanceFolder.add(this._config.performance, 'pressure').name('Pressure');
+    performanceFolder.add(this._config.performance, 'worldPressure').name('World Load');
+
+    const budgetFolder = this._gui.addFolder('Frame Budget').close();
+    budgetFolder.add(this._config.budget, 'frameTime').name('Frame Time');
+    budgetFolder.add(this._config.budget, 'drawCalls').name('Draw Calls');
+    budgetFolder.add(this._config.budget, 'triangles').name('Triangles');
+    budgetFolder.add(this._config.budget, 'visibility').name('Visibility');
+    budgetFolder.add(this._config.budget, 'sceneUI').name('Scene UI');
+    budgetFolder.add(this._config.budget, 'postFx').name('Post FX');
 
     // WebGL stats panel
     const webglFolder = this._gui.addFolder('WebGL');
@@ -344,6 +445,9 @@ export default class DebugPanel {
     this._updatePlayerInfo();
     this._updateCameraInfo();
     this._updateServerInfo();
+    const perfSnapshot = this._game.performanceBaselineManager.snapshotDetailed();
+    this._updatePerformanceStats(perfSnapshot);
+    this._updateFrameBudget(perfSnapshot);
     this._updateMemoryStats();
     this._updateRttStats();
     this._updateEntityStats();
@@ -376,6 +480,38 @@ export default class DebugPanel {
     this._config.server.sendProtocol = this._game.networkManager.lastSendProtocol;
     this._config.server.receiveProtocol = this._game.networkManager.lastReceiveProtocol;
     this._config.server.version = this._game.networkManager.serverVersion ?? 'unknown';
+  }
+
+  private _updatePerformanceStats(snapshot: DetailedPerformanceBaselineSnapshot): void {
+    const renderer = this._game.renderer;
+    const targetFps = this._resolveTargetFps();
+    const frameBudgetMs = 1000 / targetFps;
+
+    this._config.performance.fps = snapshot.frame.currentFps;
+    this._config.performance.targetFps = targetFps;
+    this._config.performance.frameBudgetMs = Number(frameBudgetMs.toFixed(2));
+    this._config.performance.frameP95Ms = Number(snapshot.frame.timings.p95.toFixed(2));
+    this._config.performance.adaptiveResolution = Number(renderer.adaptiveResolutionScale.toFixed(2));
+    this._config.performance.renderResolution = `${snapshot.renderer.canvasWidth}x${snapshot.renderer.canvasHeight} @ ${snapshot.renderer.pixelRatio.toFixed(2)}x`;
+    this._config.performance.pressure = this._resolvePressureSummary(snapshot, frameBudgetMs);
+    this._config.performance.worldPressure = this._resolveWorldPressureSummary(snapshot);
+  }
+
+  private _updateFrameBudget(snapshot: DetailedPerformanceBaselineSnapshot): void {
+    const budgets = this._resolveFrameBudgets();
+    const frameBudgetMs = 1000 / this._resolveTargetFps();
+    const postFx = this._game.renderer.postProcessingDebugState;
+    const postFxCount = Number(postFx.bloom) + Number(postFx.depthBlur) + Number(postFx.outline) + Number(postFx.smaa);
+
+    this._config.budget.frameTime = this._formatBudgetStatus(snapshot.frame.timings.p95, frameBudgetMs, 'ms');
+    this._config.budget.drawCalls = this._formatBudgetStatus(snapshot.renderer.calls, budgets.drawCalls);
+    this._config.budget.triangles = this._formatBudgetStatus(snapshot.renderer.triangles, budgets.triangles);
+    this._config.budget.visibility = this._formatBudgetStatus(
+      Math.max(snapshot.chunks.visibleCount, snapshot.chunkVisibility.visibleBatchCount),
+      budgets.visibleChunks,
+    );
+    this._config.budget.sceneUI = this._formatBudgetStatus(snapshot.sceneUI.visibleCount, budgets.sceneUI);
+    this._config.budget.postFx = `${postFxCount}/4 ${this._formatBudgetLabel(postFxCount <= 2 ? 'ok' : postFxCount === 3 ? 'tight' : 'over')}`;
   }
 
   private _updateMemoryStats(): void {
@@ -464,5 +600,78 @@ export default class DebugPanel {
     this._config.webgl.programs = info.programs?.length || 0;
     this._config.webgl.triangles = info.render.triangles;
     this._config.webgl.textures = info.memory.textures;
+  }
+
+  private _resolveTargetFps(): number {
+    return this._game.settingsManager.qualityPerfTradeoff.fpsCap
+      ?? this._game.performanceMetricsManager.refreshRate
+      ?? 60;
+  }
+
+  private _resolveFrameBudgets(): FrameBudgetThresholds {
+    return FRAME_BUDGETS_BY_PRESET[this._game.settingsManager.qualityPresetLevel] ?? DEFAULT_FRAME_BUDGETS;
+  }
+
+  private _resolvePressureSummary(snapshot: DetailedPerformanceBaselineSnapshot, frameBudgetMs: number): string {
+    const frameP95Ms = snapshot.frame.timings.p95;
+    const renderer = this._game.renderer;
+
+    if (frameP95Ms <= frameBudgetMs * 0.9 && renderer.adaptiveResolutionScale >= 0.98) {
+      return 'healthy';
+    }
+
+    if (renderer.adaptiveResolutionScale < 0.9 || snapshot.renderer.triangles > this._resolveFrameBudgets().triangles) {
+      return 'gpu-bound';
+    }
+
+    if (snapshot.chunkVisibility.pendingFullRefresh || snapshot.chunkWorker.currentBacklog > 0) {
+      return 'streaming';
+    }
+
+    if (snapshot.renderer.calls > this._resolveFrameBudgets().drawCalls || snapshot.sceneUI.visibleCount > this._resolveFrameBudgets().sceneUI) {
+      return 'scene-heavy';
+    }
+
+    return 'tight';
+  }
+
+  private _resolveWorldPressureSummary(snapshot: DetailedPerformanceBaselineSnapshot): string {
+    const budgets = this._resolveFrameBudgets();
+    const visibleCount = Math.max(snapshot.chunks.visibleCount, snapshot.chunkVisibility.visibleBatchCount);
+
+    if (snapshot.chunkWorker.currentBacklog > 0) {
+      return `chunk backlog ${snapshot.chunkWorker.currentBacklog}`;
+    }
+
+    if (visibleCount > budgets.visibleChunks) {
+      return `visibility ${visibleCount}/${budgets.visibleChunks}`;
+    }
+
+    if (snapshot.chunks.transparentFaceCount > budgets.transparentFaces) {
+      return `alpha ${snapshot.chunks.transparentFaceCount}/${budgets.transparentFaces}`;
+    }
+
+    return `steady ${visibleCount}/${budgets.visibleChunks}`;
+  }
+
+  private _formatBudgetStatus(current: number, budget: number, suffix: string = ''): string {
+    const currentLabel = suffix ? `${current.toFixed(1)}${suffix}` : `${Math.round(current)}`;
+    const budgetLabel = suffix ? `${budget.toFixed(1)}${suffix}` : `${Math.round(budget)}`;
+    const ratio = budget > 0 ? current / budget : 0;
+    const status = ratio > 1 ? 'over' : ratio > 0.85 ? 'tight' : 'ok';
+
+    return `${currentLabel}/${budgetLabel} ${this._formatBudgetLabel(status)}`;
+  }
+
+  private _formatBudgetLabel(status: 'ok' | 'tight' | 'over'): string {
+    if (status === 'ok') {
+      return 'OK';
+    }
+
+    if (status === 'tight') {
+      return 'TIGHT';
+    }
+
+    return 'OVER';
   }
 }
