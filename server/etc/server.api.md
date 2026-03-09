@@ -2300,6 +2300,10 @@ export class Player extends EventRouter implements protocol.Serializable {
     discardInputForSimulation(): void;
     disconnect(): void;
     getPersistedData(): Record<string, unknown> | undefined;
+    // Warning: (ae-forgotten-export) The symbol "HostedPlayerPacketEnvelope" needs to be exported by the entry point index.d.ts
+    //
+    // @internal (undocumented)
+    handleHostedPacket(envelope: HostedPlayerPacketEnvelope): void;
     readonly id: string;
     get input(): PlayerInput;
     get isInteractEnabled(): boolean;

@@ -1,5 +1,6 @@
 import EventRouter from '@/events/EventRouter';
 import World from '@/worlds/World';
+import WorldHostManager from '@/worlds/hosting/WorldHostManager';
 import type { WorldOptions } from '@/worlds/World';
 
 /**
@@ -99,6 +100,7 @@ export default class WorldManager {
     world.start();
 
     this._worlds.set(world.id, world);
+    WorldHostManager.instance.client.registerWorld(world);
 
     EventRouter.globalInstance.emit(WorldManagerEvent.WORLD_CREATED, { world });
 
@@ -132,10 +134,13 @@ export default class WorldManager {
    * **Category:** Core
    */
   public getDefaultWorld(): World {
-    this._defaultWorld ??= this.createWorld({ // Lazy init if none exist
-      name: 'Default World',
-      skyboxUri: 'skyboxes/partly-cloudy',
-    });
+    if (!this._defaultWorld) {
+      this._defaultWorld = this.createWorld({ // Lazy init if none exist
+        name: 'Default World',
+        skyboxUri: 'skyboxes/partly-cloudy',
+      });
+      WorldHostManager.instance.client.setDefaultWorld(this._defaultWorld);
+    }
 
     return this._defaultWorld;
   }
@@ -184,5 +189,6 @@ export default class WorldManager {
    */
   public setDefaultWorld(world: World) {
     this._defaultWorld = world;
+    WorldHostManager.instance.client.setDefaultWorld(world);
   }
 }

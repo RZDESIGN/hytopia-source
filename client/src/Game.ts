@@ -3,7 +3,6 @@ import AudioManager from './audio/AudioManager';
 import BlockMaterialManager from './blocks/BlockMaterialManager';
 import BlockTextureAtlasManager from './blocks/BlockTextureAtlasManager';
 import BlockTypeManager from './blocks/BlockTypeManager';
-import BridgeManager from './bridge/BridgeManager';
 import Camera from './core/Camera';
 import ChunkManager from './chunks/ChunkManager';
 import ChunkMeshManager from './chunks/ChunkMeshManager';
@@ -25,6 +24,7 @@ import SettingsManager from './settings/SettingsManager';
 import UIManager from './ui/UIManager';
 import ChunkWorkerClient from './workers/ChunkWorkerClient';
 import type DebugRenderer from './core/DebugRenderer';
+import type BridgeManager from './bridge/BridgeManager';
 
 const DEBUG_QUERY_STRINGS = 'debug';
 
@@ -37,7 +37,10 @@ export default class Game {
   private _blockMaterialManager: BlockMaterialManager;
   private _blockTextureAtlasManager: BlockTextureAtlasManager;
   private _blockTypeManager: BlockTypeManager;
-  private _bridgeManager: BridgeManager;
+  private _bridgeManager: Pick<BridgeManager, 'sendGameReady' | 'sendReconnect'> = {
+    sendGameReady: () => {},
+    sendReconnect: () => {},
+  };
   private _camera: Camera;
   private _chunkManager: ChunkManager;
   private _chunkMeshManager: ChunkMeshManager;
@@ -76,7 +79,6 @@ export default class Game {
     this._blockTextureAtlasManager = new BlockTextureAtlasManager(this);
     this._blockMaterialManager = new BlockMaterialManager(this);
     this._blockTypeManager = new BlockTypeManager(this);
-    this._bridgeManager = new BridgeManager(this);
     this._chunkManager = new ChunkManager(this);
     this._chunkMeshManager = new ChunkMeshManager(this);
     this._customTextureManager = new CustomTextureManager();
@@ -104,7 +106,7 @@ export default class Game {
   public get blockMaterialManager(): BlockMaterialManager { return this._blockMaterialManager; }
   public get blockTextureAtlasManager(): BlockTextureAtlasManager { return this._blockTextureAtlasManager; }
   public get blockTypeManager(): BlockTypeManager { return this._blockTypeManager; }
-  public get bridgeManager(): BridgeManager { return this._bridgeManager; }
+  public get bridgeManager(): Pick<BridgeManager, 'sendGameReady' | 'sendReconnect'> { return this._bridgeManager; }
   public get camera(): Camera { return this._camera; }
   public get chunkManager(): ChunkManager { return this._chunkManager; }
   public get chunkMeshManager(): ChunkMeshManager { return this._chunkMeshManager; }
@@ -128,6 +130,18 @@ export default class Game {
   public get uiManager(): UIManager { return this._uiManager; }
 
   public async start(): Promise<void> {
+    let bridgeLoadPromise: Promise<void> | undefined;
+
+    if (window.self !== window.top) {
+      bridgeLoadPromise = import('./bridge/BridgeManager')
+        .then(({ default: BridgeManager }) => {
+          this._bridgeManager = new BridgeManager(this);
+        })
+        .catch((error) => {
+          console.error('Game: Failed to load bridge manager.', error);
+        });
+    }
+
     if (this.inDebugMode) {
       void import('./core/DebugRenderer')
         .then(({ default: DebugRenderer }) => {
@@ -139,6 +153,7 @@ export default class Game {
     }
 
     this._renderer.start();
+    await bridgeLoadPromise;
     await this._networkManager.connect();
     this._blockTextureAtlasManager.init();
   }

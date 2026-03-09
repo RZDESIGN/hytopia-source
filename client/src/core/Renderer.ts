@@ -45,7 +45,6 @@ import Chunk from '../chunks/Chunk';
 import Assets from '../network/Assets';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
-import { modalAlert } from '../ui/Modal';
 import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
 import { NetworkManagerEventType } from '../network/NetworkEvents';
 import { getTransparentSortKey, lerpColor } from '../three/utils';
@@ -999,7 +998,11 @@ export default class Renderer {
     // Handle error throwing for context loss
     this._renderer.domElement.addEventListener('webglcontextlost', e => {
       e.preventDefault();
-      modalAlert('WebGL Context has been lost, this likely means a low memory or excessive GPU usage situation. Please report this error. You may refresh the page or reload the app to continue playing.');
+      void import('../ui/Modal')
+        .then(({ modalAlert }) => modalAlert('WebGL Context has been lost, this likely means a low memory or excessive GPU usage situation. Please report this error. You may refresh the page or reload the app to continue playing.'))
+        .catch((error) => {
+          console.error('Renderer: Failed to load modal alert after context loss.', error);
+        });
       throw new Error('WebGL Context Lost & Caught!');
     }, false);
 

@@ -6,6 +6,8 @@ import ModelRegistry from '@/models/ModelRegistry';
 import PlayerManager from '@/players/PlayerManager';
 import Socket from '@/networking/Socket';
 import WebServer from '@/networking/WebServer';
+import ProcessWorldHostClient from '@/worlds/hosting/ProcessWorldHostClient';
+import WorldHostManager from '@/worlds/hosting/WorldHostManager';
 import WorldManager from '@/worlds/WorldManager';
 import type World from '@/worlds/World';
 
@@ -125,8 +127,9 @@ export default class GameServer {
 
   /** @internal */
   private constructor() {
-    // The constructor is intentionally empty to enforce the singleton pattern.
-    // Initialization of the GameServer instance is handled via the `instance` getter.
+    if (ProcessWorldHostClient.shouldEnableFromEnvironment()) {
+      WorldHostManager.instance.setClient(new ProcessWorldHostClient());
+    }
   }
 
   /**

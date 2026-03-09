@@ -70,6 +70,44 @@ const manualChunks = (id) => {
     return undefined;
   }
 
+  if (id.includes('/ethers/')) {
+    return 'vendor-ethers';
+  }
+
+  if (
+    id.includes('/socket.io-client/')
+    || id.includes('/socket.io-parser/')
+    || id.includes('/engine.io-client/')
+    || id.includes('/engine.io-parser/')
+    || id.includes('/@socket.io/component-emitter/')
+    || id.includes('/debug/')
+    || id.includes('/ms/')
+  ) {
+    return 'vendor-socket';
+  }
+
+  if (
+    id.includes('/ajv/')
+    || id.includes('/fast-uri/')
+    || id.includes('/fast-deep-equal/')
+    || id.includes('/json-schema-traverse/')
+  ) {
+    return 'vendor-schema';
+  }
+
+  if (
+    id.includes('/@noble/')
+    || id.includes('/aes-js/')
+    || id.includes('/@adraffy/ens-normalize/')
+    || id.includes('/tslib/')
+  ) {
+    return 'vendor-crypto';
+  }
+
+  if (id.includes('/dijkstrajs/')) {
+    return 'vendor-pathfinding';
+  }
+
   if (
     id.includes('lil-gui')
     || id.includes('stats.module.js')

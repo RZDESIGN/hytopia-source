@@ -1,5 +1,6 @@
 import protocol from '@hytopia.com/server-protocol';
 import ErrorHandler from '@/errors/ErrorHandler';
+import GatewayPlayerSessionManager from '@/networking/GatewayPlayerSessionManager';
 import IterationMap from '@/shared/classes/IterationMap';
 import Telemetry, { TelemetrySpanOperation } from '@/metrics/Telemetry';
 import { DEFAULT_TICK_RATE } from '@/worlds/physics/Simulation';
@@ -25,6 +26,7 @@ import { PlayerUIEvent } from '@/players/PlayerUI';
 import { SceneUIEvent } from '@/worlds/ui/SceneUI';
 import { SimulationEvent } from '@/worlds/physics/Simulation';
 import { WorldEvent } from '@/worlds/World';
+import WorldHostManager from '@/worlds/hosting/WorldHostManager';
 import type Audio from '@/worlds/audios/Audio';
 import type BlockType from '@/worlds/blocks/BlockType';
 import type Chunk from '@/worlds/blocks/Chunk';
@@ -1128,7 +1130,12 @@ export default class NetworkSynchronizer {
   };
 
   private _onPlayerRequestSync = (payload: EventPayloads[PlayerEvent.REQUEST_SYNC]) => {
-    payload.player.connection.send([
+    const session = GatewayPlayerSessionManager.instance.getSessionByPlayer(payload.player);
+    if (!session) {
+      return;
+    }
+
+    WorldHostManager.instance.client.sendPacketsToPlayer(session, [
       protocol.createPacket(protocol.outboundPackets.syncResponsePacketDefinition, {
         r: payload.receivedAt,
         s: Date.now(),
@@ -1715,21 +1722,26 @@ export default class NetworkSynchronizer {
   private _sendPacketPlan(packetPlan: PacketPlan): void {
     Telemetry.startSpan({ operation: TelemetrySpanOperation.SEND_ALL_PACKETS }, () => {
       for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
+        const session = GatewayPlayerSessionManager.instance.getSessionByPlayer(player);
+        if (!session) {
+          continue;
+        }
+
         for (let i = 0; i < packetPlan.reliableSlots.length; i++) {
           const slot = packetPlan.reliableSlots[i];
 
           if (slot.sharedPackets && slot.sharedPackets.length > 0) {
-            player.connection.send(slot.sharedPackets);
+            WorldHostManager.instance.client.sendPacketsToPlayer(session, slot.sharedPackets);
           }
 
           const perPlayerPackets = slot.perPlayerPackets?.get(player);
           if (perPlayerPackets && perPlayerPackets.length > 0) {
-            player.connection.send(perPlayerPackets);
+            WorldHostManager.instance.client.sendPacketsToPlayer(session, perPlayerPackets);
           }
         }
 
         if (packetPlan.sharedUnreliablePackets.length > 0) {
-          player.connection.send(packetPlan.sharedUnreliablePackets, false);
+          WorldHostManager.instance.client.sendPacketsToPlayer(session, packetPlan.sharedUnreliablePackets, false);
         }
       }
     });

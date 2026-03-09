@@ -15,7 +15,6 @@ import NetworkConditionSimulator from './NetworkConditionSimulator';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
 import { NetworkManagerEventType } from './NetworkEvents';
-import Servers from './Servers';
 
 import type {
   DeserializedConnection,
@@ -109,6 +108,7 @@ export default class NetworkManager {
       return console.warn('NetworkManager.connect(): Already connected to server, ignoring.');
     }
 
+    const { default: Servers } = await import('./Servers');
     const { hostname, lobbyId, version } = await Servers.getServerDetails();
 
     this._serverHostname = hostname;
@@ -479,6 +479,7 @@ export default class NetworkManager {
 
   private async _reconnect(): Promise<void> {
     // Probe server health for diagnostics; reconnect flow currently does not branch on this.
+    const { default: Servers } = await import('./Servers');
     await Servers.isCurrentServerHealthy().catch(() => false);
 
     const url = new URL(window.location.href);

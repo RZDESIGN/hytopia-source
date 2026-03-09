@@ -1,5 +1,3 @@
-import { modalAlert, modalPrompt } from '../ui/Modal';
-
 // Minimum supported server version
 const MINIMUM_SUPPORTED_SERVER_VERSION = '0.10.0';
 const DEV_LOCAL_HOSTNAME = 'local.hytopiahosting.com:8080';
@@ -26,6 +24,11 @@ const fetchWithTimeout = async (url: string, init: RequestInit, timeoutMs: numbe
   }
 };
 
+const getModalHelpers = async (): Promise<{
+  modalAlert: typeof import('../ui/Modal').modalAlert;
+  modalPrompt: typeof import('../ui/Modal').modalPrompt;
+}> => import('../ui/Modal');
+
 export default class Servers {
   public static async getServerDetails(): Promise<{ hostname: string, lobbyId: string, version: string }> {
     let hostname = '';
@@ -39,6 +42,7 @@ export default class Servers {
 
       // Prompt for server hostname if not already present in join query parameter
       if (!hostname) {
+        const { modalPrompt } = await getModalHelpers();
         hostname = await modalPrompt(
           'Connect to a HYTOPIA server (leave blank for local dev).\nRecommended: use a Chromium browser (Chrome, Brave, Edge).',
           '',
@@ -141,6 +145,7 @@ export default class Servers {
       (majorServer === majorMin && minorServer < minorMin) ||
       (majorServer === majorMin && minorServer === minorMin && patchServer < patchMin)
     ) {
+      const { modalAlert } = await getModalHelpers();
       await modalAlert(
         'This HYTOPIA game is out of date.\n' +
         `It is running SDK version ${version}, which is not supported.\n` +

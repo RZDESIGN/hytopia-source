@@ -7,6 +7,7 @@ import PlatformGateway from '@/networking/PlatformGateway';
 import PlayerCamera from '@/players/PlayerCamera';
 import PlayerUI from '@/players/PlayerUI';
 import Serializer from '@/networking/Serializer';
+import type { HostedPlayerPacketEnvelope } from '@/worlds/hosting/WorldHostProtocol';
 import {
   SEQUENCED_MOVEMENT_INPUT_SET,
   SEQUENCED_MOVEMENT_INPUTS,
@@ -208,12 +209,6 @@ export default class Player extends EventRouter implements protocol.Serializable
       ? PlatformGateway.instance.getPlayerCosmetics(session.user.id)
       : Promise.resolve(undefined);
     this.ui = new PlayerUI(this);
-
-    connection.onPacket(protocol.PacketId.CHAT_MESSAGE_SEND, this._onChatMessageSendPacket);
-    connection.onPacket(protocol.PacketId.DEBUG_CONFIG, this._onDebugConfigPacket);
-    connection.onPacket(protocol.PacketId.INPUT, this._onInputPacket);
-    connection.onPacket(protocol.PacketId.SYNC_REQUEST, this._onSyncRequestPacket);
-    connection.onPacket(protocol.PacketId.UI_DATA_SEND, this._onUIDataSendPacket);
   }
 
   /**
@@ -493,6 +488,31 @@ export default class Player extends EventRouter implements protocol.Serializable
   }
 
   /** @internal */
+  public handleHostedPacket(envelope: HostedPlayerPacketEnvelope): void {
+    const { packet, receivedAtMonotonicMs, receivedAtUnixMs } = envelope;
+
+    switch (packet[0]) {
+      case protocol.PacketId.CHAT_MESSAGE_SEND:
+        this._onChatMessageSendPacket(packet as protocol.ChatMessageSendPacket);
+        break;
+      case protocol.PacketId.DEBUG_CONFIG:
+        this._onDebugConfigPacket(packet as protocol.DebugConfigPacket);
+        break;
+      case protocol.PacketId.INPUT:
+        this._onInputPacket(packet as protocol.InputPacket);
+        break;
+      case protocol.PacketId.SYNC_REQUEST:
+        this._onSyncRequestPacket(receivedAtUnixMs, receivedAtMonotonicMs);
+        break;
+      case protocol.PacketId.UI_DATA_SEND:
+        this._onUIDataSendPacket(packet as protocol.UIDataSendPacket);
+        break;
+      default:
+        break;
+    }
+  }
+
+  /** @internal */
   public markInputAppliedForSimulation(): void {
     if (
       this._queuedSequencedMovementInputs.length === 0 &&
@@ -732,12 +752,12 @@ export default class Player extends EventRouter implements protocol.Serializable
   };
 
   /** @internal */
-  private _onSyncRequestPacket = () => {
+  private _onSyncRequestPacket = (receivedAtUnixMs: number, receivedAtMonotonicMs: number) => {
     if (this._world) {
       this.emitWithWorld(this._world, PlayerEvent.REQUEST_SYNC, {
         player: this,
-        receivedAt: Date.now(),
-        receivedAtMs: performance.now(),
+        receivedAt: receivedAtUnixMs,
+        receivedAtMs: receivedAtMonotonicMs,
       });
     }
   };

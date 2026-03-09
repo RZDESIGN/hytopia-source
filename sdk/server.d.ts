@@ -8156,6 +8156,7 @@ export declare class Player extends EventRouter implements protocol.Serializable
 
 
 
+
 }
 
 /**
@@ -9196,6 +9197,7 @@ export declare class PlayerManager {
      * **Category:** Players
      */
     getConnectedPlayerByUsername(username: string): Player | undefined;
+
 
 
 

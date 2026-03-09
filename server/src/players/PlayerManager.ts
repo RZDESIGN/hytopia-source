@@ -1,9 +1,12 @@
 import { ConnectionEvent } from '@/networking/Connection';
 import EventRouter from '@/events/EventRouter';
 import ErrorHandler from '@/errors/ErrorHandler';
+import GatewayPlayerSessionManager from '@/networking/GatewayPlayerSessionManager';
 import PersistenceManager from '@/persistence/PersistenceManager';
 import Player, { PlayerEvent } from '@/players/Player';
 import WorldManager from '@/worlds/WorldManager';
+import WorldHostManager from '@/worlds/hosting/WorldHostManager';
+import type { AnyPacket } from '@hytopia.com/server-protocol';
 import type Connection from '@/networking/Connection';
 import type { Session } from '@/networking/PlatformGateway';
 import type World from '@/worlds/World';
@@ -90,7 +93,7 @@ export default class PlayerManager {
   public worldSelectionHandler?: (player: Player) => Promise<World | undefined>;
 
   /** @internal */
-  private _connectionPlayers: Map<Connection, Player> = new Map<Connection, Player>();
+  private _gatewaySessions = GatewayPlayerSessionManager.instance;
 
   /** @internal */
   private _worldPlayers: Map<World, Set<Player>> = new Map<World, Set<Player>>();
@@ -99,6 +102,10 @@ export default class PlayerManager {
   private constructor() {
     EventRouter.globalInstance.on(ConnectionEvent.OPENED, ({ connection, session }) => {
       void this._onConnectionOpened(connection, session);
+    });
+
+    EventRouter.globalInstance.on(ConnectionEvent.PACKET_RECEIVED, ({ connection, packet }) => {
+      this._onConnectionPacketReceived(connection, packet);
     });
 
     EventRouter.globalInstance.on(ConnectionEvent.DISCONNECTED, ({ connection }) => {
@@ -120,7 +127,7 @@ export default class PlayerManager {
    * **Category:** Players
    */
   public get playerCount(): number {
-    return this._connectionPlayers.size;
+    return this._gatewaySessions.sessionCount;
   }
 
   /**
@@ -131,7 +138,7 @@ export default class PlayerManager {
    * **Category:** Players
    */
   public getConnectedPlayers(): Player[] {
-    return Array.from(this._connectionPlayers.values());
+    return this._gatewaySessions.getAllPlayers();
   }
 
   /**
@@ -161,7 +168,7 @@ export default class PlayerManager {
    * **Category:** Players
    */
   public getConnectedPlayerByUsername(username: string): Player | undefined {
-    return Array.from(this._connectionPlayers.values()).find(player => {
+    return this._gatewaySessions.getAllPlayers().find(player => {
       return player.username.toLowerCase() === username.toLowerCase();
     });
   }
@@ -171,20 +178,35 @@ export default class PlayerManager {
     const player = new Player(connection, session);
     player.on(PlayerEvent.JOINED_WORLD, this._onPlayerJoinedWorld);
     player.on(PlayerEvent.LEFT_WORLD, this._onPlayerLeftWorld);
+    const gatewaySession = this._gatewaySessions.createSession(player);
 
     await player.loadInitialPersistedData();
 
     EventRouter.globalInstance.emit(PlayerManagerEvent.PLAYER_CONNECTED, { player, connectionParams: connection.initialConnectionParams });
     
-    const world = await this.worldSelectionHandler?.(player);
-    player.joinWorld(world ?? WorldManager.instance.getDefaultWorld());
+    const selectedWorld = await this.worldSelectionHandler?.(player);
+    const targetWorld = selectedWorld ?? WorldManager.instance.getDefaultWorld();
+    WorldHostManager.instance.client.assignPlayerToWorld(gatewaySession, targetWorld);
+  }
 
-    this._connectionPlayers.set(connection, player);
+  /** @internal */
+  private _onConnectionPacketReceived(connection: Connection, packet: AnyPacket) {
+    const session = this._gatewaySessions.getSessionByConnection(connection);
+    if (!session) {
+      return;
+    }
+
+    WorldHostManager.instance.client.handlePlayerPacket(session, {
+      packet,
+      receivedAtMonotonicMs: performance.now(),
+      receivedAtUnixMs: Date.now(),
+    });
   }
 
   /** @internal */
   private _onConnectionDisconnected(connection: Connection) {
-    const player = this._connectionPlayers.get(connection);
+    const session = this._gatewaySessions.getSessionByConnection(connection);
+    const player = session?.player;
 
     if (player) {
       player.resetInputs(); // prevent movement/actions if keys were pressed at time of disconnect
@@ -194,24 +216,24 @@ export default class PlayerManager {
 
   /** @internal */
   private _onConnectionReconnected(connection: Connection) {
-    const player = this._connectionPlayers.get(connection);
+    const session = this._gatewaySessions.getSessionByConnection(connection);
+    const player = session?.player;
 
     if (player) {
       player.reconnected();
       EventRouter.globalInstance.emit(PlayerManagerEvent.PLAYER_RECONNECTED, { player });
     } else {
-      ErrorHandler.warning(`PlayerManager._onConnectionReconnected(): Connection ${connection.id} not in the PlayerManager._connectionPlayers map.`);
+      ErrorHandler.warning(`PlayerManager._onConnectionReconnected(): Connection ${connection.id} not in the GatewayPlayerSessionManager.`);
     }
   }
   
   /** @internal */
   private _onConnectionClosed(connection: Connection) {
-    const player = this._connectionPlayers.get(connection);
+    const session = this._gatewaySessions.removeSessionByConnection(connection);
+    const player = session?.player;
 
     if (player) {
       player.disconnect();
-
-      this._connectionPlayers.delete(connection);
 
       if (!connection.isDuplicate) {
         PersistenceManager.instance.unloadPlayerData(player).catch(error => {
@@ -221,7 +243,7 @@ export default class PlayerManager {
 
       EventRouter.globalInstance.emit(PlayerManagerEvent.PLAYER_DISCONNECTED, { player });
     } else {
-      ErrorHandler.warning(`PlayerManager._onConnectionClosed(): Connection ${connection.id} not in the PlayerManager._connectionPlayers map.`);
+      ErrorHandler.warning(`PlayerManager._onConnectionClosed(): Connection ${connection.id} not in the GatewayPlayerSessionManager.`);
     }
   }
 
@@ -239,6 +261,11 @@ export default class PlayerManager {
 
   /** @internal */
   private _onPlayerLeftWorld = ({ player, world }: { player: Player, world: World }) => {
+    const session = this._gatewaySessions.getSessionByPlayer(player);
+    if (session) {
+      WorldHostManager.instance.client.detachPlayerFromWorld(session, world, 'world_transfer');
+    }
+
     const players = this._worldPlayers.get(world);
 
     if (!players) {
