@@ -84,7 +84,9 @@ export enum AudioEvent {
     // (undocumented)
     SET_REFERENCE_DISTANCE = "AUDIO.SET_REFERENCE_DISTANCE",
     // (undocumented)
-    SET_VOLUME = "AUDIO.SET_VOLUME"
+    SET_VOLUME = "AUDIO.SET_VOLUME",
+    // (undocumented)
+    UNLOAD = "AUDIO.UNLOAD"
 }
 
 // @public
@@ -129,6 +131,9 @@ export interface AudioEventPayloads {
     [AudioEvent.SET_VOLUME]: {
         audio: Audio;
         volume: number;
+    };
+    [AudioEvent.UNLOAD]: {
+        audio: Audio;
     };
 }
 

@@ -246,5 +246,24 @@ Emitted when the audio's volume is set.
 
 
 </td></tr>
+<tr><td>
+
+["AUDIO.UNLOAD"](./server.audioeventpayloads._audio.unload_.md)
+
+
+</td><td>
+
+
+</td><td>
+
+{ audio: [Audio](./server.audio.md)<!-- -->; }
+
+
+</td><td>
+
+Emitted when the audio is removed from the world audio manager.
+
+
+</td></tr>
 </tbody></table>
 

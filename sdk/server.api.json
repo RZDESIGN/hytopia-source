@@ -1678,6 +1678,27 @@
               },
               "releaseTag": "Public",
               "name": "SET_VOLUME"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!AudioEvent.UNLOAD:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "UNLOAD = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"AUDIO.UNLOAD\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "UNLOAD"
             }
           ]
         },
@@ -2204,6 +2225,51 @@
               "isOptional": false,
               "releaseTag": "Public",
               "name": "\"AUDIO.SET_VOLUME\"",
+              "propertyTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 6
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!AudioEventPayloads#\"AUDIO.UNLOAD\":member",
+              "docComment": "/**\n * Emitted when the audio is removed from the world audio manager.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "["
+                },
+                {
+                  "kind": "Reference",
+                  "text": "AudioEvent.UNLOAD",
+                  "canonicalReference": "server!AudioEvent.UNLOAD:member"
+                },
+                {
+                  "kind": "Content",
+                  "text": "]: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "{\n        audio: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Audio",
+                  "canonicalReference": "server!Audio:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n    }"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "\"AUDIO.UNLOAD\"",
               "propertyTypeTokenRange": {
                 "startIndex": 3,
                 "endIndex": 6

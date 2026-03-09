@@ -188,5 +188,19 @@ SET\_VOLUME
 
 
 </td></tr>
+<tr><td>
+
+UNLOAD
+
+
+</td><td>
+
+`"AUDIO.UNLOAD"`
+
+
+</td><td>
+
+
+</td></tr>
 </tbody></table>
 

@@ -14,6 +14,7 @@
     "build:docs": "npx api-documenter markdown --input-folder=../sdk --output-folder ../sdk/docs",
     "build:api": "npx api-extractor run --local",
     "format": "npx eslint --fix ./src",
+    "test:world-host-all": "npm run test:world-host && npm run test:world-host-client",
     "test:world-host": "node --test ./tests/worlds/hosting/*.test.mjs",
     "test:world-host-client": "bun test ./tests/worlds/hosting/*.test.ts"
   },

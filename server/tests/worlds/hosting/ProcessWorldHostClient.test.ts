@@ -1,10 +1,14 @@
 import { afterEach, expect, test } from 'bun:test';
+import { once } from 'node:events';
+import { gunzipSync } from 'node:zlib';
+import protocol from '@hytopia.com/server-protocol';
 import GatewayPlayerSession from '@/networking/GatewayPlayerSession';
 import GatewayPlayerSessionManager from '@/networking/GatewayPlayerSessionManager';
 import PlayerManager from '@/players/PlayerManager';
 import { PlayerCameraMode } from '@/players/PlayerCamera';
 import ProcessWorldHostClient from '@/worlds/hosting/ProcessWorldHostClient';
 import DefaultPlayerEntityController from '@/worlds/entities/controllers/DefaultPlayerEntityController';
+import { unpack } from 'msgpackr';
 
 import type { EntitySchema, OutlineSchema, WorldSchema } from '@hytopia.com/server-protocol';
 
@@ -12,13 +16,42 @@ const ORIGINAL_SPAWN_CHILD = (ProcessWorldHostClient.prototype as any)._spawnChi
 const ORIGINAL_RESPAWN_DELAY_MS = (ProcessWorldHostClient as any)._RESPAWN_DELAY_MS;
 const ORIGINAL_GET_CONNECTED_PLAYERS_BY_WORLD_SET = PlayerManager.instance.getConnectedPlayersByWorldSet;
 const ORIGINAL_GET_SESSION_BY_PLAYER = GatewayPlayerSessionManager.instance.getSessionByPlayer;
+const ORIGINAL_GET_SESSION_BY_PLAYER_ID = GatewayPlayerSessionManager.instance.getSessionByPlayerId;
+const cleanupCallbacks: Array<() => Promise<void> | void> = [];
 
-afterEach(() => {
+afterEach(async () => {
+  while (cleanupCallbacks.length > 0) {
+    const cleanup = cleanupCallbacks.pop();
+    await cleanup?.();
+  }
+
   (ProcessWorldHostClient.prototype as any)._spawnChild = ORIGINAL_SPAWN_CHILD;
   (ProcessWorldHostClient as any)._RESPAWN_DELAY_MS = ORIGINAL_RESPAWN_DELAY_MS;
   PlayerManager.instance.getConnectedPlayersByWorldSet = ORIGINAL_GET_CONNECTED_PLAYERS_BY_WORLD_SET;
   GatewayPlayerSessionManager.instance.getSessionByPlayer = ORIGINAL_GET_SESSION_BY_PLAYER;
+  GatewayPlayerSessionManager.instance.getSessionByPlayerId = ORIGINAL_GET_SESSION_BY_PLAYER_ID;
 });
+
+const decodeWirePackets = (wireBytes: Uint8Array) => {
+  let buffer = Buffer.from(wireBytes);
+  if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+    buffer = gunzipSync(buffer);
+  }
+
+  return unpack(buffer) as unknown[];
+};
+
+const waitFor = async (predicate: () => boolean, timeoutMs: number = 2_000) => {
+  const startedAt = Date.now();
+
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error('Timed out waiting for condition.');
+    }
+
+    await Bun.sleep(25);
+  }
+};
 
 const createOutlineSchema = (): OutlineSchema => ({
   c: [ 1, 0.5, 0 ],
@@ -197,6 +230,33 @@ const createWorldHarness = () => {
   return { player, playerEntity, world };
 };
 
+const createSessionHarness = () => {
+  const { player, playerEntity, world } = createWorldHarness();
+  const sentMessages: any[] = [];
+  const session = new GatewayPlayerSession({
+    ...player,
+    connection: {
+      id: 'connection-1',
+      send() {},
+      sendSerializedBuffer() {},
+    },
+  } as any);
+  const inlineClient = createInlineClientStub(world) as any;
+  const worldDescriptor = { id: world.id, mode: 'process', name: world.name, processId: 'shadow-test' } as const;
+
+  (ProcessWorldHostClient.prototype as any)._spawnChild = function noop() {};
+
+  const client = new ProcessWorldHostClient(inlineClient);
+  (client as any)._send = (message: any) => {
+    if ((client as any)._child?.connected) {
+      sentMessages.push(message);
+    }
+  };
+  (client as any)._descriptorsByWorldId.set(world.id, worldDescriptor);
+
+  return { client, inlineClient, player: session.player, playerEntity, sentMessages, session, world, worldDescriptor };
+};
+
 test('replays cached and recoverable player-local entity state during mirrored world bootstrap', () => {
   const { player, playerEntity, world } = createWorldHarness();
   const sentMessages: any[] = [];
@@ -287,4 +347,176 @@ test('respawn scheduling only boots one replacement child for repeated exit sign
   await Bun.sleep(25);
 
   expect(spawnCalls).toBe(2);
+});
+
+test('does not duplicate sync requests inline while a connected child owns the mirrored world', () => {
+  const { client, inlineClient, sentMessages, session, worldDescriptor } = createSessionHarness();
+  let inlineHandlePlayerPacketCalls = 0;
+
+  inlineClient.handlePlayerPacket = () => {
+    inlineHandlePlayerPacketCalls += 1;
+  };
+  (client as any)._child = { connected: true };
+  session.player.world = worldDescriptor as any;
+
+  client.handlePlayerPacket(session, {
+    packet: [ protocol.PacketId.SYNC_REQUEST, null ],
+    receivedAtMonotonicMs: 10,
+    receivedAtUnixMs: 20,
+  });
+
+  expect(sentMessages).toHaveLength(1);
+  expect(sentMessages[0]).toEqual(expect.objectContaining({
+    playerId: session.playerId,
+    type: 'player_packets',
+    worldId: worldDescriptor.id,
+  }));
+  expect(inlineHandlePlayerPacketCalls).toBe(0);
+});
+
+test('falls back inline for sync requests when the mirrored child is unavailable', () => {
+  const { client, inlineClient, sentMessages, session, world } = createSessionHarness();
+  let inlineHandlePlayerPacketCalls = 0;
+
+  inlineClient.handlePlayerPacket = () => {
+    inlineHandlePlayerPacketCalls += 1;
+  };
+  (client as any)._child = null;
+  session.player.world = world as any;
+
+  client.handlePlayerPacket(session, {
+    packet: [ protocol.PacketId.SYNC_REQUEST, null ],
+    receivedAtMonotonicMs: 10,
+    receivedAtUnixMs: 20,
+  });
+
+  expect(sentMessages).toHaveLength(0);
+  expect(inlineHandlePlayerPacketCalls).toBe(1);
+});
+
+test('does not duplicate targeted entity sends inline while a connected child owns the mirrored world', () => {
+  const { client, inlineClient, sentMessages, session, worldDescriptor } = createSessionHarness();
+  let inlineEntitySendCalls = 0;
+
+  inlineClient.sendEntitiesToPlayer = () => {
+    inlineEntitySendCalls += 1;
+  };
+  (client as any)._child = { connected: true };
+  session.player.world = worldDescriptor as any;
+
+  client.sendEntitiesToPlayer(session, [{
+    i: 999,
+    ol: createOutlineSchema(),
+  }], 123);
+
+  expect(sentMessages).toHaveLength(1);
+  expect(sentMessages[0]).toEqual(expect.objectContaining({
+    playerId: session.playerId,
+    type: 'player_entities',
+    worldId: worldDescriptor.id,
+    worldTick: 123,
+  }));
+  expect(inlineEntitySendCalls).toBe(0);
+});
+
+test('falls back inline for targeted entity sends when the mirrored child is unavailable', () => {
+  const { client, inlineClient, sentMessages, session, world } = createSessionHarness();
+  let inlineEntitySendCalls = 0;
+
+  inlineClient.sendEntitiesToPlayer = () => {
+    inlineEntitySendCalls += 1;
+  };
+  (client as any)._child = null;
+  session.player.world = world as any;
+
+  client.sendEntitiesToPlayer(session, [{
+    i: 999,
+    ol: createOutlineSchema(),
+  }], 123);
+
+  expect(sentMessages).toHaveLength(0);
+  expect(inlineEntitySendCalls).toBe(1);
+});
+
+test('real child restart reboots mirrored world state and resumes targeted entity forwarding without inline fallback', async () => {
+  const { player, playerEntity, world } = createWorldHarness();
+  const serializedBatches: Uint8Array[] = [];
+  const inlineClient = createInlineClientStub(world) as any;
+  const worldDescriptor = { id: world.id, mode: 'process', name: world.name, processId: 'shadow-test' } as const;
+  const session = new GatewayPlayerSession({
+    ...player,
+    connection: {
+      id: 'connection-1',
+      send() {},
+      sendSerializedBuffer(wireBytes: Uint8Array) {
+        serializedBatches.push(wireBytes);
+      },
+    },
+  } as any);
+  let inlineEntitySends = 0;
+
+  inlineClient.sendEntitiesToPlayer = () => {
+    inlineEntitySends += 1;
+  };
+
+  (ProcessWorldHostClient as any)._RESPAWN_DELAY_MS = 25;
+  PlayerManager.instance.getConnectedPlayersByWorldSet = () => new Set([ session.player ]);
+  GatewayPlayerSessionManager.instance.getSessionByPlayer = () => session;
+  GatewayPlayerSessionManager.instance.getSessionByPlayerId = playerId => {
+    return playerId === session.playerId ? session : undefined;
+  };
+
+  const client = new ProcessWorldHostClient(inlineClient);
+  cleanupCallbacks.push(async () => {
+    const activeChild = (client as any)._child;
+    clearTimeout((client as any)._respawnTimer);
+    (client as any)._respawnTimer = undefined;
+    (client as any)._scheduleRespawn = () => {};
+
+    if (activeChild?.exitCode === null && activeChild?.signalCode === null) {
+      activeChild.kill('SIGTERM');
+      await once(activeChild, 'exit');
+    }
+  });
+
+  (client as any)._descriptorsByWorldId.set(world.id, worldDescriptor);
+  (client as any)._bootstrapMirroredWorlds();
+
+  await waitFor(() => serializedBatches.length > 0);
+  serializedBatches.length = 0;
+
+  const firstChild = (client as any)._child;
+  firstChild.kill('SIGTERM');
+  await once(firstChild, 'exit');
+
+  await waitFor(() => {
+    const nextChild = (client as any)._child;
+    return !!nextChild && nextChild !== firstChild && nextChild.connected;
+  }, 5_000);
+  await waitFor(() => serializedBatches.length > 0, 5_000);
+  serializedBatches.length = 0;
+
+  client.sendEntitiesToPlayer(session, [{
+    i: playerEntity.id,
+    ol: createOutlineSchema(),
+  }], world.loop.currentTick);
+
+  await waitFor(() => {
+    return serializedBatches.some(batch => {
+      const packets = decodeWirePackets(batch) as any[];
+      return packets.some(packet => {
+        return packet[0] === 38 && packet[1]?.[0]?.i === playerEntity.id;
+      });
+    });
+  }, 5_000);
+
+  const matchingBatches = serializedBatches.filter(batch => {
+    const packets = decodeWirePackets(batch) as any[];
+    return packets.some(packet => {
+      return packet[0] === 38 && packet[1]?.[0]?.i === playerEntity.id && packet[1]?.[0]?.ol;
+    });
+  });
+
+  expect(matchingBatches).toHaveLength(1);
+  expect(inlineEntitySends).toBe(0);
 });
