@@ -67,13 +67,11 @@ const LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S = 1 / 8;
 const LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND = 12;
 const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.18 * 0.18;
 const LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.08 * 0.08;
-const LOCAL_PREDICTION_ACTIVE_INPUT_HORIZONTAL_RECONCILE_TOLERANCE_SQ = 0.55 * 0.55;
 const LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ = 2.5 * 2.5;
 const LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE = 10;
 const LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE = 16;
 const LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE = 0.03;
 const LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE = 0.01;
-const LOCAL_PREDICTION_ACTIVE_INPUT_VERTICAL_RECONCILE_TOLERANCE = 0.35;
 const LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE = 2.5;
 const LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE = 18;
 const LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE = 26;
@@ -81,7 +79,6 @@ const LOCAL_PREDICTION_VERTICAL_VELOCITY_ADAPT_RATE = 0.35;
 const LOCAL_PREDICTION_VERTICAL_VELOCITY_REJECT_THRESHOLD = 80;
 const LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE = 0.5;
 const LOCAL_PREDICTION_IDLE_ROTATION_ERROR_DEAD_ZONE = 0.05;
-const LOCAL_PREDICTION_ACTIVE_INPUT_ROTATION_RECONCILE_TOLERANCE = 0.9;
 const LOCAL_PREDICTION_ROTATION_SNAP_ANGLE = 1.2;
 const LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE = 4;
 const LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE = 12;
@@ -1261,9 +1258,9 @@ export default class EntityManager {
         );
 
     if (shouldContinuouslyReconcile) {
-      const shouldDeferActiveInputReconcile =
-        hasLocalMovementIntent &&
-        this._shouldDeferActiveInputReconcile();
+      const shouldDeferActiveInputReconcile = hasLocalMovementIntent
+        ? !this._shouldForceActiveInputReconcile()
+        : false;
 
       if (!shouldDeferActiveInputReconcile) {
         this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
@@ -1499,7 +1496,7 @@ export default class EntityManager {
     return !!blockType && !blockType.isLiquid;
   }
 
-  private _shouldDeferActiveInputReconcile(): boolean {
+  private _shouldForceActiveInputReconcile(): boolean {
     if (this._localPredictionState.hasAuthoritativePosition) {
       const predictedPosition = this._localPredictionState.predictedPosition;
       const authoritativePosition = this._localPredictionState.authoritativePosition;
@@ -1507,15 +1504,15 @@ export default class EntityManager {
       const dz = authoritativePosition.z - predictedPosition.z;
       const horizontalErrorSq = (dx * dx) + (dz * dz);
 
-      if (horizontalErrorSq > LOCAL_PREDICTION_ACTIVE_INPUT_HORIZONTAL_RECONCILE_TOLERANCE_SQ) {
-        return false;
+      if (horizontalErrorSq > LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ) {
+        return true;
       }
 
       if (
         Math.abs(authoritativePosition.y - predictedPosition.y)
-        > LOCAL_PREDICTION_ACTIVE_INPUT_VERTICAL_RECONCILE_TOLERANCE
+        > LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE
       ) {
-        return false;
+        return true;
       }
     }
 
@@ -1524,12 +1521,12 @@ export default class EntityManager {
         this._localPredictionState.authoritativeRotation,
       );
 
-      if (rotationError > LOCAL_PREDICTION_ACTIVE_INPUT_ROTATION_RECONCILE_TOLERANCE) {
-        return false;
+      if (rotationError > LOCAL_PREDICTION_ROTATION_SNAP_ANGLE) {
+        return true;
       }
     }
 
-    return true;
+    return false;
   }
 
   private _setLastAcknowledgedMovementDirection(command?: LocalPredictionCommand): void {
