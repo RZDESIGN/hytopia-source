@@ -4,6 +4,8 @@
 
 ## DEFAULT\_BLOCK\_EDIT\_PREDICTION\_PLACE\_BLOCK\_ID variable
 
+Default block ID used by block edit prediction helpers when placing a block.
+
 **Signature:**
 
 ```typescript

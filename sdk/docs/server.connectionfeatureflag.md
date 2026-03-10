@@ -4,6 +4,8 @@
 
 ## ConnectionFeatureFlag enum
 
+Bit flags negotiated between the server and a client connection.
+
 **Signature:**
 
 ```typescript

@@ -12254,7 +12254,7 @@
         {
           "kind": "Enum",
           "canonicalReference": "server!ConnectionFeatureFlag:enum",
-          "docComment": "",
+          "docComment": "/**\n * Bit flags negotiated between the server and a client connection.\n *\n * @public\n */\n",
           "excerptTokens": [
             {
               "kind": "Content",
@@ -12559,7 +12559,7 @@
         {
           "kind": "Variable",
           "canonicalReference": "server!DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE:var",
-          "docComment": "",
+          "docComment": "/**\n * Default maximum raycast distance used by block edit prediction helpers.\n *\n * @public\n */\n",
           "excerptTokens": [
             {
               "kind": "Content",
@@ -12586,7 +12586,7 @@
         {
           "kind": "Variable",
           "canonicalReference": "server!DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID:var",
-          "docComment": "",
+          "docComment": "/**\n * Default block ID used by block edit prediction helpers when placing a block.\n *\n * @public\n */\n",
           "excerptTokens": [
             {
               "kind": "Content",
@@ -14824,7 +14824,7 @@
         {
           "kind": "Function",
           "canonicalReference": "server!disableConnectionFeature:function(1)",
-          "docComment": "",
+          "docComment": "/**\n * Disables a connection feature bit in the server-wide negotiation mask.\n *\n * @public\n */\n",
           "excerptTokens": [
             {
               "kind": "Content",
@@ -15309,7 +15309,7 @@
         {
           "kind": "Function",
           "canonicalReference": "server!enableConnectionFeature:function(1)",
-          "docComment": "",
+          "docComment": "/**\n * Enables a connection feature bit in the server-wide negotiation mask.\n *\n * @public\n */\n",
           "excerptTokens": [
             {
               "kind": "Content",

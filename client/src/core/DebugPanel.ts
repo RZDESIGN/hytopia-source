@@ -125,6 +125,22 @@ export interface DebugPanelConfig {
     horizontalError: number;
     verticalError: number;
     rotationErrorDeg: number;
+    lastReconcileMode: string;
+    softReconcileCount: number;
+    snapReconcileCount: number;
+    forcedActiveReconcileCount: number;
+    deferredActiveReconcileCount: number;
+    motionBasisHorizontalSpeed: number;
+    motionBasisVertical: number;
+    authoritativeGrounded: boolean;
+    predictedGrounded: boolean;
+    groundedMismatch: boolean;
+    authoritativeGroundedTransitionCount: number;
+    predictedGroundedTransitionCount: number;
+    authoritativeGroundFootOffset: number;
+    predictedGroundFootOffset: number;
+    traceEntryCount: number;
+    latestTraceLine: string;
   };
   chunk: {
     count: number;
@@ -235,6 +251,22 @@ export default class DebugPanel {
       horizontalError: 0,
       verticalError: 0,
       rotationErrorDeg: 0,
+      lastReconcileMode: 'none',
+      softReconcileCount: 0,
+      snapReconcileCount: 0,
+      forcedActiveReconcileCount: 0,
+      deferredActiveReconcileCount: 0,
+      motionBasisHorizontalSpeed: 0,
+      motionBasisVertical: 0,
+      authoritativeGrounded: false,
+      predictedGrounded: false,
+      groundedMismatch: false,
+      authoritativeGroundedTransitionCount: 0,
+      predictedGroundedTransitionCount: 0,
+      authoritativeGroundFootOffset: 0,
+      predictedGroundFootOffset: 0,
+      traceEntryCount: 0,
+      latestTraceLine: '-',
     },
     chunk: {
       count: 0,
@@ -373,6 +405,22 @@ export default class DebugPanel {
     predictionFolder.add(this._config.prediction, 'horizontalError').name('Horizontal Error');
     predictionFolder.add(this._config.prediction, 'verticalError').name('Vertical Error');
     predictionFolder.add(this._config.prediction, 'rotationErrorDeg').name('Rotation Error');
+    predictionFolder.add(this._config.prediction, 'lastReconcileMode').name('Reconcile Mode');
+    predictionFolder.add(this._config.prediction, 'softReconcileCount').name('Soft Reconciles');
+    predictionFolder.add(this._config.prediction, 'snapReconcileCount').name('Snap Reconciles');
+    predictionFolder.add(this._config.prediction, 'forcedActiveReconcileCount').name('Forced Active Rec');
+    predictionFolder.add(this._config.prediction, 'deferredActiveReconcileCount').name('Deferred Active Rec');
+    predictionFolder.add(this._config.prediction, 'motionBasisHorizontalSpeed').name('Motion Basis H');
+    predictionFolder.add(this._config.prediction, 'motionBasisVertical').name('Motion Basis Y');
+    predictionFolder.add(this._config.prediction, 'authoritativeGrounded').name('Auth Grounded');
+    predictionFolder.add(this._config.prediction, 'predictedGrounded').name('Pred Grounded');
+    predictionFolder.add(this._config.prediction, 'groundedMismatch').name('Grounded Mismatch');
+    predictionFolder.add(this._config.prediction, 'authoritativeGroundedTransitionCount').name('Auth Ground Trans');
+    predictionFolder.add(this._config.prediction, 'predictedGroundedTransitionCount').name('Pred Ground Trans');
+    predictionFolder.add(this._config.prediction, 'authoritativeGroundFootOffset').name('Auth Foot Offset');
+    predictionFolder.add(this._config.prediction, 'predictedGroundFootOffset').name('Pred Foot Offset');
+    predictionFolder.add(this._config.prediction, 'traceEntryCount').name('Trace Entries');
+    predictionFolder.add(this._config.prediction, 'latestTraceLine').name('Last Trace');
 
     // Chunk stats panel
     const chunkFolder = this._gui.addFolder('Chunks');
@@ -555,6 +603,22 @@ export default class DebugPanel {
     this._config.prediction.horizontalError = Number(LocalPredictionStats.horizontalError.toFixed(3));
     this._config.prediction.verticalError = Number(LocalPredictionStats.verticalError.toFixed(3));
     this._config.prediction.rotationErrorDeg = Number(LocalPredictionStats.rotationErrorDeg.toFixed(2));
+    this._config.prediction.lastReconcileMode = LocalPredictionStats.lastReconcileMode;
+    this._config.prediction.softReconcileCount = LocalPredictionStats.softReconcileCount;
+    this._config.prediction.snapReconcileCount = LocalPredictionStats.snapReconcileCount;
+    this._config.prediction.forcedActiveReconcileCount = LocalPredictionStats.forcedActiveReconcileCount;
+    this._config.prediction.deferredActiveReconcileCount = LocalPredictionStats.deferredActiveReconcileCount;
+    this._config.prediction.motionBasisHorizontalSpeed = Number(LocalPredictionStats.motionBasisHorizontalSpeed.toFixed(3));
+    this._config.prediction.motionBasisVertical = Number(LocalPredictionStats.motionBasisVertical.toFixed(3));
+    this._config.prediction.authoritativeGrounded = LocalPredictionStats.authoritativeGrounded;
+    this._config.prediction.predictedGrounded = LocalPredictionStats.predictedGrounded;
+    this._config.prediction.groundedMismatch = LocalPredictionStats.groundedMismatch;
+    this._config.prediction.authoritativeGroundedTransitionCount = LocalPredictionStats.authoritativeGroundedTransitionCount;
+    this._config.prediction.predictedGroundedTransitionCount = LocalPredictionStats.predictedGroundedTransitionCount;
+    this._config.prediction.authoritativeGroundFootOffset = Number(LocalPredictionStats.authoritativeGroundFootOffset.toFixed(3));
+    this._config.prediction.predictedGroundFootOffset = Number(LocalPredictionStats.predictedGroundFootOffset.toFixed(3));
+    this._config.prediction.traceEntryCount = LocalPredictionStats.traceEntryCount;
+    this._config.prediction.latestTraceLine = LocalPredictionStats.latestTraceLine;
   }
 
   private _updateChunkStats(): void {

@@ -4,6 +4,8 @@
 
 ## DEFAULT\_BLOCK\_EDIT\_PREDICTION\_MAX\_DISTANCE variable
 
+Default maximum raycast distance used by block edit prediction helpers.
+
 **Signature:**
 
 ```typescript

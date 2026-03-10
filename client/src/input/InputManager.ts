@@ -8,6 +8,8 @@ import {
 } from '@engine-shared/network/ConnectionFeatureFlags';
 import { CameraEventType } from '../core/Camera';
 import type { CameraEventPayload } from '../core/Camera';
+import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
+import { NetworkManagerEventType } from '../network/NetworkEvents';
 
 // Max duration in ms for a tap/click (vs hold)
 const INTERACT_TAP_MAX_DURATION_MS = 200;
@@ -227,6 +229,7 @@ export default class InputManager {
   private _lastMovementPacketTickTimeS: number = 0;
   private _movementPacketTimerId: number | undefined;
   private _movementPacketImmediateFlushScheduled: boolean = false;
+  private _serverMovementTickHz: number | undefined;
 
   // Interact tracking - Map by pointerId to support multitouch
   private _interactPointers: Map<number, InteractPointerState> = new Map();
@@ -352,6 +355,11 @@ export default class InputManager {
     EventRouter.instance.on(
       CameraEventType.GameCameraOrientationChange,
       this._onGameCameraOrientationChange,
+    );
+
+    EventRouter.instance.on(
+      NetworkManagerEventType.WorldPacket,
+      this._onWorldPacket,
     );
   }
 
@@ -511,23 +519,63 @@ export default class InputManager {
     }
   }
 
-  private _getMovementPacketUpdateHz(): number {
-    if (MobileManager.isMobile) {
-      return MOBILE_INPUT_UPDATE_HZ;
+  private _shouldImmediatelyFlushSequencedMovement(): boolean {
+    if (!this._game.camera?.isFirstPersonGameCameraActive) {
+      return true;
     }
 
+    // In first person the server still consumes queued movement once per fixed
+    // world tick. Let the scheduled movement tick batch state changes together
+    // so client replay does not simulate extra mid-tick movement snapshots that
+    // the server never applies.
+    return this._serverMovementTickHz === undefined;
+  }
+
+  private _getMovementPacketUpdateHz(): number {
+    const serverTickHz = this._serverMovementTickHz;
+    if (MobileManager.isMobile) {
+      return serverTickHz !== undefined
+        ? Math.min(MOBILE_INPUT_UPDATE_HZ, serverTickHz)
+        : MOBILE_INPUT_UPDATE_HZ;
+    }
+
+    let desiredHz = DESKTOP_INPUT_UPDATE_HZ;
+
     if (!this._game.camera?.isFirstPersonGameCameraActive) {
-      return DESKTOP_INPUT_UPDATE_HZ;
+      return serverTickHz !== undefined
+        ? Math.min(desiredHz, serverTickHz)
+        : desiredHz;
     }
 
     const refreshRate = this._game.performanceMetricsManager.refreshRate;
-    if (!refreshRate || !Number.isFinite(refreshRate)) {
-      return DESKTOP_INPUT_UPDATE_HZ;
+    if (refreshRate && Number.isFinite(refreshRate)) {
+      desiredHz = Math.min(
+        MAX_FIRST_PERSON_INPUT_UPDATE_HZ,
+        Math.max(DESKTOP_INPUT_UPDATE_HZ, refreshRate),
+      );
     }
 
-    return Math.min(
+    return serverTickHz !== undefined
+      ? Math.min(desiredHz, serverTickHz)
+      : desiredHz;
+  }
+
+  private _onWorldPacket = (payload: NetworkManagerEventPayload.IWorldPacket): void => {
+    const timestepS = payload.deserializedWorld.timestep;
+    if (
+      typeof timestepS !== 'number' ||
+      !Number.isFinite(timestepS) ||
+      timestepS <= 0
+    ) {
+      return;
+    }
+
+    // The server consumes queued sequenced movement input once per world tick,
+    // so sending faster than the fixed tick rate only creates extra client-side
+    // replay states that the server never simulates.
+    this._serverMovementTickHz = Math.min(
       MAX_FIRST_PERSON_INPUT_UPDATE_HZ,
-      Math.max(DESKTOP_INPUT_UPDATE_HZ, refreshRate),
+      Math.max(1, 1 / timestepS),
     );
   }
 
@@ -609,7 +657,9 @@ export default class InputManager {
     if (this._networkedInputEnabled) {
       if (DISCRETE_MOVEMENT_INPUT_SET.has(input)) {
         this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
-        this._scheduleImmediateMovementPacketFlush();
+        if (this._shouldImmediatelyFlushSequencedMovement()) {
+          this._scheduleImmediateMovementPacketFlush();
+        }
       } else {
         this._game.networkManager.sendInputPacket({ [input]: isPressed });
       }
@@ -693,7 +743,9 @@ export default class InputManager {
       this._joystickDirection = nextDirection;
       this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
       this._continuousInputState.jd = nextDirection;
-      this._scheduleImmediateMovementPacketFlush();
+      if (this._shouldImmediatelyFlushSequencedMovement()) {
+        this._scheduleImmediateMovementPacketFlush();
+      }
     }
   }
 

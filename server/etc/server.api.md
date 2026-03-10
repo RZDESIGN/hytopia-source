@@ -853,7 +853,7 @@ export interface ConeColliderOptions extends BaseColliderOptions {
     shape: ColliderShape.CONE;
 }
 
-// @public (undocumented)
+// @public
 export enum ConnectionFeatureFlag {
     // (undocumented)
     DefaultBlockEditPrediction = 2,
@@ -891,10 +891,10 @@ export type DecodedCollisionGroups = {
     collidesWith: string[];
 };
 
-// @public (undocumented)
+// @public
 export const DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE = 5;
 
-// @public (undocumented)
+// @public
 export const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
 
 // @public
@@ -985,7 +985,7 @@ export type DefaultPlayerEntityOptions = {
     cosmeticHiddenSlots?: PlayerCosmeticSlot[];
 } & PlayerEntityOptions;
 
-// @public (undocumented)
+// @public
 export const disableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
 
 // @public
@@ -1008,7 +1008,7 @@ export interface DynamicRigidBodyOptions extends BaseRigidBodyOptions {
     type: RigidBodyType.DYNAMIC;
 }
 
-// @public (undocumented)
+// @public
 export const enableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
 
 // @public

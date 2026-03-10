@@ -4,6 +4,8 @@
 
 ## disableConnectionFeature() function
 
+Disables a connection feature bit in the server-wide negotiation mask.
+
 **Signature:**
 
 ```typescript

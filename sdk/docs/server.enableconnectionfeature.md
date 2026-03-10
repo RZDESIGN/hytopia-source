@@ -4,6 +4,8 @@
 
 ## enableConnectionFeature() function
 
+Enables a connection feature bit in the server-wide negotiation mask.
+
 **Signature:**
 
 ```typescript

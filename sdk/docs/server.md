@@ -799,6 +799,8 @@ The default collision groups.
 
 </td><td>
 
+Bit flags negotiated between the server and a client connection.
+
 
 </td></tr>
 <tr><td>
@@ -1137,6 +1139,8 @@ Description
 
 </td><td>
 
+Disables a connection feature bit in the server-wide negotiation mask.
+
 
 </td></tr>
 <tr><td>
@@ -1145,6 +1149,8 @@ Description
 
 
 </td><td>
+
+Enables a connection feature bit in the server-wide negotiation mask.
 
 
 </td></tr>
@@ -2030,6 +2036,8 @@ N prefix = negative axis (e.g. `NZ_90` = -Z face up, rotated 90° around global 
 
 </td><td>
 
+Default maximum raycast distance used by block edit prediction helpers.
+
 
 </td></tr>
 <tr><td>
@@ -2038,6 +2046,8 @@ N prefix = negative axis (e.g. `NZ_90` = -Z face up, rotated 90° around global 
 
 
 </td><td>
+
+Default block ID used by block edit prediction helpers when placing a block.
 
 
 </td></tr>

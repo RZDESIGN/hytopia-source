@@ -47,16 +47,6 @@ const HIGH_FREQUENCY_SYNC_MAX_PLAYERS = 8;
 const NETWORK_SYNC_RATE_OVERRIDE = Number(process.env.HYTOPIA_NETWORK_SYNC_RATE);
 const PROTOCOL_ENTITY_SCHEMA = (protocol as unknown as { entitySchema?: { properties?: Record<string, unknown> } }).entitySchema;
 const PROTOCOL_ENTITY_PROPERTIES = PROTOCOL_ENTITY_SCHEMA?.properties ?? {};
-const PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK = Object.prototype.hasOwnProperty.call(
-  PROTOCOL_ENTITY_PROPERTIES,
-  'aq',
-);
-const PROTOCOL_SUPPORTS_ENTITY_FAST_MOVEMENT_DEFAULT = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'fd');
-const PROTOCOL_SUPPORTS_ENTITY_JUST_SUBMERGED = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'js');
-const PROTOCOL_SUPPORTS_ENTITY_MOTION_BASIS_VELOCITY = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'mv');
-const PROTOCOL_SUPPORTS_ENTITY_PREDICTION_FLAGS = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'pf');
-const PROTOCOL_SUPPORTS_ENTITY_MOVEMENT_REFERENCE_YAW = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'py');
-const PROTOCOL_SUPPORTS_ENTITY_SWIM_UPWARD_COOLDOWN = Object.prototype.hasOwnProperty.call(PROTOCOL_ENTITY_PROPERTIES, 'sc');
 const PROTOCOL_ENTITY_KEYS = Object.keys(PROTOCOL_ENTITY_PROPERTIES);
 const ENTITY_LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
@@ -2738,37 +2728,20 @@ export default class NetworkSynchronizer {
       predictionFlags |= ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING;
     }
 
-    if (PROTOCOL_SUPPORTS_ENTITY_FAST_MOVEMENT_DEFAULT) {
-      entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
-    }
-
-    if (PROTOCOL_SUPPORTS_ENTITY_PREDICTION_FLAGS) {
-      entitySync.pf = predictionFlags;
-    }
-
-    if (PROTOCOL_SUPPORTS_ENTITY_MOVEMENT_REFERENCE_YAW) {
-      entitySync.py = controller.localPredictionMovementReferenceYaw;
-    }
-
-    if (PROTOCOL_SUPPORTS_ENTITY_MOTION_BASIS_VELOCITY) {
-      entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
-    }
-
-    if (PROTOCOL_SUPPORTS_ENTITY_JUST_SUBMERGED) {
-      entitySync.js = undefined;
-    }
-
-    if (PROTOCOL_SUPPORTS_ENTITY_SWIM_UPWARD_COOLDOWN) {
-      entitySync.sc = undefined;
-    }
+    entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
+    entitySync.pf = predictionFlags;
+    entitySync.py = controller.localPredictionMovementReferenceYaw;
+    entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
+    entitySync.js = undefined;
+    entitySync.sc = undefined;
 
     const justSubmergedRemainingMs = controller.localPredictionJustSubmergedRemainingMs;
-    if (PROTOCOL_SUPPORTS_ENTITY_JUST_SUBMERGED && justSubmergedRemainingMs > 0) {
+    if (justSubmergedRemainingMs > 0) {
       entitySync.js = justSubmergedRemainingMs;
     }
 
     const swimUpwardCooldownRemainingMs = controller.localPredictionSwimUpwardCooldownRemainingMs;
-    if (PROTOCOL_SUPPORTS_ENTITY_SWIM_UPWARD_COOLDOWN && swimUpwardCooldownRemainingMs > 0) {
+    if (swimUpwardCooldownRemainingMs > 0) {
       entitySync.sc = swimUpwardCooldownRemainingMs;
     }
   }
@@ -2801,10 +2774,6 @@ export default class NetworkSynchronizer {
   }
 
   private _queuePlayerInputAcknowledgements(): void {
-    if (!PROTOCOL_SUPPORTS_ENTITY_INPUT_ACK) {
-      return;
-    }
-
     for (const playerEntity of this._world.entityManager.playerEntities) {
       if (!playerEntity.isSpawned || playerEntity.id === undefined) {
         continue;

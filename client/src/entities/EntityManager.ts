@@ -85,8 +85,6 @@ const LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE = 12;
 const LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR = 0.05;
 const LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR = 0.8;
 const LOCAL_PREDICTION_COMMAND_BUFFER_SIZE = 96;
-const LOCAL_PREDICTION_PRE_ACK_RECONCILE_GRACE_S = 0.2;
-const LOCAL_PREDICTION_ACK_SUPPORT_DETECTION_TIMEOUT_S = 2.0;
 const INPUT_MANAGER_MOVEMENT_PACKET_SENT_EVENT = 'INPUT_MANAGER.MOVEMENT_PACKET_SENT';
 const LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
@@ -183,9 +181,16 @@ type LocalPredictionState = {
   commandBufferHead: number;
   commandBufferCount: number;
   lastAcknowledgedInputSequenceNumber: number;
-  preAckReconcileGraceRemainingS: number;
-  ackSupportDetectionElapsedS: number;
-  shouldBufferCommandsBeforeAck: boolean;
+};
+
+type LocalPredictionDebugState = {
+  lastReconcileMode: 'none' | 'buffered' | 'deferred' | 'soft' | 'snap';
+  softReconcileCount: number;
+  snapReconcileCount: number;
+  forcedActiveReconcileCount: number;
+  deferredActiveReconcileCount: number;
+  authoritativeGroundedTransitionCount: number;
+  predictedGroundedTransitionCount: number;
 };
 
 export default class EntityManager {
@@ -258,9 +263,15 @@ export default class EntityManager {
     commandBufferHead: 0,
     commandBufferCount: 0,
     lastAcknowledgedInputSequenceNumber: -1,
-    preAckReconcileGraceRemainingS: 0,
-    ackSupportDetectionElapsedS: 0,
-    shouldBufferCommandsBeforeAck: true,
+  };
+  private _localPredictionDebug: LocalPredictionDebugState = {
+    lastReconcileMode: 'none',
+    softReconcileCount: 0,
+    snapReconcileCount: 0,
+    forcedActiveReconcileCount: 0,
+    deferredActiveReconcileCount: 0,
+    authoritativeGroundedTransitionCount: 0,
+    predictedGroundedTransitionCount: 0,
   };
   private _shouldSuppressEnvironmentAnimations: boolean;
 
@@ -717,12 +728,6 @@ export default class EntityManager {
 
       if (entity instanceof Entity && hasLocalPredictionSupport) {
         this._bindLocalPredictionToEntity(entity);
-      } else if (
-        entity instanceof Entity &&
-        this._localPredictionState.entityId === entity.id &&
-        deserializedEntity.acknowledgedInputSequenceNumber !== undefined
-      ) {
-        this._resetLocalPredictionState();
       }
 
       const shouldUseLocalPrediction =
@@ -826,6 +831,13 @@ export default class EntityManager {
 
   private _resetLocalPredictionState(nextEntityId?: number): void {
     LocalPredictionStats.reset();
+    this._localPredictionDebug.lastReconcileMode = 'none';
+    this._localPredictionDebug.softReconcileCount = 0;
+    this._localPredictionDebug.snapReconcileCount = 0;
+    this._localPredictionDebug.forcedActiveReconcileCount = 0;
+    this._localPredictionDebug.deferredActiveReconcileCount = 0;
+    this._localPredictionDebug.authoritativeGroundedTransitionCount = 0;
+    this._localPredictionDebug.predictedGroundedTransitionCount = 0;
     this._localPredictionState.entityId = nextEntityId;
     this._localPredictionState.estimatedVerticalVelocity = 0;
     this._localPredictionState.estimatedWalkSpeed = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
@@ -860,9 +872,6 @@ export default class EntityManager {
     this._localPredictionState.commandBufferHead = 0;
     this._localPredictionState.commandBufferCount = 0;
     this._localPredictionState.lastAcknowledgedInputSequenceNumber = -1;
-    this._localPredictionState.preAckReconcileGraceRemainingS = 0;
-    this._localPredictionState.ackSupportDetectionElapsedS = 0;
-    this._localPredictionState.shouldBufferCommandsBeforeAck = true;
     this._syncLocalPredictionStats();
   }
 
@@ -919,7 +928,7 @@ export default class EntityManager {
     const controllerState = this._localPredictionState.controllerState;
     const predictionFlags = deserializedEntity.localPredictionFlags ?? 0;
     controllerState.authoritativeFastMovementByDefault = !!deserializedEntity.localPredictionFastMovementByDefault;
-    controllerState.authoritativeGrounded = (predictionFlags & LOCAL_PREDICTION_FLAG_GROUNDED) !== 0;
+    this._setAuthoritativeGrounded((predictionFlags & LOCAL_PREDICTION_FLAG_GROUNDED) !== 0);
     controllerState.authoritativeMovementReferenceYaw =
       Number.isFinite(deserializedEntity.localPredictionMovementReferenceYaw)
         ? Number(deserializedEntity.localPredictionMovementReferenceYaw)
@@ -938,6 +947,10 @@ export default class EntityManager {
       0,
       (deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs ?? 0) / 1000,
     );
+
+    if (this._localPredictionState.commandBufferCount === 0) {
+      this._syncPredictedControllerStateFromAuthoritative();
+    }
   }
 
   private _setLocalAuthoritativePosition(position: { x: number; y: number; z: number }, serverTick: number): void {
@@ -1007,9 +1020,6 @@ export default class EntityManager {
 
   private _setLocalAcknowledgedInputSequenceNumber(acknowledgedInputSequenceNumber: number): void {
     this._localPredictionState.supportsInputAcknowledgements = true;
-    this._localPredictionState.shouldBufferCommandsBeforeAck = true;
-    this._localPredictionState.ackSupportDetectionElapsedS = 0;
-    this._localPredictionState.preAckReconcileGraceRemainingS = 0;
 
     if (acknowledgedInputSequenceNumber <= this._localPredictionState.lastAcknowledgedInputSequenceNumber) {
       return;
@@ -1085,23 +1095,7 @@ export default class EntityManager {
       this._localPredictionState.predictedRotation.copy(this._localPredictionState.authoritativeRotation);
     }
 
-    this._localPredictionState.controllerState.predictedMotionBasisVelocity.copy(
-      this._localPredictionState.controllerState.authoritativeMotionBasisVelocity,
-    );
-    this._localPredictionState.controllerState.predictedFastMovementByDefault =
-      this._localPredictionState.controllerState.authoritativeFastMovementByDefault;
-    this._localPredictionState.controllerState.predictedGrounded =
-      this._localPredictionState.controllerState.authoritativeGrounded;
-    this._localPredictionState.controllerState.predictedMovementReferenceYaw =
-      this._localPredictionState.controllerState.authoritativeMovementReferenceYaw;
-    this._localPredictionState.controllerState.predictedSwimming =
-      this._localPredictionState.controllerState.authoritativeSwimming;
-    this._localPredictionState.controllerState.predictedGroundFootOffset =
-      this._localPredictionState.controllerState.authoritativeGroundFootOffset;
-    this._localPredictionState.controllerState.predictedJustSubmergedRemainingS =
-      this._localPredictionState.controllerState.authoritativeJustSubmergedRemainingS;
-    this._localPredictionState.controllerState.predictedSwimUpwardCooldownRemainingS =
-      this._localPredictionState.controllerState.authoritativeSwimUpwardCooldownRemainingS;
+    this._syncPredictedControllerStateFromAuthoritative();
 
     let replayedCommandCount = 0;
     let replayedSubstepCount = 0;
@@ -1149,13 +1143,6 @@ export default class EntityManager {
   }
 
   private _onMovementPacketSent = (payload: MovementPacketSentPayload): void => {
-    if (
-      !this._localPredictionState.supportsInputAcknowledgements &&
-      !this._localPredictionState.shouldBufferCommandsBeforeAck
-    ) {
-      return;
-    }
-
     if (payload.sequenceNumber <= this._localPredictionState.lastAcknowledgedInputSequenceNumber) {
       return;
     }
@@ -1184,18 +1171,6 @@ export default class EntityManager {
     command.c = payload.c;
 
     this._localPredictionState.commandBufferCount++;
-
-    if (!this._localPredictionState.supportsInputAcknowledgements) {
-      this._localPredictionState.preAckReconcileGraceRemainingS = LOCAL_PREDICTION_PRE_ACK_RECONCILE_GRACE_S;
-      this._localPredictionState.ackSupportDetectionElapsedS += payload.deltaTimeS;
-
-      if (this._localPredictionState.ackSupportDetectionElapsedS >= LOCAL_PREDICTION_ACK_SUPPORT_DETECTION_TIMEOUT_S) {
-        this._localPredictionState.shouldBufferCommandsBeforeAck = false;
-        this._localPredictionState.commandBufferHead = 0;
-        this._localPredictionState.commandBufferCount = 0;
-        this._localPredictionState.preAckReconcileGraceRemainingS = 0;
-      }
-    }
   }
 
   private _applyLocalPrediction(entity: Entity, deltaTimeS: number): void {
@@ -1247,34 +1222,29 @@ export default class EntityManager {
       substeps++;
     }
 
-    if (
-      !this._localPredictionState.supportsInputAcknowledgements &&
-      this._localPredictionState.preAckReconcileGraceRemainingS > 0
-    ) {
-      this._localPredictionState.preAckReconcileGraceRemainingS = Math.max(
-        0,
-        this._localPredictionState.preAckReconcileGraceRemainingS - clampedDeltaS,
-      );
-    }
+    // True CSP depends on input acknowledgements, so keep authoritative
+    // reconciliation paused while any locally issued commands remain pending.
+    const shouldContinuouslyReconcile = this._localPredictionState.commandBufferCount === 0;
 
-    // When ack replay is active, avoid pulling toward delayed authoritative state
-    // while there are pending commands. Before first ack, apply a short grace window
-    // to reduce start-of-movement tug while still preserving a smooth fallback.
-    const shouldContinuouslyReconcile =
-      this._localPredictionState.supportsInputAcknowledgements
-        ? this._localPredictionState.commandBufferCount === 0
-        : (
-          this._localPredictionState.commandBufferCount === 0 ||
-          this._localPredictionState.preAckReconcileGraceRemainingS <= 0
-        );
+    this._localPredictionDebug.lastReconcileMode = shouldContinuouslyReconcile ? 'none' : 'buffered';
 
     if (shouldContinuouslyReconcile) {
+      const shouldForceActiveInputReconcile = hasLocalMovementIntent &&
+        this._shouldForceActiveInputReconcile();
       const shouldDeferActiveInputReconcile = hasLocalMovementIntent
-        ? !this._shouldForceActiveInputReconcile()
+        ? !shouldForceActiveInputReconcile
         : false;
 
       if (!shouldDeferActiveInputReconcile) {
-        this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
+        if (shouldForceActiveInputReconcile) {
+          this._localPredictionDebug.forcedActiveReconcileCount++;
+        }
+
+        this._localPredictionDebug.lastReconcileMode =
+          this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
+      } else {
+        this._localPredictionDebug.deferredActiveReconcileCount++;
+        this._localPredictionDebug.lastReconcileMode = 'deferred';
       }
     }
 
@@ -1297,6 +1267,9 @@ export default class EntityManager {
     c: boolean,
   ): boolean {
     const controllerState = this._localPredictionState.controllerState;
+    if (this._localPredictionState.commandBufferCount === 0) {
+      this._syncPredictedControllerStateFromAuthoritative();
+    }
     controllerState.predictedJustSubmergedRemainingS = Math.max(
       0,
       controllerState.predictedJustSubmergedRemainingS - deltaTimeS,
@@ -1369,7 +1342,7 @@ export default class EntityManager {
         this._localPredictionState.estimatedVerticalVelocity <= 3
       ) {
         predictedVerticalVelocity = LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY + motionBasisVelocity.y;
-        controllerState.predictedGrounded = false;
+        this._setPredictedGrounded(false);
       } else if (
         controllerState.predictedSwimming &&
         controllerState.predictedSwimUpwardCooldownRemainingS <= 0
@@ -1428,7 +1401,7 @@ export default class EntityManager {
         controllerState.predictedGrounded &&
         Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON
       ) {
-        controllerState.predictedGrounded = false;
+        this._setPredictedGrounded(false);
       }
 
       return;
@@ -1443,7 +1416,7 @@ export default class EntityManager {
       (movingDownOrStable && distanceToGround <= LOCAL_PREDICTION_GROUND_SNAP_DISTANCE)
     ) {
       predictedPosition.y = groundY + footOffset;
-      controllerState.predictedGrounded = true;
+      this._setPredictedGrounded(true);
       return;
     }
 
@@ -1451,26 +1424,33 @@ export default class EntityManager {
       distanceToGround > LOCAL_PREDICTION_GROUND_SNAP_DISTANCE &&
       Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON
     ) {
-      controllerState.predictedGrounded = false;
+      this._setPredictedGrounded(false);
     }
   }
 
   private _getPredictedGroundY(x: number, y: number, z: number, footOffset: number): number | undefined {
-    const sampleBlockY = Math.floor((y - footOffset) - LOCAL_PREDICTION_COLLISION_EPSILON);
+    const footY = y - footOffset;
+    const maxCandidateBlockY = Math.floor(footY + LOCAL_PREDICTION_GROUND_SNAP_DISTANCE - LOCAL_PREDICTION_COLLISION_EPSILON);
+    const minCandidateBlockY = Math.floor(footY - LOCAL_PREDICTION_GROUND_SNAP_DISTANCE - 1);
     let highestGroundY: number | undefined;
 
     for (const [sampleOffsetX, sampleOffsetZ] of LOCAL_PREDICTION_FOOTPRINT_SAMPLES) {
-      const blockIsSolid = this._isSolidPredictionBlockAt(
-        Math.floor(x + sampleOffsetX),
-        sampleBlockY,
-        Math.floor(z + sampleOffsetZ),
-      );
+      const sampleX = Math.floor(x + sampleOffsetX);
+      const sampleZ = Math.floor(z + sampleOffsetZ);
 
-      if (!blockIsSolid) {
-        continue;
+      for (let blockY = maxCandidateBlockY; blockY >= minCandidateBlockY; blockY--) {
+        const blockIsSolid = this._isSolidPredictionBlockAt(sampleX, blockY, sampleZ);
+
+        if (!blockIsSolid) {
+          continue;
+        }
+
+        const candidateGroundY = blockY + 1;
+        if (candidateGroundY <= footY + LOCAL_PREDICTION_GROUND_SNAP_DISTANCE) {
+          highestGroundY = Math.max(highestGroundY ?? -Infinity, candidateGroundY);
+          break;
+        }
       }
-
-      highestGroundY = Math.max(highestGroundY ?? -Infinity, sampleBlockY + 1);
     }
 
     return highestGroundY;
@@ -1546,6 +1526,42 @@ export default class EntityManager {
       LOCAL_PREDICTION_COLLISION_EPSILON,
       LOCAL_PREDICTION_ENTITY_HEIGHT - this._getPredictedGroundFootOffset(),
     );
+  }
+
+  private _syncPredictedControllerStateFromAuthoritative(): void {
+    const controllerState = this._localPredictionState.controllerState;
+    controllerState.predictedMotionBasisVelocity.copy(
+      controllerState.authoritativeMotionBasisVelocity,
+    );
+    controllerState.predictedFastMovementByDefault = controllerState.authoritativeFastMovementByDefault;
+    this._setPredictedGrounded(controllerState.authoritativeGrounded);
+    controllerState.predictedMovementReferenceYaw = controllerState.authoritativeMovementReferenceYaw;
+    controllerState.predictedSwimming = controllerState.authoritativeSwimming;
+    controllerState.predictedGroundFootOffset = controllerState.authoritativeGroundFootOffset;
+    controllerState.predictedJustSubmergedRemainingS = controllerState.authoritativeJustSubmergedRemainingS;
+    controllerState.predictedSwimUpwardCooldownRemainingS = controllerState.authoritativeSwimUpwardCooldownRemainingS;
+  }
+
+  private _setAuthoritativeGrounded(nextGrounded: boolean): void {
+    const controllerState = this._localPredictionState.controllerState;
+
+    if (controllerState.authoritativeGrounded === nextGrounded) {
+      return;
+    }
+
+    controllerState.authoritativeGrounded = nextGrounded;
+    this._localPredictionDebug.authoritativeGroundedTransitionCount++;
+  }
+
+  private _setPredictedGrounded(nextGrounded: boolean): void {
+    const controllerState = this._localPredictionState.controllerState;
+
+    if (controllerState.predictedGrounded === nextGrounded) {
+      return;
+    }
+
+    controllerState.predictedGrounded = nextGrounded;
+    this._localPredictionDebug.predictedGroundedTransitionCount++;
   }
 
   private _shouldForceActiveInputReconcile(): boolean {
@@ -1711,7 +1727,16 @@ export default class EntityManager {
     return currentEstimate + ((sampledSpeed - currentEstimate) * adaptRate);
   }
 
-  private _reconcileLocalPrediction(isActivelyMoving: boolean, deltaTimeS: number): void {
+  private _reconcileLocalPrediction(isActivelyMoving: boolean, deltaTimeS: number): 'none' | 'soft' | 'snap' {
+    let reconcileMode: 'none' | 'soft' | 'snap' = 'none';
+    const markSoftReconcile = () => {
+      if (reconcileMode === 'none') {
+        reconcileMode = 'soft';
+      }
+    };
+    let sawSoftReconcile = false;
+    let sawSnapReconcile = false;
+
     if (this._localPredictionState.hasAuthoritativePosition) {
       const predictedPosition = this._localPredictionState.predictedPosition;
       const authoritativePosition = this._localPredictionState.authoritativePosition;
@@ -1722,6 +1747,8 @@ export default class EntityManager {
       if (horizontalErrorSq > LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ) {
         predictedPosition.x = authoritativePosition.x;
         predictedPosition.z = authoritativePosition.z;
+        reconcileMode = 'snap';
+        sawSnapReconcile = true;
       } else {
         const horizontalDeadZoneSq = isActivelyMoving
           ? LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ
@@ -1734,6 +1761,8 @@ export default class EntityManager {
           );
           predictedPosition.x += dx * correctionT;
           predictedPosition.z += dz * correctionT;
+          markSoftReconcile();
+          sawSoftReconcile = true;
         }
       }
 
@@ -1741,6 +1770,8 @@ export default class EntityManager {
       const absVerticalError = Math.abs(verticalError);
       if (absVerticalError > LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE) {
         predictedPosition.y = authoritativePosition.y;
+        reconcileMode = 'snap';
+        sawSnapReconcile = true;
       } else {
         const verticalDeadZone = isActivelyMoving
           ? LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE
@@ -1752,6 +1783,8 @@ export default class EntityManager {
             deltaTimeS * (isActivelyMoving ? LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE : LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE),
           );
           predictedPosition.y += verticalError * correctionT;
+          markSoftReconcile();
+          sawSoftReconcile = true;
         }
       }
     }
@@ -1760,6 +1793,8 @@ export default class EntityManager {
       const rotationError = this._localPredictionState.predictedRotation.angleTo(this._localPredictionState.authoritativeRotation);
       if (rotationError > LOCAL_PREDICTION_ROTATION_SNAP_ANGLE) {
         this._localPredictionState.predictedRotation.copy(this._localPredictionState.authoritativeRotation);
+        reconcileMode = 'snap';
+        sawSnapReconcile = true;
       } else {
         const deadZone = isActivelyMoving
           ? LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE
@@ -1771,9 +1806,21 @@ export default class EntityManager {
             deltaTimeS * (isActivelyMoving ? LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE : LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE),
           );
           this._localPredictionState.predictedRotation.slerp(this._localPredictionState.authoritativeRotation, correctionT);
+          markSoftReconcile();
+          sawSoftReconcile = true;
         }
       }
     }
+
+    if (sawSoftReconcile && !sawSnapReconcile) {
+      this._localPredictionDebug.softReconcileCount++;
+    }
+
+    if (sawSnapReconcile) {
+      this._localPredictionDebug.snapReconcileCount++;
+    }
+
+    return reconcileMode;
   }
 
   private _syncLocalPredictionStats(
@@ -1784,6 +1831,11 @@ export default class EntityManager {
     LocalPredictionStats.supportsInputAcknowledgements = this._localPredictionState.supportsInputAcknowledgements;
     LocalPredictionStats.bufferedCommandCount = this._localPredictionState.commandBufferCount;
     LocalPredictionStats.lastAcknowledgedInputSequenceNumber = this._localPredictionState.lastAcknowledgedInputSequenceNumber;
+    LocalPredictionStats.lastReconcileMode = this._localPredictionDebug.lastReconcileMode;
+    LocalPredictionStats.softReconcileCount = this._localPredictionDebug.softReconcileCount;
+    LocalPredictionStats.snapReconcileCount = this._localPredictionDebug.snapReconcileCount;
+    LocalPredictionStats.forcedActiveReconcileCount = this._localPredictionDebug.forcedActiveReconcileCount;
+    LocalPredictionStats.deferredActiveReconcileCount = this._localPredictionDebug.deferredActiveReconcileCount;
 
     if (lastReplayCommandCount !== undefined) {
       LocalPredictionStats.lastReplayCommandCount = lastReplayCommandCount;
@@ -1819,6 +1871,24 @@ export default class EntityManager {
     } else {
       LocalPredictionStats.rotationErrorDeg = 0;
     }
+
+    const controllerState = this._localPredictionState.controllerState;
+    LocalPredictionStats.motionBasisHorizontalSpeed = Math.hypot(
+      controllerState.predictedMotionBasisVelocity.x,
+      controllerState.predictedMotionBasisVelocity.z,
+    );
+    LocalPredictionStats.motionBasisVertical = controllerState.predictedMotionBasisVelocity.y;
+    LocalPredictionStats.authoritativeGrounded = controllerState.authoritativeGrounded;
+    LocalPredictionStats.predictedGrounded = controllerState.predictedGrounded;
+    LocalPredictionStats.groundedMismatch =
+      controllerState.authoritativeGrounded !== controllerState.predictedGrounded;
+    LocalPredictionStats.authoritativeGroundedTransitionCount =
+      this._localPredictionDebug.authoritativeGroundedTransitionCount;
+    LocalPredictionStats.predictedGroundedTransitionCount =
+      this._localPredictionDebug.predictedGroundedTransitionCount;
+    LocalPredictionStats.authoritativeGroundFootOffset = controllerState.authoritativeGroundFootOffset;
+    LocalPredictionStats.predictedGroundFootOffset = controllerState.predictedGroundFootOffset;
+    LocalPredictionStats.maybeRecordTrace();
   }
 
   private _onBlockEntityBuilt = (payload: WorkerEventPayload.IBlockEntityBuilt): void => {

@@ -2763,6 +2763,11 @@ export declare interface ConeColliderOptions extends BaseColliderOptions {
     radius?: number;
 }
 
+/**
+ * Bit flags negotiated between the server and a client connection.
+ *
+ * @public
+ */
 export declare enum ConnectionFeatureFlag {
     SceneInteract = 1,
     DefaultBlockEditPrediction = 2
@@ -2863,8 +2868,18 @@ export declare type DecodedCollisionGroups = {
     collidesWith: string[];
 };
 
+/**
+ * Default maximum raycast distance used by block edit prediction helpers.
+ *
+ * @public
+ */
 export declare const DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE = 5;
 
+/**
+ * Default block ID used by block edit prediction helpers when placing a block.
+ *
+ * @public
+ */
 export declare const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
 
 /**
@@ -3282,6 +3297,11 @@ export declare type DefaultPlayerEntityOptions = {
 
 declare function definePacket<TId extends PacketId, TSchema>(id: TId, schema: JSONSchemaType<TSchema>): IPacketDefinition<TId, TSchema>;
 
+/**
+ * Disables a connection feature bit in the server-wide negotiation mask.
+ *
+ * @public
+ */
 export declare const disableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
 
 /**
@@ -3380,6 +3400,11 @@ export declare interface DynamicRigidBodyOptions extends BaseRigidBodyOptions {
     softCcdPrediction?: number;
 }
 
+/**
+ * Enables a connection feature bit in the server-wide negotiation mask.
+ *
+ * @public
+ */
 export declare const enableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
 
 declare type EntitiesPacket = IPacket<typeof PacketId.ENTITIES, EntitiesSchema> & [WorldTick];

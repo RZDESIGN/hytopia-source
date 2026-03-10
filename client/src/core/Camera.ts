@@ -824,7 +824,10 @@ export default class Camera {
         : 1;
       const scaledTargetFilmOffset = this._gameCameraTargetFilmOffset * zoomScale;
       if (filmOffset !== scaledTargetFilmOffset) {
-        if (this._gameCameraSkipNextFilmOffsetInterpolation) {
+        if (
+          this._gameCameraMode === CameraMode.FIRST_PERSON ||
+          this._gameCameraSkipNextFilmOffsetInterpolation
+        ) {
           // Apply immediately when skipping interpolation
           perspectiveGameCamera.filmOffset = scaledTargetFilmOffset;
           this._gameCameraSkipNextFilmOffsetInterpolation = false;
