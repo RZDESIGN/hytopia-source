@@ -93,6 +93,23 @@ const LOCAL_PREDICTION_ACK_SUPPORT_DETECTION_TIMEOUT_S = 2.0;
 const INPUT_MANAGER_MOVEMENT_PACKET_SENT_EVENT = 'INPUT_MANAGER.MOVEMENT_PACKET_SENT';
 const LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
+const LOCAL_PREDICTION_COLLIDER_RADIUS = 0.4;
+const LOCAL_PREDICTION_FOOT_OFFSET = 0.75;
+const LOCAL_PREDICTION_TOP_OFFSET = 0.75;
+const LOCAL_PREDICTION_GROUND_SNAP_DISTANCE = 0.18;
+const LOCAL_PREDICTION_COLLISION_EPSILON = 0.001;
+const LOCAL_PREDICTION_SAMPLE_INSET = LOCAL_PREDICTION_COLLIDER_RADIUS * 0.8;
+const LOCAL_PREDICTION_FOOTPRINT_SAMPLES = [
+  [0, 0],
+  [LOCAL_PREDICTION_SAMPLE_INSET, 0],
+  [-LOCAL_PREDICTION_SAMPLE_INSET, 0],
+  [0, LOCAL_PREDICTION_SAMPLE_INSET],
+  [0, -LOCAL_PREDICTION_SAMPLE_INSET],
+  [LOCAL_PREDICTION_SAMPLE_INSET, LOCAL_PREDICTION_SAMPLE_INSET],
+  [LOCAL_PREDICTION_SAMPLE_INSET, -LOCAL_PREDICTION_SAMPLE_INSET],
+  [-LOCAL_PREDICTION_SAMPLE_INSET, LOCAL_PREDICTION_SAMPLE_INSET],
+  [-LOCAL_PREDICTION_SAMPLE_INSET, -LOCAL_PREDICTION_SAMPLE_INSET],
+] as const;
 
 type LocalPredictionCommand = {
   sequenceNumber: number;
@@ -846,6 +863,7 @@ export default class EntityManager {
 
   private _bindLocalPredictionToEntity(entity: Entity): void {
     const isFirstOwnedBinding = this._localPredictionState.entityId === undefined;
+    let bindingChanged = false;
 
     if (this._localPredictionState.entityId !== entity.id) {
       if (!isFirstOwnedBinding) {
@@ -858,6 +876,17 @@ export default class EntityManager {
         this._localPredictionState.lastAuthoritativePositionServerTick = 0;
         this._localPredictionState.lastAuthoritativeRotationServerTick = 0;
       }
+
+      bindingChanged = true;
+    }
+
+    if (
+      !bindingChanged &&
+      this._localPredictionState.hasPredictedTransform &&
+      this._localPredictionState.hasAuthoritativePosition &&
+      this._localPredictionState.hasAuthoritativeRotation
+    ) {
+      return;
     }
 
     this._localPredictionState.predictedPosition.copy(entity.position);
@@ -1281,6 +1310,7 @@ export default class EntityManager {
     const isActivelyMoving = movementDirection.lengthSq > 0;
     const motionBasisVelocity = controllerState.predictedMotionBasisVelocity;
     const isFastMovement = sh || controllerState.predictedFastMovementByDefault;
+    const predictedPosition = this._localPredictionState.predictedPosition;
     const movementSpeed = controllerState.predictedSwimming
       ? (isFastMovement ? LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED : LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED)
       : (
@@ -1294,10 +1324,20 @@ export default class EntityManager {
 
     const movementVelocityX = isActivelyMoving ? movementDirection.x * movementSpeed : 0;
     const movementVelocityZ = isActivelyMoving ? movementDirection.z * movementSpeed : 0;
-    this._localPredictionState.predictedPosition.x += (movementVelocityX + motionBasisVelocity.x) * deltaTimeS;
-    this._localPredictionState.predictedPosition.z += (movementVelocityZ + motionBasisVelocity.z) * deltaTimeS;
+    this._applyPredictedHorizontalMovement(
+      (movementVelocityX + motionBasisVelocity.x) * deltaTimeS,
+      (movementVelocityZ + motionBasisVelocity.z) * deltaTimeS,
+    );
 
     let predictedVerticalVelocity = this._localPredictionState.estimatedVerticalVelocity + motionBasisVelocity.y;
+
+    if (
+      controllerState.predictedGrounded &&
+      !controllerState.predictedSwimming &&
+      !sp
+    ) {
+      predictedVerticalVelocity = motionBasisVelocity.y;
+    }
 
     if (controllerState.predictedSwimming) {
       if (c) {
@@ -1331,7 +1371,16 @@ export default class EntityManager {
       }
     }
 
-    this._localPredictionState.predictedPosition.y += predictedVerticalVelocity * deltaTimeS;
+    const verticalDelta = predictedVerticalVelocity * deltaTimeS;
+    if (!this._intersectsLocalPredictionWorldAt(predictedPosition.x, predictedPosition.y + verticalDelta, predictedPosition.z)) {
+      predictedPosition.y += verticalDelta;
+    } else if (verticalDelta > 0) {
+      predictedVerticalVelocity = motionBasisVelocity.y;
+    }
+
+    if (!controllerState.predictedSwimming) {
+      this._resolvePredictedGroundContact(predictedVerticalVelocity, motionBasisVelocity.y);
+    }
 
     if (isActivelyMoving) {
       const movementYaw = resolveDeterministicMovementYaw(movementDirection.x, movementDirection.z);
@@ -1340,6 +1389,114 @@ export default class EntityManager {
     }
 
     return isActivelyMoving || motionBasisVelocity.lengthSq() > 0 || Math.abs(predictedVerticalVelocity) > 0.001;
+  }
+
+  private _applyPredictedHorizontalMovement(deltaX: number, deltaZ: number): void {
+    const predictedPosition = this._localPredictionState.predictedPosition;
+
+    if (deltaX !== 0) {
+      const nextX = predictedPosition.x + deltaX;
+      if (!this._intersectsLocalPredictionWorldAt(nextX, predictedPosition.y, predictedPosition.z)) {
+        predictedPosition.x = nextX;
+      }
+    }
+
+    if (deltaZ !== 0) {
+      const nextZ = predictedPosition.z + deltaZ;
+      if (!this._intersectsLocalPredictionWorldAt(predictedPosition.x, predictedPosition.y, nextZ)) {
+        predictedPosition.z = nextZ;
+      }
+    }
+  }
+
+  private _resolvePredictedGroundContact(predictedVerticalVelocity: number, motionBasisVelocityY: number): void {
+    const controllerState = this._localPredictionState.controllerState;
+    const predictedPosition = this._localPredictionState.predictedPosition;
+    const groundY = this._getPredictedGroundY(predictedPosition.x, predictedPosition.y, predictedPosition.z);
+
+    if (groundY === undefined) {
+      if (
+        controllerState.predictedGrounded &&
+        Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON
+      ) {
+        controllerState.predictedGrounded = false;
+      }
+
+      return;
+    }
+
+    const footY = predictedPosition.y - LOCAL_PREDICTION_FOOT_OFFSET;
+    const distanceToGround = footY - groundY;
+    const movingDownOrStable = predictedVerticalVelocity <= (motionBasisVelocityY + LOCAL_PREDICTION_COLLISION_EPSILON);
+
+    if (
+      distanceToGround < 0 ||
+      (movingDownOrStable && distanceToGround <= LOCAL_PREDICTION_GROUND_SNAP_DISTANCE)
+    ) {
+      predictedPosition.y = groundY + LOCAL_PREDICTION_FOOT_OFFSET;
+      controllerState.predictedGrounded = true;
+      return;
+    }
+
+    if (
+      distanceToGround > LOCAL_PREDICTION_GROUND_SNAP_DISTANCE &&
+      Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON
+    ) {
+      controllerState.predictedGrounded = false;
+    }
+  }
+
+  private _getPredictedGroundY(x: number, y: number, z: number): number | undefined {
+    const sampleBlockY = Math.floor((y - LOCAL_PREDICTION_FOOT_OFFSET) - LOCAL_PREDICTION_COLLISION_EPSILON);
+    let highestGroundY: number | undefined;
+
+    for (const [sampleOffsetX, sampleOffsetZ] of LOCAL_PREDICTION_FOOTPRINT_SAMPLES) {
+      const blockIsSolid = this._isSolidPredictionBlockAt(
+        Math.floor(x + sampleOffsetX),
+        sampleBlockY,
+        Math.floor(z + sampleOffsetZ),
+      );
+
+      if (!blockIsSolid) {
+        continue;
+      }
+
+      highestGroundY = Math.max(highestGroundY ?? -Infinity, sampleBlockY + 1);
+    }
+
+    return highestGroundY;
+  }
+
+  private _intersectsLocalPredictionWorldAt(x: number, y: number, z: number): boolean {
+    const minBlockX = Math.floor(x - LOCAL_PREDICTION_COLLIDER_RADIUS + LOCAL_PREDICTION_COLLISION_EPSILON);
+    const maxBlockX = Math.floor(x + LOCAL_PREDICTION_COLLIDER_RADIUS - LOCAL_PREDICTION_COLLISION_EPSILON);
+    const minBlockY = Math.floor(y - LOCAL_PREDICTION_FOOT_OFFSET + LOCAL_PREDICTION_COLLISION_EPSILON);
+    const maxBlockY = Math.floor(y + LOCAL_PREDICTION_TOP_OFFSET - LOCAL_PREDICTION_COLLISION_EPSILON);
+    const minBlockZ = Math.floor(z - LOCAL_PREDICTION_COLLIDER_RADIUS + LOCAL_PREDICTION_COLLISION_EPSILON);
+    const maxBlockZ = Math.floor(z + LOCAL_PREDICTION_COLLIDER_RADIUS - LOCAL_PREDICTION_COLLISION_EPSILON);
+
+    for (let blockY = minBlockY; blockY <= maxBlockY; blockY++) {
+      for (let blockZ = minBlockZ; blockZ <= maxBlockZ; blockZ++) {
+        for (let blockX = minBlockX; blockX <= maxBlockX; blockX++) {
+          if (this._isSolidPredictionBlockAt(blockX, blockY, blockZ)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  private _isSolidPredictionBlockAt(x: number, y: number, z: number): boolean {
+    const block = this._game.chunkManager.getBlock({ x, y, z });
+
+    if (!block || block.blockId === 0) {
+      return false;
+    }
+
+    const blockType = this._game.blockTypeManager.getBlockType(block.blockId);
+    return !!blockType && !blockType.isLiquid;
   }
 
   private _shouldDeferActiveInputReconcile(): boolean {
