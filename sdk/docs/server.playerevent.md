@@ -36,12 +36,40 @@ Description
 </th></tr></thead>
 <tbody><tr><td>
 
+BLOCK\_EDIT\_PREDICTION
+
+
+</td><td>
+
+`"PLAYER.BLOCK_EDIT_PREDICTION"`
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 CHAT\_MESSAGE\_SEND
 
 
 </td><td>
 
 `"PLAYER.CHAT_MESSAGE_SEND"`
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+CONFIRM\_BLOCK\_EDIT\_PREDICTION
+
+
+</td><td>
+
+`"PLAYER.CONFIRM_BLOCK_EDIT_PREDICTION"`
 
 
 </td><td>
@@ -126,6 +154,20 @@ REQUEST\_SYNC
 </td><td>
 
 `"PLAYER.REQUEST_SYNC"`
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+ROLLBACK\_BLOCK\_EDIT\_PREDICTION
+
+
+</td><td>
+
+`"PLAYER.ROLLBACK_BLOCK_EDIT_PREDICTION"`
 
 
 </td><td>

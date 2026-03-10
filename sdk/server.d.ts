@@ -1078,6 +1078,21 @@ export declare interface BlockColliderOptions extends BaseColliderOptions {
     halfExtents?: Vector3Like;
 }
 
+declare type BlockEditPredictionResultSchema = {
+    p: string;
+    a: 'confirm' | 'rollback';
+};
+
+declare const blockEditPredictionResultSchema: JSONSchemaType<BlockEditPredictionResultSchema>;
+
+declare type BlockEditPredictionResultsPacket = IPacket<typeof PacketId.BLOCK_EDIT_PREDICTION_RESULTS, BlockEditPredictionResultsSchema> & [WorldTick];
+
+declare const blockEditPredictionResultsPacketDefinition: IPacketDefinition<PacketId.BLOCK_EDIT_PREDICTION_RESULTS, BlockEditPredictionResultsSchema>;
+
+declare type BlockEditPredictionResultsSchema = BlockEditPredictionResultSchema[];
+
+declare const blockEditPredictionResultsSchema: JSONSchemaType<BlockEditPredictionResultsSchema>;
+
 /**
  * The options for creating a block entity.
  *
@@ -5519,6 +5534,8 @@ declare namespace inboundPackets {
         debugConfigPacketDefinition,
         InputPacket,
         inputPacketDefinition,
+        PredictedBlockEditsSendPacket,
+        predictedBlockEditsSendPacketDefinition,
         StateRequestPacket,
         stateRequestPacketDefinition,
         SyncRequestPacket,
@@ -6730,6 +6747,8 @@ declare namespace outboundPackets {
     export {
         AudiosPacket,
         audiosPacketDefinition,
+        BlockEditPredictionResultsPacket,
+        blockEditPredictionResultsPacketDefinition,
         BlocksPacket,
         blocksPacketDefinition,
         BlockTypesPacket,
@@ -6802,6 +6821,7 @@ declare enum PacketId {
     STATE_REQUEST = 2,
     CHAT_MESSAGE_SEND = 3,
     UI_DATA_SEND = 4,
+    PREDICTED_BLOCK_EDITS_SEND = 5,
     SYNC_RESPONSE = 32,
     AUDIOS = 33,
     BLOCKS = 34,
@@ -6818,6 +6838,7 @@ declare enum PacketId {
     PLAYERS = 45,
     PARTICLE_EMITTERS = 46,
     NOTIFICATION_PERMISSION_REQUEST = 47,
+    BLOCK_EDIT_PREDICTION_RESULTS = 48,
     CONNECTION = 116,
     HEARTBEAT = 117,
     DEBUG_CONFIG = 128,
@@ -8156,6 +8177,18 @@ export declare class Player extends EventRouter implements protocol.Serializable
      */
     setMaxInteractDistance(distance: number): void;
     /**
+     * Confirms a speculative client block edit batch by prediction id.
+     *
+     * **Category:** Players
+     */
+    confirmPredictedBlockEdit(predictionId: string): void;
+    /**
+     * Rejects and rolls back a speculative client block edit batch by prediction id.
+     *
+     * **Category:** Players
+     */
+    rollbackPredictedBlockEdit(predictionId: string): void;
+    /**
      * Merges data into the player's persisted data cache.
      *
      * Use for: saving progress, inventory, or other player-specific state.
@@ -8173,6 +8206,7 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     setPersistedData(data: Record<string, unknown>): void;
+
 
 
 
@@ -9082,13 +9116,16 @@ export declare type PlayerEntityOptions = {
  * @public
  */
 export declare enum PlayerEvent {
+    BLOCK_EDIT_PREDICTION = "PLAYER.BLOCK_EDIT_PREDICTION",
     CHAT_MESSAGE_SEND = "PLAYER.CHAT_MESSAGE_SEND",
+    CONFIRM_BLOCK_EDIT_PREDICTION = "PLAYER.CONFIRM_BLOCK_EDIT_PREDICTION",
     INTERACT = "PLAYER.INTERACT",
     JOINED_WORLD = "PLAYER.JOINED_WORLD",
     LEFT_WORLD = "PLAYER.LEFT_WORLD",
     RECONNECTED_WORLD = "PLAYER.RECONNECTED_WORLD",
     REQUEST_NOTIFICATION_PERMISSION = "PLAYER.REQUEST_NOTIFICATION_PERMISSION",
-    REQUEST_SYNC = "PLAYER.REQUEST_SYNC"
+    REQUEST_SYNC = "PLAYER.REQUEST_SYNC",
+    ROLLBACK_BLOCK_EDIT_PREDICTION = "PLAYER.ROLLBACK_BLOCK_EDIT_PREDICTION"
 }
 
 /**
@@ -9098,10 +9135,21 @@ export declare enum PlayerEvent {
  * @public
  */
 export declare interface PlayerEventPayloads {
+    /** Emitted when a player submits a speculative block edit intent. */
+    [PlayerEvent.BLOCK_EDIT_PREDICTION]: {
+        player: Player;
+        predictionId: string;
+        edits: PredictedBlockEditAttempt[];
+    };
     /** Emitted when a player sends a chat message. */
     [PlayerEvent.CHAT_MESSAGE_SEND]: {
         player: Player;
         message: string;
+    };
+    /** Emitted when server gameplay confirms a speculative block edit prediction. */
+    [PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION]: {
+        player: Player;
+        predictionId: string;
     };
     /** Emitted when a player joins a world. */
     [PlayerEvent.JOINED_WORLD]: {
@@ -9134,6 +9182,11 @@ export declare interface PlayerEventPayloads {
         player: Player;
         receivedAt: number;
         receivedAtMs: number;
+    };
+    /** Emitted when server gameplay rejects a speculative block edit prediction. */
+    [PlayerEvent.ROLLBACK_BLOCK_EDIT_PREDICTION]: {
+        player: Player;
+        predictionId: string;
     };
 }
 
@@ -9455,6 +9508,37 @@ export declare interface PlayerUIEventPayloads {
     };
 }
 
+/**
+ * A client-submitted speculative block edit intent.
+ *
+ * **Category:** Players
+ * @public
+ */
+export declare type PredictedBlockEditAttempt = {
+    globalCoordinate: Vector3Like;
+    blockTypeId: number;
+    blockRotationIndex?: number;
+};
+
+declare type PredictedBlockEditSchema = {
+    c: VectorSchema;
+    i: number;
+    r?: number;
+};
+
+declare const predictedBlockEditSchema: JSONSchemaType<PredictedBlockEditSchema>;
+
+declare type PredictedBlockEditsSendPacket = IPacket<typeof PacketId.PREDICTED_BLOCK_EDITS_SEND, PredictedBlockEditsSendSchema>;
+
+declare const predictedBlockEditsSendPacketDefinition: IPacketDefinition<PacketId.PREDICTED_BLOCK_EDITS_SEND, PredictedBlockEditsSendSchema>;
+
+declare type PredictedBlockEditsSendSchema = {
+    p: string;
+    e: PredictedBlockEditSchema[];
+};
+
+declare const predictedBlockEditsSendSchema: JSONSchemaType<PredictedBlockEditsSendSchema>;
+
 declare namespace protocol {
     export {
         ConnectionPacket,
@@ -9467,6 +9551,8 @@ declare namespace protocol {
         debugConfigPacketDefinition,
         InputPacket,
         inputPacketDefinition,
+        PredictedBlockEditsSendPacket,
+        predictedBlockEditsSendPacketDefinition,
         StateRequestPacket,
         stateRequestPacketDefinition,
         SyncRequestPacket,
@@ -9475,6 +9561,8 @@ declare namespace protocol {
         uiDataSendPacketDefinition,
         AudiosPacket,
         audiosPacketDefinition,
+        BlockEditPredictionResultsPacket,
+        blockEditPredictionResultsPacketDefinition,
         BlocksPacket,
         blocksPacketDefinition,
         BlockTypesPacket,
@@ -9530,6 +9618,10 @@ declare namespace protocol {
         audioSchema,
         AudiosSchema,
         audiosSchema,
+        BlockEditPredictionResultSchema,
+        blockEditPredictionResultSchema,
+        BlockEditPredictionResultsSchema,
+        blockEditPredictionResultsSchema,
         BlockSchema,
         blockSchema,
         BlocksSchema,
@@ -9588,6 +9680,10 @@ declare namespace protocol {
         playerSchema,
         PlayersSchema,
         playersSchema,
+        PredictedBlockEditSchema,
+        predictedBlockEditSchema,
+        PredictedBlockEditsSendSchema,
+        predictedBlockEditsSendSchema,
         QuaternionSchema,
         quaternionSchema,
         RgbColorSchema,

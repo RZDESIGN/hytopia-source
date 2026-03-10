@@ -2501,6 +2501,19 @@ The input state of a `Player`<!-- -->.
 </td></tr>
 <tr><td>
 
+[PredictedBlockEditAttempt](./server.predictedblockeditattempt.md)
+
+
+</td><td>
+
+A client-submitted speculative block edit intent.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
 [RawCollider](./server.rawcollider.md)
 
 

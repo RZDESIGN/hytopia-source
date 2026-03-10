@@ -39,6 +39,25 @@ Description
 </th></tr></thead>
 <tbody><tr><td>
 
+["PLAYER.BLOCK\_EDIT\_PREDICTION"](./server.playereventpayloads._player.block_edit_prediction_.md)
+
+
+</td><td>
+
+
+</td><td>
+
+{ player: [Player](./server.player.md)<!-- -->; predictionId: string; edits: [PredictedBlockEditAttempt](./server.predictedblockeditattempt.md)<!-- -->\[\]; }
+
+
+</td><td>
+
+Emitted when a player submits a speculative block edit intent.
+
+
+</td></tr>
+<tr><td>
+
 ["PLAYER.CHAT\_MESSAGE\_SEND"](./server.playereventpayloads._player.chat_message_send_.md)
 
 
@@ -53,6 +72,25 @@ Description
 </td><td>
 
 Emitted when a player sends a chat message.
+
+
+</td></tr>
+<tr><td>
+
+["PLAYER.CONFIRM\_BLOCK\_EDIT\_PREDICTION"](./server.playereventpayloads._player.confirm_block_edit_prediction_.md)
+
+
+</td><td>
+
+
+</td><td>
+
+{ player: [Player](./server.player.md)<!-- -->; predictionId: string; }
+
+
+</td><td>
+
+Emitted when server gameplay confirms a speculative block edit prediction.
 
 
 </td></tr>
@@ -167,6 +205,25 @@ Emitted when notification permission is requested by a game.
 </td><td>
 
 Emitted when a player's client requests a round trip time synchronization.
+
+
+</td></tr>
+<tr><td>
+
+["PLAYER.ROLLBACK\_BLOCK\_EDIT\_PREDICTION"](./server.playereventpayloads._player.rollback_block_edit_prediction_.md)
+
+
+</td><td>
+
+
+</td><td>
+
+{ player: [Player](./server.player.md)<!-- -->; predictionId: string; }
+
+
+</td><td>
+
+Emitted when server gameplay rejects a speculative block edit prediction.
 
 
 </td></tr>

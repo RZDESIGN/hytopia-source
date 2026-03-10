@@ -298,6 +298,22 @@ Description
 </th></tr></thead>
 <tbody><tr><td>
 
+[confirmPredictedBlockEdit(predictionId)](./server.player.confirmpredictedblockedit.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Confirms a speculative client block edit batch by prediction id.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
 [disconnect()](./server.player.disconnect.md)
 
 
@@ -363,6 +379,22 @@ Resets all cached input keys for the player.
 Use for: clearing stuck input states (e.g., after disconnect or pause).
 
 \*\*Side effects:\*\* Clears the current `PlayerInput` state.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
+[rollbackPredictedBlockEdit(predictionId)](./server.player.rollbackpredictedblockedit.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Rejects and rolls back a speculative client block edit batch by prediction id.
 
 \*\*Category:\*\* Players
 

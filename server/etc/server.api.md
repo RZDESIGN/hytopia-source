@@ -2296,6 +2296,7 @@ export class Player extends EventRouter implements protocol.Serializable {
     // @internal (undocumented)
     applyQueuedInputForSimulation(): void;
     readonly camera: PlayerCamera;
+    confirmPredictedBlockEdit(predictionId: string): void;
     // Warning: (ae-forgotten-export) The symbol "Connection" needs to be exported by the entry point index.d.ts
     //
     // @internal (undocumented)
@@ -2324,6 +2325,7 @@ export class Player extends EventRouter implements protocol.Serializable {
     // @internal (undocumented)
     reconnected(): void;
     resetInputs(): void;
+    rollbackPredictedBlockEdit(predictionId: string): void;
     scheduleNotification(type: string, scheduledFor: number): Promise<string | void>;
     // @internal (undocumented)
     serialize(): protocol.PlayerSchema;
@@ -2624,7 +2626,11 @@ export type PlayerEntityOptions = {
 // @public
 export enum PlayerEvent {
     // (undocumented)
+    BLOCK_EDIT_PREDICTION = "PLAYER.BLOCK_EDIT_PREDICTION",
+    // (undocumented)
     CHAT_MESSAGE_SEND = "PLAYER.CHAT_MESSAGE_SEND",
+    // (undocumented)
+    CONFIRM_BLOCK_EDIT_PREDICTION = "PLAYER.CONFIRM_BLOCK_EDIT_PREDICTION",
     // (undocumented)
     INTERACT = "PLAYER.INTERACT",
     // (undocumented)
@@ -2636,14 +2642,25 @@ export enum PlayerEvent {
     // (undocumented)
     REQUEST_NOTIFICATION_PERMISSION = "PLAYER.REQUEST_NOTIFICATION_PERMISSION",
     // (undocumented)
-    REQUEST_SYNC = "PLAYER.REQUEST_SYNC"
+    REQUEST_SYNC = "PLAYER.REQUEST_SYNC",
+    // (undocumented)
+    ROLLBACK_BLOCK_EDIT_PREDICTION = "PLAYER.ROLLBACK_BLOCK_EDIT_PREDICTION"
 }
 
 // @public
 export interface PlayerEventPayloads {
+    [PlayerEvent.BLOCK_EDIT_PREDICTION]: {
+        player: Player;
+        predictionId: string;
+        edits: PredictedBlockEditAttempt[];
+    };
     [PlayerEvent.CHAT_MESSAGE_SEND]: {
         player: Player;
         message: string;
+    };
+    [PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION]: {
+        player: Player;
+        predictionId: string;
     };
     [PlayerEvent.INTERACT]: {
         player: Player;
@@ -2670,6 +2687,10 @@ export interface PlayerEventPayloads {
         player: Player;
         receivedAt: number;
         receivedAtMs: number;
+    };
+    [PlayerEvent.ROLLBACK_BLOCK_EDIT_PREDICTION]: {
+        player: Player;
+        predictionId: string;
     };
 }
 
@@ -2769,6 +2790,13 @@ export interface PlayerUIEventPayloads {
         data: Record<string, any>;
     };
 }
+
+// @public
+export type PredictedBlockEditAttempt = {
+    globalCoordinate: Vector3Like;
+    blockTypeId: number;
+    blockRotationIndex?: number;
+};
 
 // @public
 export class Quaternion extends Float32Array implements QuaternionLike {
