@@ -30,6 +30,15 @@ inboundPacketHandlers[protocol.PacketId.ENTITIES] = (data, serverTick) => {
   });
 };
 
+inboundPacketHandlers[protocol.PacketId.BLOCK_EDIT_PREDICTION_RESULTS] = (data, serverTick) => {
+  EventRouter.instance.emit(NetworkManagerEventType.BlockEditPredictionResultsPacket, {
+    deserializedBlockEditPredictionResults: Deserializer.deserializeBlockEditPredictionResults(
+      data as protocol.BlockEditPredictionResultsSchema,
+    ),
+    serverTick: serverTick as number,
+  });
+};
+
 inboundPacketHandlers[protocol.PacketId.CHUNKS] = (data, serverTick) => {
   EventRouter.instance.emit(NetworkManagerEventType.ChunksPacket, {
     deserializedChunks: Deserializer.deserializeChunks(data as protocol.ChunksSchema),

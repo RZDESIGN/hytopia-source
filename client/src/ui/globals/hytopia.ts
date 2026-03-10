@@ -254,6 +254,35 @@ export class HytopiaUI {
   }
 
   /**
+   * Applies a speculative block edit batch locally and sends the same edit intent to the server.
+   * Server gameplay code can listen for the prediction id and explicitly confirm or reject it.
+   * @param edits - Block edits to apply locally and submit to the server
+   * @param timeoutMs - Optional rollback timeout if the server never confirms the change
+   * @returns Prediction id if at least one edit was applied, otherwise undefined
+   * @public
+   */
+  public submitPredictedBlockEdits(
+    edits: PredictedBlockEdit[],
+    timeoutMs?: number,
+  ): string | undefined {
+    const predictionId = this.predictBlocks(edits, timeoutMs);
+    if (!predictionId) {
+      return undefined;
+    }
+
+    Game.instance.networkManager.sendPredictedBlockEditsPacket(
+      predictionId,
+      edits.map(edit => ({
+        globalCoordinate: edit.globalCoordinate,
+        blockTypeId: edit.blockTypeId,
+        blockRotationIndex: edit.blockRotationIndex,
+      })),
+    );
+
+    return predictionId;
+  }
+
+  /**
    * Confirms a previously created speculative block edit batch.
    * This is useful when your gameplay networking layer acknowledges success before the normal authoritative block sync arrives.
    * @param predictionId - The prediction id returned by `predictBlocks()`

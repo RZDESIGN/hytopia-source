@@ -1,5 +1,7 @@
 export * from './Audio';
 export * from './Audios';
+export * from './BlockEditPredictionResult';
+export * from './BlockEditPredictionResults';
 export * from './Block';
 export * from './Blocks';
 export * from './BlockType';
@@ -29,6 +31,8 @@ export * from './PhysicsDebugRaycasts';
 export * from './PhysicsDebugRender';
 export * from './Player';
 export * from './Players';
+export * from './PredictedBlockEdit';
+export * from './PredictedBlockEditsSend';
 export * from './Quaternion';
 export * from './RgbColor';
 export * from './SceneUI';

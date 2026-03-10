@@ -17,7 +17,7 @@ import type Connection from '@/networking/Connection';
 import { PlayerUIEvent } from '@/players/PlayerUI';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 import type World from '@/worlds/World';
-import type { InputSchema } from '@hytopia.com/server-protocol';
+import type { InputSchema, PredictedBlockEditsSendSchema } from '@hytopia.com/server-protocol';
 import type { PlayerCosmetics, Session } from '@/networking/PlatformGateway';
 import type { RaycastHit } from '@/worlds/physics/Simulation';
 
@@ -54,6 +54,18 @@ type SequencedMovementInputCommand = {
 export type PlayerInput = InputSchema;
 
 /**
+ * A client-submitted speculative block edit intent.
+ *
+ * **Category:** Players
+ * @public
+ */
+export type PredictedBlockEditAttempt = {
+  globalCoordinate: Vector3Like;
+  blockTypeId: number;
+  blockRotationIndex?: number;
+};
+
+/**
  * Event types a Player can emit.
  *
  * See `PlayerEventPayloads` for the payloads.
@@ -62,13 +74,16 @@ export type PlayerInput = InputSchema;
  * @public
  */
 export enum PlayerEvent {
+  BLOCK_EDIT_PREDICTION          = 'PLAYER.BLOCK_EDIT_PREDICTION',
   CHAT_MESSAGE_SEND               = 'PLAYER.CHAT_MESSAGE_SEND',
+  CONFIRM_BLOCK_EDIT_PREDICTION   = 'PLAYER.CONFIRM_BLOCK_EDIT_PREDICTION',
   INTERACT                        = 'PLAYER.INTERACT',
   JOINED_WORLD                    = 'PLAYER.JOINED_WORLD',
   LEFT_WORLD                      = 'PLAYER.LEFT_WORLD',
   RECONNECTED_WORLD               = 'PLAYER.RECONNECTED_WORLD',
   REQUEST_NOTIFICATION_PERMISSION = 'PLAYER.REQUEST_NOTIFICATION_PERMISSION',
   REQUEST_SYNC                    = 'PLAYER.REQUEST_SYNC',
+  ROLLBACK_BLOCK_EDIT_PREDICTION  = 'PLAYER.ROLLBACK_BLOCK_EDIT_PREDICTION',
 }
 
 /**
@@ -78,8 +93,14 @@ export enum PlayerEvent {
  * @public
  */
 export interface PlayerEventPayloads {
+  /** Emitted when a player submits a speculative block edit intent. */
+  [PlayerEvent.BLOCK_EDIT_PREDICTION]:          { player: Player, predictionId: string, edits: PredictedBlockEditAttempt[] }
+
   /** Emitted when a player sends a chat message. */
   [PlayerEvent.CHAT_MESSAGE_SEND]:               { player: Player, message: string }
+
+  /** Emitted when server gameplay confirms a speculative block edit prediction. */
+  [PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION]:   { player: Player, predictionId: string }
 
   /** Emitted when a player joins a world. */
   [PlayerEvent.JOINED_WORLD]:                    { player: Player, world: World }
@@ -98,6 +119,9 @@ export interface PlayerEventPayloads {
 
   /** Emitted when a player's client requests a round trip time synchronization. */
   [PlayerEvent.REQUEST_SYNC]:                    { player: Player, receivedAt: number, receivedAtMs: number }
+
+  /** Emitted when server gameplay rejects a speculative block edit prediction. */
+  [PlayerEvent.ROLLBACK_BLOCK_EDIT_PREDICTION]:  { player: Player, predictionId: string }
 }
 
 /**
@@ -454,6 +478,38 @@ export default class Player extends EventRouter implements protocol.Serializable
   }
 
   /**
+   * Confirms a speculative client block edit batch by prediction id.
+   *
+   * **Category:** Players
+   */
+  public confirmPredictedBlockEdit(predictionId: string): void {
+    if (!this._world) {
+      return;
+    }
+
+    this.emitWithWorld(this._world, PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION, {
+      player: this,
+      predictionId,
+    });
+  }
+
+  /**
+   * Rejects and rolls back a speculative client block edit batch by prediction id.
+   *
+   * **Category:** Players
+   */
+  public rollbackPredictedBlockEdit(predictionId: string): void {
+    if (!this._world) {
+      return;
+    }
+
+    this.emitWithWorld(this._world, PlayerEvent.ROLLBACK_BLOCK_EDIT_PREDICTION, {
+      player: this,
+      predictionId,
+    });
+  }
+
+  /**
    * Merges data into the player's persisted data cache.
    *
    * Use for: saving progress, inventory, or other player-specific state.
@@ -500,6 +556,9 @@ export default class Player extends EventRouter implements protocol.Serializable
         break;
       case protocol.PacketId.INPUT:
         this._onInputPacket(packet as protocol.InputPacket);
+        break;
+      case protocol.PacketId.PREDICTED_BLOCK_EDITS_SEND:
+        this._onPredictedBlockEditsSendPacket(packet as protocol.PredictedBlockEditsSendPacket);
         break;
       case protocol.PacketId.SYNC_REQUEST:
         this._onSyncRequestPacket(receivedAtUnixMs, receivedAtMonotonicMs);
@@ -682,6 +741,35 @@ export default class Player extends EventRouter implements protocol.Serializable
     if (!hasSequencedMovementInput && input.cp !== undefined) this.camera.setOrientationPitch(input.cp);
     if (!hasSequencedMovementInput && input.cy !== undefined) this.camera.setOrientationYaw(input.cy);
     if (this.world && input.ird && input.iro) this.interact();
+  };
+
+  /** @internal */
+  private _onPredictedBlockEditsSendPacket = (packet: protocol.PredictedBlockEditsSendPacket) => {
+    if (!this._world) {
+      return;
+    }
+
+    const data: PredictedBlockEditsSendSchema = packet[1];
+    const edits: PredictedBlockEditAttempt[] = new Array(data.e.length);
+
+    for (let i = 0; i < data.e.length; i++) {
+      const edit = data.e[i];
+      edits[i] = {
+        globalCoordinate: {
+          x: edit.c[0],
+          y: edit.c[1],
+          z: edit.c[2],
+        },
+        blockTypeId: edit.i,
+        blockRotationIndex: edit.r,
+      };
+    }
+
+    this.emitWithWorld(this._world, PlayerEvent.BLOCK_EDIT_PREDICTION, {
+      player: this,
+      predictionId: data.p,
+      edits,
+    });
   };
 
   /** @internal */

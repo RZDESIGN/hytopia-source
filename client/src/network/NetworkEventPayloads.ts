@@ -1,5 +1,6 @@
 import type {
   DeserializedAudios,
+  DeserializedBlockEditPredictionResults,
   DeserializedBlocks,
   DeserializedBlockTypes,
   DeserializedCamera,
@@ -21,6 +22,7 @@ import type {
 
 export namespace NetworkManagerEventPayload {
   export interface IAudiosPacket { deserializedAudios: DeserializedAudios; serverTick: number; }
+  export interface IBlockEditPredictionResultsPacket { deserializedBlockEditPredictionResults: DeserializedBlockEditPredictionResults; serverTick: number; }
   export interface IBlocksPacket { deserializedBlocks: DeserializedBlocks; serverTick: number; }
   export interface IBlockTypesPacket { deserializedBlockTypes: DeserializedBlockTypes; serverTick: number; }
   export interface ICameraPacket { deserializedCamera: DeserializedCamera; serverTick: number; }

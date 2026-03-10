@@ -27,6 +27,7 @@ export enum PacketId {
   STATE_REQUEST = 2,
   CHAT_MESSAGE_SEND = 3,
   UI_DATA_SEND = 4,
+  PREDICTED_BLOCK_EDITS_SEND = 5,
 
   // Standard Outbound Packet Types: 32 - 127 range
   SYNC_RESPONSE = 32,
@@ -45,6 +46,7 @@ export enum PacketId {
   PLAYERS = 45,
   PARTICLE_EMITTERS = 46,
   NOTIFICATION_PERMISSION_REQUEST = 47,
+  BLOCK_EDIT_PREDICTION_RESULTS = 48,
 
   // Standard Bi-Directional Packet Types: 116 - 127 range
   CONNECTION = 116,

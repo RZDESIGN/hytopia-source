@@ -140,7 +140,7 @@ export type { PlayerCosmetics, PlayerCosmeticsEquippedItem } from '@/networking/
 
 // Player
 export { default as Player, PlayerEvent, SUPPORTED_INPUTS } from '@/players/Player';
-export type { PlayerEventPayloads, PlayerInput } from '@/players/Player';
+export type { PlayerEventPayloads, PlayerInput, PredictedBlockEditAttempt } from '@/players/Player';
 
 // PlayerCamera
 export {

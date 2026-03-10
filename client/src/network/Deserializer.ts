@@ -29,6 +29,12 @@ export type DeserializedAudio = {
 }
 export type DeserializedAudios = DeserializedAudio[];
 
+export type DeserializedBlockEditPredictionResult = {
+  predictionId: string;
+  action: 'confirm' | 'rollback';
+}
+export type DeserializedBlockEditPredictionResults = DeserializedBlockEditPredictionResult[];
+
 export type DeserializedBlock = {
   id: number;
   globalCoordinate: {
@@ -352,6 +358,27 @@ export default class Deserializer {
     }
 
     return deserializedBlocks;
+  }
+
+  public static deserializeBlockEditPredictionResult(
+    result: protocol.BlockEditPredictionResultSchema,
+  ): DeserializedBlockEditPredictionResult {
+    return {
+      predictionId: result.p,
+      action: result.a,
+    };
+  }
+
+  public static deserializeBlockEditPredictionResults(
+    results: protocol.BlockEditPredictionResultsSchema,
+  ): DeserializedBlockEditPredictionResults {
+    const deserializedResults = new Array<DeserializedBlockEditPredictionResult>(results.length);
+
+    for (let i = 0; i < results.length; i++) {
+      deserializedResults[i] = this.deserializeBlockEditPredictionResult(results[i]);
+    }
+
+    return deserializedResults;
   }
 
   public static deserializeBlockType(blockType: protocol.BlockTypeSchema): DeserializedBlockType {

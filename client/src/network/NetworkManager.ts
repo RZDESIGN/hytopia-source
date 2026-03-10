@@ -225,6 +225,24 @@ export default class NetworkManager {
     this.sendPacket(protocol.createPacket(protocol.uiDataSendPacketDefinition, { ...data }));
   }
 
+  public sendPredictedBlockEditsPacket(
+    predictionId: string,
+    edits: { globalCoordinate: { x: number; y: number; z: number }, blockTypeId: number, blockRotationIndex?: number }[],
+  ): void {
+    this.sendPacket(protocol.createPacket(protocol.predictedBlockEditsSendPacketDefinition, {
+      p: predictionId,
+      e: edits.map(edit => ({
+        c: [
+          edit.globalCoordinate.x,
+          edit.globalCoordinate.y,
+          edit.globalCoordinate.z,
+        ] as [number, number, number],
+        i: edit.blockTypeId,
+        r: edit.blockRotationIndex,
+      })),
+    }));
+  }
+
   private async _connectWebTransport(): Promise<void> {
     console.log('NetworkManager._connectWebTransport(): Attempting to connect using WebTransport...');
 

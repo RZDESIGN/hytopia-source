@@ -111,6 +111,11 @@ export default class ChunkManager {
       NetworkManagerEventType.BlocksPacket,
       this._onBlocksPacket,
     );
+
+    EventRouter.instance.on(
+      NetworkManagerEventType.BlockEditPredictionResultsPacket,
+      this._onBlockEditPredictionResultsPacket,
+    );
     
     EventRouter.instance.on(
       NetworkManagerEventType.ChunksPacket,
@@ -213,6 +218,21 @@ export default class ChunkManager {
 
     this._applyBlockUpdates(updates);
   }
+
+  private _onBlockEditPredictionResultsPacket = (
+    payload: NetworkManagerEventPayload.IBlockEditPredictionResultsPacket,
+  ) => {
+    const { deserializedBlockEditPredictionResults } = payload;
+
+    for (let i = 0; i < deserializedBlockEditPredictionResults.length; i++) {
+      const result = deserializedBlockEditPredictionResults[i];
+      if (result.action === 'confirm') {
+        this.confirmPredictedBlocks(result.predictionId);
+      } else {
+        this.rollbackPredictedBlocks(result.predictionId);
+      }
+    }
+  };
 
   private _onChunksPacket = (payload: NetworkManagerEventPayload.IChunksPacket) => {
     const { deserializedChunks } = payload;

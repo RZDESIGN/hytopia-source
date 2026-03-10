@@ -100,6 +100,7 @@ export default class NetworkSynchronizer {
   private _queuedPlayerSyncs: SyncQueue<string, protocol.PlayerSchema> = { broadcast: new IterationMap(), perPlayer: new IterationMap() };
   private _queuedSceneUISyncs: SyncQueue<number, protocol.SceneUISchema> = { broadcast: new IterationMap(), perPlayer: new IterationMap() };
   
+  private _queuedBlockEditPredictionResultsSyncs: SingletonSyncQueue<protocol.BlockEditPredictionResultsSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedCameraSyncs: SingletonSyncQueue<protocol.CameraSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedChatMessagesSyncs: SingletonSyncQueue<protocol.ChatMessagesSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedDebugRaycastsSyncs: SingletonSyncQueue<protocol.PhysicsDebugRaycastsSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
@@ -206,6 +207,7 @@ export default class NetworkSynchronizer {
       this._clearSyncQueue(this._queuedPlayerSyncs);
       this._clearSyncQueue(this._queuedSceneUISyncs);
       
+      this._clearSingletonSyncQueue(this._queuedBlockEditPredictionResultsSyncs);
       this._clearSingletonSyncQueue(this._queuedCameraSyncs);
       this._clearSingletonSyncQueue(this._queuedChatMessagesSyncs);
       this._clearSingletonSyncQueue(this._queuedDebugRaycastsSyncs);
@@ -337,11 +339,13 @@ export default class NetworkSynchronizer {
   }
 
   private _subscribeToPlayerEvents() {
+    this._world.final(PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION, this._onPlayerConfirmBlockEditPrediction);
     this._world.final(PlayerEvent.JOINED_WORLD, this._onPlayerJoinedWorld);
     this._world.final(PlayerEvent.LEFT_WORLD, this._onPlayerLeftWorld);
     this._world.final(PlayerEvent.RECONNECTED_WORLD, this._onPlayerReconnectedWorld);
     this._world.final(PlayerEvent.REQUEST_NOTIFICATION_PERMISSION, this._onPlayerRequestNotificationPermission);
     this._world.final(PlayerEvent.REQUEST_SYNC, this._onPlayerRequestSync);
+    this._world.final(PlayerEvent.ROLLBACK_BLOCK_EDIT_PREDICTION, this._onPlayerRollbackBlockEditPrediction);
   }
 
   private _subscribeToPlayerCameraEvents() {
@@ -1842,6 +1846,26 @@ export default class NetworkSynchronizer {
     ]);
   };
 
+  private _onPlayerConfirmBlockEditPrediction = (
+    payload: EventPayloads[PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION],
+  ) => {
+    const resultsSync = this._createOrGetQueuedBlockEditPredictionResultsSync(payload.player);
+    resultsSync.push({
+      p: payload.predictionId,
+      a: 'confirm',
+    });
+  };
+
+  private _onPlayerRollbackBlockEditPrediction = (
+    payload: EventPayloads[PlayerEvent.ROLLBACK_BLOCK_EDIT_PREDICTION],
+  ) => {
+    const resultsSync = this._createOrGetQueuedBlockEditPredictionResultsSync(payload.player);
+    resultsSync.push({
+      p: payload.predictionId,
+      a: 'rollback',
+    });
+  };
+
   private _onPlayerUIAppend = (payload: EventPayloads[PlayerUIEvent.APPEND]) => {
     const playerUISync = this._createOrGetQueuedUISync(payload.playerUI.player);
     playerUISync.ua ??= [];
@@ -2192,6 +2216,18 @@ export default class NetworkSynchronizer {
     return this._createOrGetQueuedSingletonSync(this._queuedUIDatasSyncs, this._createUIDatasSync, undefined, forPlayer);
   }
 
+  private _createBlockEditPredictionResultsSync = () => ([]);
+  private _createOrGetQueuedBlockEditPredictionResultsSync(
+    forPlayer?: Player,
+  ): protocol.BlockEditPredictionResultsSchema {
+    return this._createOrGetQueuedSingletonSync(
+      this._queuedBlockEditPredictionResultsSyncs,
+      this._createBlockEditPredictionResultsSync,
+      undefined,
+      forPlayer,
+    );
+  }
+
   private _createWorldSync = (world: World) => ({ i: world.id });
   private _createOrGetQueuedWorldSync(world: World, forPlayer?: Player): protocol.WorldSchema {
     if (world.id !== this._world.id) { ErrorHandler.fatalError('NetworkSynchronizer._createOrGetQueuedWorldSync(): World does not match this network synchronizer world!'); }
@@ -2300,6 +2336,16 @@ export default class NetworkSynchronizer {
     this._pushReliablePacketSlot(
       packetPlan.prePlayerUIReliableSlots,
       this._buildSyncPacketSlot(this._queuedBlockTypeSyncs, protocol.outboundPackets.blockTypesPacketDefinition, currentTick),
+    );
+
+    // 4. owner-only block edit prediction responses
+    this._pushReliablePacketSlot(
+      packetPlan.prePlayerUIReliableSlots,
+      this._buildSingletonSyncPacketSlot(
+        this._queuedBlockEditPredictionResultsSyncs,
+        protocol.outboundPackets.blockEditPredictionResultsPacketDefinition,
+        currentTick,
+      ),
     );
 
     // 4. chunks

@@ -1,5 +1,6 @@
 export enum NetworkManagerEventType {
   AudiosPacket = 'NETWORK_MANAGER.AUDIOS_PACKET',
+  BlockEditPredictionResultsPacket = 'NETWORK_MANAGER.BLOCK_EDIT_PREDICTION_RESULTS_PACKET',
   BlocksPacket = 'NETWORK_MANAGER.BLOCKS_PACKET',
   BlockTypesPacket = 'NETWORK_MANAGER.BLOCK_TYPES_PACKET',
   CameraPacket = 'NETWORK_MANAGER.CAMERA_PACKET',
