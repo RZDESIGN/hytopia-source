@@ -94,6 +94,9 @@ const LOCAL_PREDICTION_FOOT_OFFSET = 0.75;
 const LOCAL_PREDICTION_MIN_FOOT_OFFSET = 0.65;
 const LOCAL_PREDICTION_MAX_FOOT_OFFSET = 0.8;
 const LOCAL_PREDICTION_GROUND_SNAP_DISTANCE = 0.18;
+const LOCAL_PREDICTION_GROUND_HOLD_DISTANCE = 0.32;
+const LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE = 0.4;
+const LOCAL_PREDICTION_GROUNDED_UPWARD_RELEASE_VELOCITY = 1.25;
 const LOCAL_PREDICTION_COLLISION_EPSILON = 0.001;
 const LOCAL_PREDICTION_SAMPLE_INSET = LOCAL_PREDICTION_COLLIDER_RADIUS * 0.8;
 const LOCAL_PREDICTION_FOOTPRINT_SAMPLES = [
@@ -1394,7 +1397,16 @@ export default class EntityManager {
     const controllerState = this._localPredictionState.controllerState;
     const predictedPosition = this._localPredictionState.predictedPosition;
     const footOffset = this._getPredictedGroundFootOffset();
-    const groundY = this._getPredictedGroundY(predictedPosition.x, predictedPosition.y, predictedPosition.z, footOffset);
+    const groundProbeDistance = controllerState.predictedGrounded
+      ? LOCAL_PREDICTION_GROUND_HOLD_DISTANCE
+      : LOCAL_PREDICTION_GROUND_SNAP_DISTANCE;
+    const groundY = this._getPredictedGroundY(
+      predictedPosition.x,
+      predictedPosition.y,
+      predictedPosition.z,
+      footOffset,
+      groundProbeDistance,
+    );
 
     if (groundY === undefined) {
       if (
@@ -1410,6 +1422,10 @@ export default class EntityManager {
     const footY = predictedPosition.y - footOffset;
     const distanceToGround = footY - groundY;
     const movingDownOrStable = predictedVerticalVelocity <= (motionBasisVelocityY + LOCAL_PREDICTION_COLLISION_EPSILON);
+    const canHoldGroundedState =
+      controllerState.predictedGrounded &&
+      Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON &&
+      predictedVerticalVelocity <= LOCAL_PREDICTION_GROUNDED_UPWARD_RELEASE_VELOCITY;
 
     if (
       distanceToGround < 0 ||
@@ -1421,17 +1437,32 @@ export default class EntityManager {
     }
 
     if (
-      distanceToGround > LOCAL_PREDICTION_GROUND_SNAP_DISTANCE &&
+      canHoldGroundedState &&
+      distanceToGround <= LOCAL_PREDICTION_GROUND_HOLD_DISTANCE
+    ) {
+      predictedPosition.y = groundY + footOffset;
+      this._setPredictedGrounded(true);
+      return;
+    }
+
+    if (
+      distanceToGround > LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE &&
       Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON
     ) {
       this._setPredictedGrounded(false);
     }
   }
 
-  private _getPredictedGroundY(x: number, y: number, z: number, footOffset: number): number | undefined {
+  private _getPredictedGroundY(
+    x: number,
+    y: number,
+    z: number,
+    footOffset: number,
+    maxProbeDistance: number = LOCAL_PREDICTION_GROUND_SNAP_DISTANCE,
+  ): number | undefined {
     const footY = y - footOffset;
-    const maxCandidateBlockY = Math.floor(footY + LOCAL_PREDICTION_GROUND_SNAP_DISTANCE - LOCAL_PREDICTION_COLLISION_EPSILON);
-    const minCandidateBlockY = Math.floor(footY - LOCAL_PREDICTION_GROUND_SNAP_DISTANCE - 1);
+    const maxCandidateBlockY = Math.floor(footY + maxProbeDistance - LOCAL_PREDICTION_COLLISION_EPSILON);
+    const minCandidateBlockY = Math.floor(footY - maxProbeDistance - 1);
     let highestGroundY: number | undefined;
 
     for (const [sampleOffsetX, sampleOffsetZ] of LOCAL_PREDICTION_FOOTPRINT_SAMPLES) {
@@ -1446,7 +1477,7 @@ export default class EntityManager {
         }
 
         const candidateGroundY = blockY + 1;
-        if (candidateGroundY <= footY + LOCAL_PREDICTION_GROUND_SNAP_DISTANCE) {
+        if (candidateGroundY <= footY + maxProbeDistance) {
           highestGroundY = Math.max(highestGroundY ?? -Infinity, candidateGroundY);
           break;
         }
@@ -1502,6 +1533,7 @@ export default class EntityManager {
       position.y,
       position.z,
       controllerState.authoritativeGroundFootOffset,
+      LOCAL_PREDICTION_GROUND_HOLD_DISTANCE,
     );
 
     if (groundY === undefined) {

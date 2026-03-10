@@ -22,6 +22,16 @@ declare global {
 export type TemplateRenderer = (id: number, onState: (callback: OnStateCallback) => void) => HTMLElement;
 
 /**
+ * A single speculative block edit to apply locally on the owner client.
+ * @public
+ */
+export type PredictedBlockEdit = {
+  globalCoordinate: THREE.Vector3Like;
+  blockTypeId: number;
+  blockRotationIndex?: number;
+};
+
+/**
  * Global API for interacting with the HYTOPIA game client.
  * Access via the `hytopia` global variable in your client-side HTML UI code.
  * @public
@@ -219,6 +229,49 @@ export class HytopiaUI {
       blockRotationIndex,
       timeoutMs,
     );
+  }
+
+  /**
+   * Applies a batch of owner-only speculative block changes on the client and returns a prediction id.
+   * Use this for gameplay-specific mining/building systems so you can confirm or roll back the whole edit later.
+   * @param edits - Block edits to apply locally
+   * @param timeoutMs - Optional rollback timeout if the server never confirms the change
+   * @returns Prediction id if at least one edit was applied, otherwise undefined
+   * @public
+   */
+  public predictBlocks(
+    edits: PredictedBlockEdit[],
+    timeoutMs?: number,
+  ): string | undefined {
+    return Game.instance.chunkManager.predictBlocks(
+      edits.map(edit => ({
+        globalCoordinate: edit.globalCoordinate,
+        blockId: edit.blockTypeId,
+        blockRotationIndex: edit.blockRotationIndex,
+      })),
+      timeoutMs,
+    );
+  }
+
+  /**
+   * Confirms a previously created speculative block edit batch.
+   * This is useful when your gameplay networking layer acknowledges success before the normal authoritative block sync arrives.
+   * @param predictionId - The prediction id returned by `predictBlocks()`
+   * @returns Whether the prediction id was found and confirmed
+   * @public
+   */
+  public confirmPredictedBlocks(predictionId: string): boolean {
+    return Game.instance.chunkManager.confirmPredictedBlocks(predictionId);
+  }
+
+  /**
+   * Rolls back a previously created speculative block edit batch.
+   * @param predictionId - The prediction id returned by `predictBlocks()`
+   * @returns Whether the prediction id was found and rolled back
+   * @public
+   */
+  public rollbackPredictedBlocks(predictionId: string): boolean {
+    return Game.instance.chunkManager.rollbackPredictedBlocks(predictionId);
   }
 
   /**

@@ -47,13 +47,21 @@ type ChunkBlockUpdate = {
   blockRotationIndex?: number;
 };
 
-type PredictedBlockEntry = {
-  baselineBlockId: BlockId;
-  baselineBlockRotationIndex?: number;
+type BlockState = {
   blockId: BlockId;
   blockRotationIndex?: number;
+};
+
+type PredictedBlockLayer = BlockState & {
   expiresAtMs: number;
+  predictionId: string;
+};
+
+type PredictedBlockEntry = {
+  authoritativeBlockId: BlockId;
+  authoritativeBlockRotationIndex?: number;
   globalCoordinate: Vector3Like;
+  layers: PredictedBlockLayer[];
 };
 
 export type RaycastedBlock = {
@@ -80,6 +88,8 @@ export default class ChunkManager {
   private _chunkBatchBuildRequestVersions: Map<BatchId, number> = new Map();
   private _firstChunkBatchBuilt: boolean = false;
   private _predictedBlocks: Map<string, PredictedBlockEntry> = new Map();
+  private _predictionCoordinateKeysById: Map<string, Set<string>> = new Map();
+  private _nextPredictionId: number = 1;
   private _visibleBatchIds: Set<BatchId> = new Set();
   private _lastVisibilityCellX: number | null = null;
   private _lastVisibilityCellZ: number | null = null;
@@ -169,12 +179,36 @@ export default class ChunkManager {
     for (let i = 0; i < deserializedBlocks.length; i++) {
       const deserializedBlock: DeserializedBlock = deserializedBlocks[i];
       const { id: blockId, globalCoordinate, blockRotationIndex } = deserializedBlock;
-      this._predictedBlocks.delete(this._blockCoordinateKey(globalCoordinate));
-      updates.push({
-        globalCoordinate,
-        blockId,
-        blockRotationIndex,
-      });
+      const key = this._blockCoordinateKey(globalCoordinate);
+      const prediction = this._predictedBlocks.get(key);
+
+      if (!prediction) {
+        updates.push({
+          globalCoordinate,
+          blockId,
+          blockRotationIndex,
+        });
+        continue;
+      }
+
+      prediction.authoritativeBlockId = blockId;
+      prediction.authoritativeBlockRotationIndex = this._normalizeBlockRotationIndex(blockRotationIndex);
+
+      const effectiveState = this._getEffectivePredictedState(prediction);
+      if (
+        effectiveState &&
+        this._blockStatesEqual(effectiveState, {
+          blockId,
+          blockRotationIndex,
+        })
+      ) {
+        this._clearPredictionEntry(key, prediction);
+        updates.push({
+          globalCoordinate,
+          blockId,
+          blockRotationIndex,
+        });
+      }
     }
 
     this._applyBlockUpdates(updates);
@@ -408,54 +442,174 @@ export default class ChunkManager {
     blockRotationIndex?: number,
     timeoutMs: number = BLOCK_PREDICTION_TIMEOUT_MS,
   ): boolean {
-    const baseline = this.getBlock(globalCoordinate);
-
-    if (!baseline) {
-      return false;
-    }
-
-    const key = this._blockCoordinateKey(globalCoordinate);
-    const existing = this._predictedBlocks.get(key);
-
-    this._predictedBlocks.set(key, {
-      baselineBlockId: existing?.baselineBlockId ?? baseline.blockId,
-      baselineBlockRotationIndex: existing?.baselineBlockRotationIndex ?? this._normalizeBlockRotationIndex(baseline.blockRotationIndex),
-      blockId,
-      blockRotationIndex: this._normalizeBlockRotationIndex(blockRotationIndex),
-      expiresAtMs: performance.now() + Math.max(0, timeoutMs),
-      globalCoordinate: {
-        x: globalCoordinate.x,
-        y: globalCoordinate.y,
-        z: globalCoordinate.z,
-      },
-    });
-
-    return this._applyBlockUpdates([
+    return this.predictBlocks([
       {
         globalCoordinate,
         blockId,
         blockRotationIndex,
       },
-    ]);
+    ], timeoutMs) !== undefined;
+  }
+
+  public predictBlocks(
+    updates: ChunkBlockUpdate[],
+    timeoutMs: number = BLOCK_PREDICTION_TIMEOUT_MS,
+  ): string | undefined {
+    const predictionId = this._createPredictionId();
+    const updatesToApply: ChunkBlockUpdate[] = [];
+    let didApplyPrediction = false;
+
+    for (let i = 0; i < updates.length; i++) {
+      const update = updates[i];
+      const key = this._blockCoordinateKey(update.globalCoordinate);
+      const existing = this._predictedBlocks.get(key);
+      const baseline = existing ?? this._createPredictionEntry(update.globalCoordinate);
+
+      if (!baseline) {
+        continue;
+      }
+
+      const layer: PredictedBlockLayer = {
+        predictionId,
+        blockId: update.blockId,
+        blockRotationIndex: this._normalizeBlockRotationIndex(update.blockRotationIndex),
+        expiresAtMs: performance.now() + Math.max(0, timeoutMs),
+      };
+
+      baseline.layers.push(layer);
+      this._predictedBlocks.set(key, baseline);
+      this._linkPredictionIdToCoordinate(predictionId, key);
+      didApplyPrediction = true;
+
+      const effectiveState = this._getEffectivePredictedState(baseline);
+      if (!effectiveState) {
+        continue;
+      }
+
+      updatesToApply.push({
+        globalCoordinate: baseline.globalCoordinate,
+        blockId: effectiveState.blockId,
+        blockRotationIndex: effectiveState.blockRotationIndex,
+      });
+    }
+
+    if (!didApplyPrediction) {
+      return undefined;
+    }
+
+    this._applyBlockUpdates(updatesToApply);
+    return predictionId;
+  }
+
+  public confirmPredictedBlocks(predictionId: string): boolean {
+    const coordinateKeys = this._predictionCoordinateKeysById.get(predictionId);
+
+    if (!coordinateKeys || coordinateKeys.size === 0) {
+      return false;
+    }
+
+    const updates: ChunkBlockUpdate[] = [];
+    let didConfirm = false;
+
+    for (const key of Array.from(coordinateKeys)) {
+      const prediction = this._predictedBlocks.get(key);
+      if (!prediction) {
+        this._unlinkPredictionIdFromCoordinate(predictionId, key);
+        continue;
+      }
+
+      const confirmedLayer = prediction.layers.find(layer => layer.predictionId === predictionId);
+      if (!confirmedLayer) {
+        this._unlinkPredictionIdFromCoordinate(predictionId, key);
+        continue;
+      }
+
+      prediction.authoritativeBlockId = confirmedLayer.blockId;
+      prediction.authoritativeBlockRotationIndex = confirmedLayer.blockRotationIndex;
+      this._removePredictionLayers(prediction, key, predictionId);
+      didConfirm = true;
+
+      const nextState = this._getEffectivePredictedState(prediction) ?? this._getAuthoritativeState(prediction);
+      if (!this._isDisplayedBlockState(prediction.globalCoordinate, nextState)) {
+        updates.push({
+          globalCoordinate: prediction.globalCoordinate,
+          blockId: nextState.blockId,
+          blockRotationIndex: nextState.blockRotationIndex,
+        });
+      }
+
+      if (prediction.layers.length === 0) {
+        this._predictedBlocks.delete(key);
+      }
+    }
+
+    if (updates.length > 0) {
+      this._applyBlockUpdates(updates);
+    }
+
+    return didConfirm;
+  }
+
+  public rollbackPredictedBlocks(predictionId: string): boolean {
+    const coordinateKeys = this._predictionCoordinateKeysById.get(predictionId);
+
+    if (!coordinateKeys || coordinateKeys.size === 0) {
+      return false;
+    }
+
+    const updates: ChunkBlockUpdate[] = [];
+    let didRollback = false;
+
+    for (const key of Array.from(coordinateKeys)) {
+      const prediction = this._predictedBlocks.get(key);
+      if (!prediction) {
+        this._unlinkPredictionIdFromCoordinate(predictionId, key);
+        continue;
+      }
+
+      const removed = this._removePredictionLayers(prediction, key, predictionId);
+      if (!removed) {
+        continue;
+      }
+
+      didRollback = true;
+      const nextState = this._getEffectivePredictedState(prediction) ?? this._getAuthoritativeState(prediction);
+      if (!this._isDisplayedBlockState(prediction.globalCoordinate, nextState)) {
+        updates.push({
+          globalCoordinate: prediction.globalCoordinate,
+          blockId: nextState.blockId,
+          blockRotationIndex: nextState.blockRotationIndex,
+        });
+      }
+
+      if (prediction.layers.length === 0) {
+        this._predictedBlocks.delete(key);
+      }
+    }
+
+    if (updates.length > 0) {
+      this._applyBlockUpdates(updates);
+    }
+
+    return didRollback;
   }
 
   public rollbackPredictedBlock(globalCoordinate: Vector3Like): boolean {
     const key = this._blockCoordinateKey(globalCoordinate);
-    const entry = this._predictedBlocks.get(key);
+    const prediction = this._predictedBlocks.get(key);
 
-    if (!entry) {
+    if (!prediction) {
       return false;
     }
 
-    this._predictedBlocks.delete(key);
+    const predictionIds = prediction.layers.map(layer => layer.predictionId);
+    let didRollback = false;
 
-    return this._applyBlockUpdates([
-      {
-        globalCoordinate: entry.globalCoordinate,
-        blockId: entry.baselineBlockId,
-        blockRotationIndex: entry.baselineBlockRotationIndex,
-      },
-    ]);
+    for (let i = 0; i < predictionIds.length; i++) {
+      didRollback = this.rollbackPredictedBlocks(predictionIds[i]) || didRollback;
+    }
+
+    return didRollback;
   }
 
   public raycastBlock(ray: Ray, maxDistance: number): RaycastedBlock | undefined {
@@ -567,7 +721,15 @@ export default class ChunkManager {
       }
 
       const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
-      this._registry.updateBlock(chunkId, localCoordinate, blockId, blockRotationIndex);
+      const nextBlockRotationIndex = this._normalizeBlockRotationIndex(blockRotationIndex);
+      if (
+        chunk.getBlockType(localCoordinate) === blockId &&
+        this._normalizeBlockRotationIndex(chunk.getBlockRotation(localCoordinate)) === nextBlockRotationIndex
+      ) {
+        continue;
+      }
+
+      this._registry.updateBlock(chunkId, localCoordinate, blockId, nextBlockRotationIndex);
 
       if (workerUpdate[chunkId] === undefined) {
         workerUpdate[chunkId] = [];
@@ -580,7 +742,7 @@ export default class ChunkManager {
           z: localCoordinate.z,
         },
         blockId,
-        blockRotationIndex,
+        blockRotationIndex: nextBlockRotationIndex,
       });
     }
 
@@ -607,21 +769,23 @@ export default class ChunkManager {
         continue;
       }
 
-      this._predictedBlocks.delete(key);
+      this._clearPredictionEntry(key, prediction);
     }
   }
 
   private _expirePredictedBlocks(nowMs: number): void {
-    const expiredCoordinates: Vector3Like[] = [];
+    const expiredPredictionIds: Set<string> = new Set();
 
     for (const prediction of this._predictedBlocks.values()) {
-      if (nowMs >= prediction.expiresAtMs) {
-        expiredCoordinates.push(prediction.globalCoordinate);
+      for (let i = 0; i < prediction.layers.length; i++) {
+        if (nowMs >= prediction.layers[i].expiresAtMs) {
+          expiredPredictionIds.add(prediction.layers[i].predictionId);
+        }
       }
     }
 
-    for (const globalCoordinate of expiredCoordinates) {
-      this.rollbackPredictedBlock(globalCoordinate);
+    for (const predictionId of expiredPredictionIds) {
+      this.rollbackPredictedBlocks(predictionId);
     }
   }
 
@@ -633,14 +797,121 @@ export default class ChunkManager {
         continue;
       }
 
+      const authoritativeState = this.getBlock(prediction.globalCoordinate);
+      if (authoritativeState) {
+        prediction.authoritativeBlockId = authoritativeState.blockId;
+        prediction.authoritativeBlockRotationIndex = this._normalizeBlockRotationIndex(authoritativeState.blockRotationIndex);
+      }
+
+      const effectiveState = this._getEffectivePredictedState(prediction);
+      if (!effectiveState) {
+        continue;
+      }
+
       updates.push({
         globalCoordinate: prediction.globalCoordinate,
-        blockId: prediction.blockId,
-        blockRotationIndex: prediction.blockRotationIndex,
+        blockId: effectiveState.blockId,
+        blockRotationIndex: effectiveState.blockRotationIndex,
       });
     }
 
     return updates;
+  }
+
+  private _clearPredictionEntry(key: string, prediction: PredictedBlockEntry): void {
+    for (let i = 0; i < prediction.layers.length; i++) {
+      this._unlinkPredictionIdFromCoordinate(prediction.layers[i].predictionId, key);
+    }
+
+    this._predictedBlocks.delete(key);
+  }
+
+  private _createPredictionEntry(globalCoordinate: Vector3Like): PredictedBlockEntry | undefined {
+    const baseline = this.getBlock(globalCoordinate);
+
+    if (!baseline) {
+      return undefined;
+    }
+
+    return {
+      authoritativeBlockId: baseline.blockId,
+      authoritativeBlockRotationIndex: this._normalizeBlockRotationIndex(baseline.blockRotationIndex),
+      globalCoordinate: {
+        x: globalCoordinate.x,
+        y: globalCoordinate.y,
+        z: globalCoordinate.z,
+      },
+      layers: [],
+    };
+  }
+
+  private _createPredictionId(): string {
+    return `block-prediction-${this._nextPredictionId++}`;
+  }
+
+  private _getAuthoritativeState(prediction: PredictedBlockEntry): BlockState {
+    return {
+      blockId: prediction.authoritativeBlockId,
+      blockRotationIndex: prediction.authoritativeBlockRotationIndex,
+    };
+  }
+
+  private _getEffectivePredictedState(prediction: PredictedBlockEntry): BlockState | undefined {
+    const layer = prediction.layers[prediction.layers.length - 1];
+    return layer ? {
+      blockId: layer.blockId,
+      blockRotationIndex: layer.blockRotationIndex,
+    } : undefined;
+  }
+
+  private _blockStatesEqual(left: BlockState, right: BlockState): boolean {
+    return left.blockId === right.blockId &&
+      this._normalizeBlockRotationIndex(left.blockRotationIndex) === this._normalizeBlockRotationIndex(right.blockRotationIndex);
+  }
+
+  private _isDisplayedBlockState(globalCoordinate: Vector3Like, nextState: BlockState): boolean {
+    const displayed = this.getBlock(globalCoordinate);
+
+    if (!displayed) {
+      return false;
+    }
+
+    return this._blockStatesEqual(displayed, nextState);
+  }
+
+  private _linkPredictionIdToCoordinate(predictionId: string, coordinateKey: string): void {
+    let coordinateKeys = this._predictionCoordinateKeysById.get(predictionId);
+
+    if (!coordinateKeys) {
+      coordinateKeys = new Set();
+      this._predictionCoordinateKeysById.set(predictionId, coordinateKeys);
+    }
+
+    coordinateKeys.add(coordinateKey);
+  }
+
+  private _unlinkPredictionIdFromCoordinate(predictionId: string, coordinateKey: string): void {
+    const coordinateKeys = this._predictionCoordinateKeysById.get(predictionId);
+    if (!coordinateKeys) {
+      return;
+    }
+
+    coordinateKeys.delete(coordinateKey);
+    if (coordinateKeys.size === 0) {
+      this._predictionCoordinateKeysById.delete(predictionId);
+    }
+  }
+
+  private _removePredictionLayers(prediction: PredictedBlockEntry, coordinateKey: string, predictionId: string): boolean {
+    const nextLayers = prediction.layers.filter(layer => layer.predictionId !== predictionId);
+    if (nextLayers.length === prediction.layers.length) {
+      this._unlinkPredictionIdFromCoordinate(predictionId, coordinateKey);
+      return false;
+    }
+
+    prediction.layers = nextLayers;
+    this._unlinkPredictionIdFromCoordinate(predictionId, coordinateKey);
+    return true;
   }
 
   private _normalizeBlockRotationIndex(blockRotationIndex?: number): number | undefined {
