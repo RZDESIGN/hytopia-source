@@ -520,14 +520,10 @@ export default class InputManager {
   }
 
   private _shouldImmediatelyFlushSequencedMovement(): boolean {
-    if (!this._game.camera?.isFirstPersonGameCameraActive) {
-      return true;
-    }
-
-    // In first person the server still consumes queued movement once per fixed
-    // world tick. Let the scheduled movement tick batch state changes together
-    // so client replay does not simulate extra mid-tick movement snapshots that
-    // the server never applies.
+    // The server consumes queued movement state once per fixed world tick,
+    // regardless of camera mode. Immediate mid-tick flushes create extra local
+    // replay snapshots that the server never simulates, which shows up as
+    // buffered jitter during rapid movement/direction changes.
     return this._serverMovementTickHz === undefined;
   }
 

@@ -2,6 +2,7 @@ export * from './Audio';
 export * from './Audios';
 export * from './BlockEditPredictionResult';
 export * from './BlockEditPredictionResults';
+export * from './BlockEditPredictionConfig';
 export * from './Block';
 export * from './Blocks';
 export * from './BlockType';

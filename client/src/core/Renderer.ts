@@ -79,6 +79,9 @@ const DIRECTIONAL_LIGHT_MIN_HEIGHT = 24;
 const DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO = 0.35;
 const DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S = 1 / 30;
 const DIRECTIONAL_LIGHT_SHADOW_IMMEDIATE_UPDATE_DISTANCE_RATIO = 0.5;
+const DIRECTIONAL_LIGHT_SHADOW_CAMERA_POSITION_DELTA_SQ_THRESHOLD = 0.025 * 0.025;
+const DIRECTIONAL_LIGHT_SHADOW_VIEW_DIR_DOT_THRESHOLD = 0.999996;
+const DIRECTIONAL_LIGHT_SHADOW_CONTINUOUS_UPDATE_HOLD_S = 0.12;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_PARALLEL_THRESHOLD = 0.95;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ = 0.000001;
 const WATER_REFLECTION_TEXTURE_SIZE_HIGH = 512;
@@ -262,8 +265,11 @@ export default class Renderer {
   private _directionalShadowUpdateCooldownS: number = 0;
   private _directionalShadowNeedsUpdate: boolean = true;
   private _directionalShadowInitialized: boolean = false;
+  private _directionalShadowContinuousUpdateRemainingS: number = 0;
+  private _lastDirectionalShadowCameraPosition: Vector3 = new Vector3();
   private _lastDirectionalShadowFocusCenter: Vector3 = new Vector3();
   private _lastDirectionalShadowSunDirection: Vector3 = new Vector3();
+  private _lastDirectionalShadowViewDir: Vector3 = new Vector3();
   private _lastAppliedPixelRatio: number = 0;
   private _lastAppliedViewportWidth: number = 0;
   private _lastAppliedViewportHeight: number = 0;
@@ -1534,6 +1540,34 @@ export default class Renderer {
     shadowCamera.updateProjectionMatrix();
   }
 
+  private _isDirectionalShadowMotionActive(frameDeltaS: number, cameraPosition: Vector3, viewDir: Vector3): boolean {
+    this._directionalShadowContinuousUpdateRemainingS = Math.max(
+      0,
+      this._directionalShadowContinuousUpdateRemainingS - frameDeltaS,
+    );
+
+    const cameraMoved = this._lastDirectionalShadowCameraPosition.distanceToSquared(cameraPosition)
+      >= DIRECTIONAL_LIGHT_SHADOW_CAMERA_POSITION_DELTA_SQ_THRESHOLD;
+
+    let viewDirChanged = false;
+    if (viewDir.lengthSq() > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
+      vec3e.copy(viewDir).normalize();
+      viewDirChanged = this._lastDirectionalShadowViewDir.lengthSq() <= DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ
+        || vec3e.dot(this._lastDirectionalShadowViewDir) <= DIRECTIONAL_LIGHT_SHADOW_VIEW_DIR_DOT_THRESHOLD;
+      this._lastDirectionalShadowViewDir.copy(vec3e);
+    } else {
+      this._lastDirectionalShadowViewDir.set(0, 0, 0);
+    }
+
+    this._lastDirectionalShadowCameraPosition.copy(cameraPosition);
+
+    if (cameraMoved || viewDirChanged) {
+      this._directionalShadowContinuousUpdateRemainingS = DIRECTIONAL_LIGHT_SHADOW_CONTINUOUS_UPDATE_HOLD_S;
+    }
+
+    return this._directionalShadowContinuousUpdateRemainingS > 0;
+  }
+
   private _updateDirectionalLight(frameDeltaS: number = 0, force: boolean = false): void {
     const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
     const directionalDistance = shadows?.directionalDistance ?? 48;
@@ -1553,6 +1587,10 @@ export default class Renderer {
     if (shadows?.enabled) {
       this._snapDirectionalShadowFocusCenter(vec3, directionalDistance, directionalMapSize);
     }
+
+    const shadowMotionActive = shadows?.enabled
+      ? this._isDirectionalShadowMotionActive(frameDeltaS, cameraPosition, this._game.camera.activeViewDir)
+      : false;
 
     this._directionalViewModelLight.target.position.set(0, 0, -1);
     this._directionalViewModelLight.target.updateMatrixWorld();
@@ -1577,6 +1615,7 @@ export default class Renderer {
     const focusCenterChanged = !this._directionalShadowInitialized
       || focusDeltaSq > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ;
     const shouldRefreshShadow = force
+      || shadowMotionActive
       || this._directionalShadowNeedsUpdate
       || sunDirectionChanged
       || focusDeltaSq >= immediateUpdateDistance * immediateUpdateDistance
@@ -1590,7 +1629,7 @@ export default class Renderer {
     this._directionalSceneLight.shadow.needsUpdate = true;
     this._directionalShadowNeedsUpdate = false;
     this._directionalShadowInitialized = true;
-    this._directionalShadowUpdateCooldownS = DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S;
+    this._directionalShadowUpdateCooldownS = shadowMotionActive ? 0 : DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S;
     this._lastDirectionalShadowFocusCenter.copy(vec3);
     this._lastDirectionalShadowSunDirection.copy(this._sunDirection);
   }

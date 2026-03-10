@@ -27,6 +27,27 @@ export const DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE = 5;
  */
 export const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
 
+/**
+ * Owner-only client prediction settings for stock block break/place helpers.
+ *
+ * @public
+ */
+export type DefaultBlockEditPredictionConfig = {
+  maxDistance: number;
+  placeBlockTypeId: number | null;
+  placeBlockRotationIndex?: number;
+};
+
+/**
+ * Creates the default client block edit prediction config used by stock helpers.
+ *
+ * @public
+ */
+export const createDefaultBlockEditPredictionConfig = (): DefaultBlockEditPredictionConfig => ({
+  maxDistance: DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE,
+  placeBlockTypeId: DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID,
+});
+
 let connectionFeatureFlags =
   ConnectionFeatureFlag.SceneInteract;
 

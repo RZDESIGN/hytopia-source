@@ -425,6 +425,8 @@ export default class Camera {
 
         if (!this._gameCameraAttachedPosition) {
           this._gameCameraAttachedPosition = new Vector3().copy(this._gameCameraAttachedPositionTarget);
+        } else if (this._shouldSkipPositionCameraSmoothing()) {
+          this._gameCameraAttachedPosition.copy(this._gameCameraAttachedPositionTarget);
         } else if (
           this._gameCameraAttachedPosition.distanceToSquared(this._gameCameraAttachedPositionTarget)
           > CAMERA_ATTACHED_POSITION_SNAP_DISTANCE_SQ
@@ -526,6 +528,8 @@ export default class Camera {
 
         if (!this._gameCameraTrackedPosition) {
           this._gameCameraTrackedPosition = new Vector3().copy(this._gameCameraTrackedPositionTarget);
+        } else if (this._shouldSkipPositionCameraSmoothing()) {
+          this._gameCameraTrackedPosition.copy(this._gameCameraTrackedPositionTarget);
         } else if (
           this._gameCameraTrackedPosition.distanceToSquared(this._gameCameraTrackedPositionTarget)
           > CAMERA_TRACKED_POSITION_SNAP_DISTANCE_SQ
@@ -771,6 +775,9 @@ export default class Camera {
     }
 
     if (this._gameCameraAttachedPosition && this._gameCameraAttachedPositionTarget) {
+      if (this._shouldSkipPositionCameraSmoothing()) {
+        this._gameCameraAttachedPosition.copy(this._gameCameraAttachedPositionTarget);
+      } else {
       const lerpT = smoothingAlpha(frameDeltaS, CAMERA_ATTACHED_POSITION_LERP_TIME_S);
       this._gameCameraAttachedPosition.lerp(this._gameCameraAttachedPositionTarget, lerpT);
 
@@ -780,9 +787,13 @@ export default class Camera {
       ) {
         this._gameCameraAttachedPosition.copy(this._gameCameraAttachedPositionTarget);
       }
+      }
     }
 
     if (this._gameCameraTrackedPosition && this._gameCameraTrackedPositionTarget) {
+      if (this._shouldSkipPositionCameraSmoothing()) {
+        this._gameCameraTrackedPosition.copy(this._gameCameraTrackedPositionTarget);
+      } else {
       const lerpT = smoothingAlpha(frameDeltaS, CAMERA_TRACKED_POSITION_LERP_TIME_S);
       this._gameCameraTrackedPosition.lerp(this._gameCameraTrackedPositionTarget, lerpT);
 
@@ -791,6 +802,7 @@ export default class Camera {
         <= CAMERA_POSITION_DEADZONE_SQ
       ) {
         this._gameCameraTrackedPosition.copy(this._gameCameraTrackedPositionTarget);
+      }
       }
     }
 
@@ -1049,6 +1061,12 @@ export default class Camera {
     if (projectionMatrixDirty) {
       gameCamera.updateProjectionMatrix();
     }
+  }
+
+  private _shouldSkipPositionCameraSmoothing(): boolean {
+    return this._gameCameraMode === CameraMode.FIRST_PERSON
+      && !this._gameCameraAttachedEntity
+      && !!this._gameCameraAttachedPositionTarget;
   }
 
   private _updateGameCameraOrientation(pitch: number, yaw: number): void {

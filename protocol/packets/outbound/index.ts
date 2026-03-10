@@ -1,4 +1,5 @@
 export * from './Audios';
+export * from './BlockEditPredictionConfig';
 export * from './BlockEditPredictionResults';
 export * from './Blocks';
 export * from './BlockTypes';

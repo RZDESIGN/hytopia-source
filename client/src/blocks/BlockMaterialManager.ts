@@ -225,13 +225,11 @@ class MeshLiquidMaterial extends ShaderMaterial {
                 cos(ripplePhase.x * 0.92) * 0.024 + sin(ripplePhase.y * 1.09) * 0.016 + cos(detailPhase.y * 0.96) * 0.010
               );
               surfaceNormal = normalize(vec3(surfaceNormal.x + rippleNormal.x, surfaceNormal.y + 0.35, surfaceNormal.z + rippleNormal.y));
-
-              vec3 viewDir = normalize(vViewVector);
-              vec3 reflectionDir = reflect(-viewDir, surfaceNormal);
-              float fresnel = pow(1.0 - clamp(dot(surfaceNormal, viewDir), 0.0, 1.0), 3.6);
-              float horizonFactor = smoothstep(-0.2, 0.65, reflectionDir.y);
-              vec3 reflectionColor = mix(${UNIFORM_FOG_REFLECTION_COLOR}, ${UNIFORM_SKY_REFLECTION_COLOR}, horizonFactor);
-              if (${UNIFORM_REFLECTION_ENABLED} > 0.5) {
+              // Reflection is only valid when viewing the water surface from above and when
+              // the projected reflection sample is still inside the reflection viewport.
+              if (gl_FrontFacing && ${UNIFORM_REFLECTION_ENABLED} > 0.5) {
+                vec3 viewDir = normalize(vViewVector);
+                float fresnel = pow(1.0 - clamp(dot(surfaceNormal, viewDir), 0.0, 1.0), 3.6);
                 vec4 reflectionUv = ${UNIFORM_REFLECTION_TEXTURE_MATRIX} * vec4(vWorldPos, 1.0);
                 vec2 projectedReflectionUv = reflectionUv.xy / max(reflectionUv.w, 0.0001);
                 vec2 projectedReflectionOffset = rippleNormal * mix(0.010, 0.018, fresnel);
@@ -244,22 +242,12 @@ class MeshLiquidMaterial extends ShaderMaterial {
                 float inBounds = step(0.0, reflectionSampleUv.x) * step(reflectionSampleUv.x, 1.0)
                   * step(0.0, reflectionSampleUv.y) * step(reflectionSampleUv.y, 1.0)
                   * step(0.0, reflectionUv.w);
+                float reflectionSampleBlend = inBounds * reflectionEdgeFade;
                 vec3 sceneReflection = texture2D(${UNIFORM_REFLECTION_TEXTURE}, clamp(reflectionSampleUv, 0.0, 1.0)).rgb;
-                reflectionColor = mix(reflectionColor, sceneReflection, inBounds * reflectionEdgeFade * 0.88);
-              }
-              float sunGlint = pow(max(dot(reflectionDir, normalize(-${UNIFORM_SUN_DIRECTION})), 0.0), 112.0)
-                * (0.10 + 0.68 * fresnel)
-                * ${UNIFORM_SUN_INTENSITY};
-              float waveLighting = sin(dot(vWorldPos.xz, vec2(1.35, 1.15)) + ${UNIFORM_TIME} * 0.24) * 0.06;
-              float reflectionStrength = clamp(0.34 + fresnel * 0.62, 0.0, 0.96);
+                float reflectionStrength = clamp(0.34 + fresnel * 0.62, 0.0, 0.96) * reflectionSampleBlend;
 
-              // Combine lighting effects
-              color = mix(
-                color * (0.62 + waveLighting * 0.05) + vec3(0.02, 0.04, 0.07) * (0.72 + waveLighting),
-                reflectionColor + ${UNIFORM_SUN_COLOR} * sunGlint,
-                reflectionStrength
-              );
-              color += ${UNIFORM_SUN_COLOR} * sunGlint * 0.72;
+                color = mix(color, sceneReflection, reflectionStrength);
+              }
 
               vec2 blockPos = fract(vWorldPos.xz);
               float foamWidth = 0.10;
@@ -281,7 +269,7 @@ class MeshLiquidMaterial extends ShaderMaterial {
               if (vFoamLevelDiag.z > 0.5) minDist = min(minDist, length(vec2(distFromNegX, distFromPosZ)));
               if (vFoamLevelDiag.w > 0.5) minDist = min(minDist, length(vec2(distFromNegX, distFromNegZ)));
 
-              if (minDist < maxFoamDist) {
+              if (gl_FrontFacing && minDist < maxFoamDist) {
                 float foamIntensity = exp(-minDist / foamWidth);
                 float foamTime = ${UNIFORM_TIME} * 0.3;
                 vec2 foamUV = vWorldPos.xz * 6.0;
