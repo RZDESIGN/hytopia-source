@@ -91,8 +91,10 @@ const INPUT_MANAGER_MOVEMENT_PACKET_SENT_EVENT = 'INPUT_MANAGER.MOVEMENT_PACKET_
 const LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
 const LOCAL_PREDICTION_COLLIDER_RADIUS = 0.4;
+const LOCAL_PREDICTION_ENTITY_HEIGHT = 1.5;
 const LOCAL_PREDICTION_FOOT_OFFSET = 0.75;
-const LOCAL_PREDICTION_TOP_OFFSET = 0.75;
+const LOCAL_PREDICTION_MIN_FOOT_OFFSET = 0.65;
+const LOCAL_PREDICTION_MAX_FOOT_OFFSET = 0.8;
 const LOCAL_PREDICTION_GROUND_SNAP_DISTANCE = 0.18;
 const LOCAL_PREDICTION_COLLISION_EPSILON = 0.001;
 const LOCAL_PREDICTION_SAMPLE_INSET = LOCAL_PREDICTION_COLLIDER_RADIUS * 0.8;
@@ -147,6 +149,8 @@ type LocalPredictionControllerState = {
   predictedMovementReferenceYaw?: number;
   authoritativeSwimming: boolean;
   predictedSwimming: boolean;
+  authoritativeGroundFootOffset: number;
+  predictedGroundFootOffset: number;
   authoritativeJustSubmergedRemainingS: number;
   predictedJustSubmergedRemainingS: number;
   authoritativeSwimUpwardCooldownRemainingS: number;
@@ -216,6 +220,8 @@ export default class EntityManager {
       predictedMovementReferenceYaw: undefined,
       authoritativeSwimming: false,
       predictedSwimming: false,
+      authoritativeGroundFootOffset: LOCAL_PREDICTION_FOOT_OFFSET,
+      predictedGroundFootOffset: LOCAL_PREDICTION_FOOT_OFFSET,
       authoritativeJustSubmergedRemainingS: 0,
       predictedJustSubmergedRemainingS: 0,
       authoritativeSwimUpwardCooldownRemainingS: 0,
@@ -845,6 +851,8 @@ export default class EntityManager {
     this._localPredictionState.controllerState.predictedMovementReferenceYaw = undefined;
     this._localPredictionState.controllerState.authoritativeSwimming = false;
     this._localPredictionState.controllerState.predictedSwimming = false;
+    this._localPredictionState.controllerState.authoritativeGroundFootOffset = LOCAL_PREDICTION_FOOT_OFFSET;
+    this._localPredictionState.controllerState.predictedGroundFootOffset = LOCAL_PREDICTION_FOOT_OFFSET;
     this._localPredictionState.controllerState.authoritativeJustSubmergedRemainingS = 0;
     this._localPredictionState.controllerState.predictedJustSubmergedRemainingS = 0;
     this._localPredictionState.controllerState.authoritativeSwimUpwardCooldownRemainingS = 0;
@@ -946,6 +954,7 @@ export default class EntityManager {
     this._localPredictionState.lastAuthoritativePositionServerTick = serverTick;
     this._localPredictionState.authoritativePosition.copy(position);
     this._localPredictionState.hasAuthoritativePosition = true;
+    this._updateAuthoritativeGroundFootOffset(position);
 
     if (hadPreviousAuthoritativePosition) {
       const sampledTickDelta = serverTick - previousPositionServerTick;
@@ -1087,6 +1096,8 @@ export default class EntityManager {
       this._localPredictionState.controllerState.authoritativeMovementReferenceYaw;
     this._localPredictionState.controllerState.predictedSwimming =
       this._localPredictionState.controllerState.authoritativeSwimming;
+    this._localPredictionState.controllerState.predictedGroundFootOffset =
+      this._localPredictionState.controllerState.authoritativeGroundFootOffset;
     this._localPredictionState.controllerState.predictedJustSubmergedRemainingS =
       this._localPredictionState.controllerState.authoritativeJustSubmergedRemainingS;
     this._localPredictionState.controllerState.predictedSwimUpwardCooldownRemainingS =
@@ -1409,7 +1420,8 @@ export default class EntityManager {
   private _resolvePredictedGroundContact(predictedVerticalVelocity: number, motionBasisVelocityY: number): void {
     const controllerState = this._localPredictionState.controllerState;
     const predictedPosition = this._localPredictionState.predictedPosition;
-    const groundY = this._getPredictedGroundY(predictedPosition.x, predictedPosition.y, predictedPosition.z);
+    const footOffset = this._getPredictedGroundFootOffset();
+    const groundY = this._getPredictedGroundY(predictedPosition.x, predictedPosition.y, predictedPosition.z, footOffset);
 
     if (groundY === undefined) {
       if (
@@ -1422,7 +1434,7 @@ export default class EntityManager {
       return;
     }
 
-    const footY = predictedPosition.y - LOCAL_PREDICTION_FOOT_OFFSET;
+    const footY = predictedPosition.y - footOffset;
     const distanceToGround = footY - groundY;
     const movingDownOrStable = predictedVerticalVelocity <= (motionBasisVelocityY + LOCAL_PREDICTION_COLLISION_EPSILON);
 
@@ -1430,7 +1442,7 @@ export default class EntityManager {
       distanceToGround < 0 ||
       (movingDownOrStable && distanceToGround <= LOCAL_PREDICTION_GROUND_SNAP_DISTANCE)
     ) {
-      predictedPosition.y = groundY + LOCAL_PREDICTION_FOOT_OFFSET;
+      predictedPosition.y = groundY + footOffset;
       controllerState.predictedGrounded = true;
       return;
     }
@@ -1443,8 +1455,8 @@ export default class EntityManager {
     }
   }
 
-  private _getPredictedGroundY(x: number, y: number, z: number): number | undefined {
-    const sampleBlockY = Math.floor((y - LOCAL_PREDICTION_FOOT_OFFSET) - LOCAL_PREDICTION_COLLISION_EPSILON);
+  private _getPredictedGroundY(x: number, y: number, z: number, footOffset: number): number | undefined {
+    const sampleBlockY = Math.floor((y - footOffset) - LOCAL_PREDICTION_COLLISION_EPSILON);
     let highestGroundY: number | undefined;
 
     for (const [sampleOffsetX, sampleOffsetZ] of LOCAL_PREDICTION_FOOTPRINT_SAMPLES) {
@@ -1465,10 +1477,12 @@ export default class EntityManager {
   }
 
   private _intersectsLocalPredictionWorldAt(x: number, y: number, z: number): boolean {
+    const footOffset = this._getPredictedGroundFootOffset();
+    const topOffset = this._getPredictedTopOffset();
     const minBlockX = Math.floor(x - LOCAL_PREDICTION_COLLIDER_RADIUS + LOCAL_PREDICTION_COLLISION_EPSILON);
     const maxBlockX = Math.floor(x + LOCAL_PREDICTION_COLLIDER_RADIUS - LOCAL_PREDICTION_COLLISION_EPSILON);
-    const minBlockY = Math.floor(y - LOCAL_PREDICTION_FOOT_OFFSET + LOCAL_PREDICTION_COLLISION_EPSILON);
-    const maxBlockY = Math.floor(y + LOCAL_PREDICTION_TOP_OFFSET - LOCAL_PREDICTION_COLLISION_EPSILON);
+    const minBlockY = Math.floor(y - footOffset + LOCAL_PREDICTION_COLLISION_EPSILON);
+    const maxBlockY = Math.floor(y + topOffset - LOCAL_PREDICTION_COLLISION_EPSILON);
     const minBlockZ = Math.floor(z - LOCAL_PREDICTION_COLLIDER_RADIUS + LOCAL_PREDICTION_COLLISION_EPSILON);
     const maxBlockZ = Math.floor(z + LOCAL_PREDICTION_COLLIDER_RADIUS - LOCAL_PREDICTION_COLLISION_EPSILON);
 
@@ -1494,6 +1508,44 @@ export default class EntityManager {
 
     const blockType = this._game.blockTypeManager.getBlockType(block.blockId);
     return !!blockType && !blockType.isLiquid;
+  }
+
+  private _updateAuthoritativeGroundFootOffset(position: { x: number; y: number; z: number }): void {
+    const controllerState = this._localPredictionState.controllerState;
+
+    if (!controllerState.authoritativeGrounded || controllerState.authoritativeSwimming) {
+      return;
+    }
+
+    const groundY = this._getPredictedGroundY(
+      position.x,
+      position.y,
+      position.z,
+      controllerState.authoritativeGroundFootOffset,
+    );
+
+    if (groundY === undefined) {
+      return;
+    }
+
+    const sampledFootOffset = Math.min(
+      LOCAL_PREDICTION_MAX_FOOT_OFFSET,
+      Math.max(LOCAL_PREDICTION_MIN_FOOT_OFFSET, position.y - groundY),
+    );
+
+    controllerState.authoritativeGroundFootOffset +=
+      (sampledFootOffset - controllerState.authoritativeGroundFootOffset) * 0.35;
+  }
+
+  private _getPredictedGroundFootOffset(): number {
+    return this._localPredictionState.controllerState.predictedGroundFootOffset;
+  }
+
+  private _getPredictedTopOffset(): number {
+    return Math.max(
+      LOCAL_PREDICTION_COLLISION_EPSILON,
+      LOCAL_PREDICTION_ENTITY_HEIGHT - this._getPredictedGroundFootOffset(),
+    );
   }
 
   private _shouldForceActiveInputReconcile(): boolean {
