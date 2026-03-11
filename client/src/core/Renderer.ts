@@ -433,6 +433,36 @@ export default class Renderer {
     this._scene.remove(object);
   }
 
+  public purgeEntityObjects(entityId: number): number {
+    const purgeRoots: Object3D[] = [];
+    const collectPurgeRoots = (scene: Scene): void => {
+      scene.traverse(object => {
+        if (object.userData?.entityId !== entityId) {
+          return;
+        }
+
+        if (object.parent?.userData?.entityId === entityId) {
+          return;
+        }
+
+        purgeRoots.push(object);
+      });
+    };
+
+    collectPurgeRoots(this._scene);
+    collectPurgeRoots(this._viewModelScene);
+
+    if (this._firstPersonViewModelEntity?.id === entityId) {
+      this._firstPersonViewModelEntity = undefined;
+    }
+
+    for (let i = 0; i < purgeRoots.length; i++) {
+      purgeRoots[i].removeFromParent();
+    }
+
+    return purgeRoots.length;
+  }
+
   public addToUIScene(object: CSS2DObject): void {
     this._uiScene.add(object);
     this._sceneUiRenderer.domElement.appendChild(object.element);

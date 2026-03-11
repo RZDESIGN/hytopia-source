@@ -5150,6 +5150,7 @@ declare type EntitySchema = {
     fd?: boolean;
     js?: number;
     i: number;
+    ju?: number;
     bh?: VectorSchema;
     bt?: string;
     e?: boolean;
@@ -5172,10 +5173,15 @@ declare type EntitySchema = {
     r?: QuaternionSchema;
     ri?: number;
     rm?: boolean;
+    rv?: number;
     sc?: number;
     si?: number;
+    sf?: number;
+    sl?: number;
     sv?: VectorSchema;
+    su?: number;
     t?: RgbColorSchema;
+    wv?: number;
 };
 
 declare const entitySchema: JSONSchemaType<EntitySchema>;

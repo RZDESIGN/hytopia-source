@@ -141,6 +141,7 @@ export interface DebugPanelConfig {
     predictedGroundFootOffset: number;
     traceEntryCount: number;
     latestTraceLine: string;
+    exportStatus: string;
   };
   chunk: {
     count: number;
@@ -190,6 +191,19 @@ type MyNavigator = {
 
 export default class DebugPanel {
   private _game: Game;
+  private _predictionActions = {
+    clearTrace: (): void => {
+      LocalPredictionStats.clearTrace();
+      this._config.prediction.exportStatus = 'trace cleared';
+      this._updatePredictionStats();
+    },
+    copyTrace: (): void => {
+      void this._copyPredictionTraceToClipboard();
+    },
+    downloadTrace: (): void => {
+      this._downloadPredictionTrace();
+    },
+  };
   private _config: DebugPanelConfig = {
     player: {
       position: `-, -, -`,
@@ -267,6 +281,7 @@ export default class DebugPanel {
       predictedGroundFootOffset: 0,
       traceEntryCount: 0,
       latestTraceLine: '-',
+      exportStatus: '-',
     },
     chunk: {
       count: 0,
@@ -421,6 +436,10 @@ export default class DebugPanel {
     predictionFolder.add(this._config.prediction, 'predictedGroundFootOffset').name('Pred Foot Offset');
     predictionFolder.add(this._config.prediction, 'traceEntryCount').name('Trace Entries');
     predictionFolder.add(this._config.prediction, 'latestTraceLine').name('Last Trace');
+    predictionFolder.add(this._config.prediction, 'exportStatus').name('Export Status');
+    predictionFolder.add(this._predictionActions, 'copyTrace').name('Copy Trace');
+    predictionFolder.add(this._predictionActions, 'downloadTrace').name('Download Trace');
+    predictionFolder.add(this._predictionActions, 'clearTrace').name('Clear Trace');
 
     // Chunk stats panel
     const chunkFolder = this._gui.addFolder('Chunks');
@@ -619,6 +638,77 @@ export default class DebugPanel {
     this._config.prediction.predictedGroundFootOffset = Number(LocalPredictionStats.predictedGroundFootOffset.toFixed(3));
     this._config.prediction.traceEntryCount = LocalPredictionStats.traceEntryCount;
     this._config.prediction.latestTraceLine = LocalPredictionStats.latestTraceLine;
+  }
+
+  private _buildPredictionTraceReport(): string {
+    this._updatePlayerInfo();
+    this._updateCameraInfo();
+    this._updateServerInfo();
+    this._updatePredictionStats();
+
+    const nowIso = new Date().toISOString();
+    const playerPosition = this._config.player.position;
+    const cameraPosition = this._config.camera.position;
+    const traceBody = LocalPredictionStats.dumpTrace();
+
+    const summaryLines = [
+      '# HYTOPIA Local Prediction Trace',
+      `captured_at=${nowIso}`,
+      `server_version=${this._config.server.version}`,
+      `send_protocol=${this._config.server.sendProtocol}`,
+      `receive_protocol=${this._config.server.receiveProtocol}`,
+      `fps=${this._config.performance.fps}`,
+      `target_fps=${this._config.performance.targetFps}`,
+      `frame_p95_ms=${this._config.performance.frameP95Ms}`,
+      `rtt_ms=${(this._game.networkManager.roundTripTimeS * 1000).toFixed(2)}`,
+      `player_position=${playerPosition}`,
+      `camera_position=${cameraPosition}`,
+      `prediction_entity_id=${this._config.prediction.entityId}`,
+      `ack_support=${this._config.prediction.supportsInputAcknowledgements ? 1 : 0}`,
+      `buffered_commands=${this._config.prediction.bufferedCommandCount}`,
+      `last_acked_sq=${this._config.prediction.lastAcknowledgedInputSequenceNumber}`,
+      `last_replay=${this._config.prediction.lastReplayCommandCount}/${this._config.prediction.lastReplaySubstepCount}`,
+      `peak_replay=${this._config.prediction.peakReplayCommandCount}/${this._config.prediction.peakReplaySubstepCount}`,
+      `error=${this._config.prediction.horizontalError.toFixed(3)},${this._config.prediction.verticalError.toFixed(3)},${this._config.prediction.rotationErrorDeg.toFixed(2)}`,
+      `reconcile=${this._config.prediction.lastReconcileMode}`,
+      `soft_reconciles=${this._config.prediction.softReconcileCount}`,
+      `snap_reconciles=${this._config.prediction.snapReconcileCount}`,
+      `forced_active_reconciles=${this._config.prediction.forcedActiveReconcileCount}`,
+      `deferred_active_reconciles=${this._config.prediction.deferredActiveReconcileCount}`,
+      `motion_basis=${this._config.prediction.motionBasisHorizontalSpeed.toFixed(3)},${this._config.prediction.motionBasisVertical.toFixed(3)}`,
+      `grounded=${this._config.prediction.authoritativeGrounded ? 1 : 0}/${this._config.prediction.predictedGrounded ? 1 : 0}/${this._config.prediction.groundedMismatch ? 1 : 0}`,
+      `ground_transitions=${this._config.prediction.authoritativeGroundedTransitionCount}/${this._config.prediction.predictedGroundedTransitionCount}`,
+      `foot_offset=${this._config.prediction.authoritativeGroundFootOffset.toFixed(3)}/${this._config.prediction.predictedGroundFootOffset.toFixed(3)}`,
+      `trace_entries=${this._config.prediction.traceEntryCount}`,
+      '',
+      '# Trace',
+    ];
+
+    return `${summaryLines.join('\n')}\n${traceBody || '(no trace entries recorded)'}`;
+  }
+
+  private async _copyPredictionTraceToClipboard(): Promise<void> {
+    const report = this._buildPredictionTraceReport();
+
+    try {
+      await navigator.clipboard.writeText(report);
+      this._config.prediction.exportStatus = `copied ${LocalPredictionStats.traceEntryCount} lines`;
+    } catch {
+      this._config.prediction.exportStatus = 'clipboard copy failed';
+    }
+  }
+
+  private _downloadPredictionTrace(): void {
+    const report = this._buildPredictionTraceReport();
+    const blob = new Blob([report], { type: 'text/plain;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    anchor.href = objectUrl;
+    anchor.download = `hytopia-local-prediction-trace-${timestamp}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(objectUrl);
+    this._config.prediction.exportStatus = `downloaded ${LocalPredictionStats.traceEntryCount} lines`;
   }
 
   private _updateChunkStats(): void {

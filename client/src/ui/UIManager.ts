@@ -295,7 +295,7 @@ export default class UIManager {
       if (
         deserializedSceneUI.id === undefined ||
         deserializedSceneUI.templateId === undefined ||
-        (deserializedSceneUI.attachedToEntityId === undefined && deserializedSceneUI.position === undefined)
+        (deserializedSceneUI.attachedToEntityId == null && deserializedSceneUI.position === undefined)
       ) {
         return console.info(`UIManager._updateSceneUI(): SceneUI ${deserializedSceneUI.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedSceneUI);
       }

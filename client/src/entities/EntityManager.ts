@@ -164,6 +164,13 @@ type LocalPredictionState = {
   predictedRotation: Quaternion;
   authoritativePosition: Vector3;
   authoritativeRotation: Quaternion;
+  authoritativeJumpVelocity: number;
+  authoritativeRunVelocity: number;
+  authoritativeSwimFastVelocity: number;
+  authoritativeSwimSlowVelocity: number;
+  authoritativeSwimUpwardVelocity: number;
+  authoritativeWalkVelocity: number;
+  useAuthoritativeMovementConfig: boolean;
   estimatedVerticalVelocity: number;
   estimatedWalkSpeed: number;
   estimatedRunSpeed: number;
@@ -199,6 +206,8 @@ type LocalPredictionDebugState = {
 export default class EntityManager {
   private _game: Game;
   private _entities: Map<EntityId, Entity | StaticEntity> = new Map();
+  private _lastRemovedEntityServerTickById: Map<EntityId, number> = new Map();
+  private _worldId: number | undefined;
   private _dynamicEntities: Set<Entity> = new Set();
   private _dynamicEntityList: Entity[] = [];
   private _dynamicEntityListDirty: boolean = false;
@@ -217,6 +226,13 @@ export default class EntityManager {
     predictedRotation: new Quaternion(),
     authoritativePosition: new Vector3(),
     authoritativeRotation: new Quaternion(),
+    authoritativeJumpVelocity: LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY,
+    authoritativeRunVelocity: LOCAL_PREDICTION_DEFAULT_RUN_SPEED,
+    authoritativeSwimFastVelocity: LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED,
+    authoritativeSwimSlowVelocity: LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED,
+    authoritativeSwimUpwardVelocity: LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY,
+    authoritativeWalkVelocity: LOCAL_PREDICTION_DEFAULT_WALK_SPEED,
+    useAuthoritativeMovementConfig: false,
     controllerState: {
       authoritativeMotionBasisVelocity: new Vector3(),
       predictedMotionBasisVelocity: new Vector3(),
@@ -576,6 +592,11 @@ export default class EntityManager {
   }
 
   private _onWorldPacket = (payload: NetworkManagerEventPayload.IWorldPacket): void => {
+    if (this._worldId !== payload.deserializedWorld.id) {
+      this._worldId = payload.deserializedWorld.id;
+      this._lastRemovedEntityServerTickById.clear();
+    }
+
     const timestep = payload.deserializedWorld.timestep;
     if (typeof timestep !== 'number' || !Number.isFinite(timestep) || timestep <= 0) {
       return;
@@ -584,9 +605,39 @@ export default class EntityManager {
     this._localPredictionState.worldTimestepS = Math.min(Math.max(timestep, 1 / 240), 1);
   }
 
+  private _purgeEntityVisuals(entityId: EntityId): void {
+    this._staticEnvironmentEntityManager.removeByEntityId(entityId);
+    this._game.renderer.purgeEntityObjects(entityId);
+    this._outlines.delete(entityId);
+  }
+
   private _updateEntity = (deserializedEntity: DeserializedEntity, serverTick: number): void => {
     let entity = this._entities.get(deserializedEntity.id);
     if (!entity) {
+      if (deserializedEntity.removed) {
+        if (deserializedEntity.id !== undefined) {
+          const previousRemovedServerTick = this._lastRemovedEntityServerTickById.get(deserializedEntity.id) ?? -Infinity;
+          if (serverTick > previousRemovedServerTick) {
+            this._lastRemovedEntityServerTickById.set(deserializedEntity.id, serverTick);
+          }
+
+          this._purgeEntityVisuals(deserializedEntity.id);
+        }
+
+        return;
+      }
+
+      const removedServerTick = deserializedEntity.id !== undefined
+        ? this._lastRemovedEntityServerTickById.get(deserializedEntity.id)
+        : undefined;
+      if (removedServerTick !== undefined && serverTick <= removedServerTick) {
+        return;
+      }
+
+      if (deserializedEntity.id !== undefined) {
+        this._purgeEntityVisuals(deserializedEntity.id);
+      }
+
       if (
         deserializedEntity.id === undefined ||
         deserializedEntity.position === undefined ||
@@ -647,6 +698,7 @@ export default class EntityManager {
       }
 
       this._entities.set(entity.id, entity);
+      this._lastRemovedEntityServerTickById.delete(entity.id);
 
       // Since the geometry for Block Entities depends on the Block Texture Atlas and other factors,
       // it needs to be constructed in the WebWorker just like Chunk Blocks Mesh. Therefore, a request
@@ -661,20 +713,26 @@ export default class EntityManager {
       }
     } else {
       if (deserializedEntity.removed) {
-        if ((entity instanceof StaticEntity)) {
-          throw new Error(`EntityManager: Static Environment Entity must not be removed. ${entity.id}`);
+        const previousRemovedServerTick = this._lastRemovedEntityServerTickById.get(entity.id) ?? -Infinity;
+        if (serverTick > previousRemovedServerTick) {
+          this._lastRemovedEntityServerTickById.set(entity.id, serverTick);
         }
 
         if (this._localPredictionState.entityId === entity.id) {
           this._resetLocalPredictionState();
         }
 
-        entity.release();
+        if (entity instanceof StaticEntity) {
+          this._staticEnvironmentEntityManager.remove(entity);
+        } else {
+          entity.release();
+        }
+
         this._entities.delete(entity.id);
         if (entity instanceof Entity && this._dynamicEntities.delete(entity)) {
           this._dynamicEntityListDirty = true;
         }
-        this._outlines.delete(entity.id);
+        this._purgeEntityVisuals(entity.id);
         return;
       }
 
@@ -853,6 +911,13 @@ export default class EntityManager {
     this._localPredictionDebug.predictedGroundedTransitionCount = 0;
     this._localPredictionState.entityId = nextEntityId;
     this._localPredictionState.estimatedVerticalVelocity = 0;
+    this._localPredictionState.authoritativeWalkVelocity = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
+    this._localPredictionState.authoritativeRunVelocity = LOCAL_PREDICTION_DEFAULT_RUN_SPEED;
+    this._localPredictionState.authoritativeJumpVelocity = LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY;
+    this._localPredictionState.authoritativeSwimFastVelocity = LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED;
+    this._localPredictionState.authoritativeSwimSlowVelocity = LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED;
+    this._localPredictionState.authoritativeSwimUpwardVelocity = LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY;
+    this._localPredictionState.useAuthoritativeMovementConfig = false;
     this._localPredictionState.estimatedWalkSpeed = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
     this._localPredictionState.estimatedRunSpeed = LOCAL_PREDICTION_DEFAULT_RUN_SPEED;
     this._localPredictionState.supportsInputAcknowledgements = false;
@@ -930,10 +995,16 @@ export default class EntityManager {
     return (
       deserializedEntity.localPredictionFastMovementByDefault !== undefined ||
       deserializedEntity.localPredictionFlags !== undefined ||
+      deserializedEntity.localPredictionJumpVelocity !== undefined ||
       deserializedEntity.localPredictionMotionBasisVelocity !== undefined ||
+      deserializedEntity.localPredictionRunVelocity !== undefined ||
+      deserializedEntity.localPredictionSwimFastVelocity !== undefined ||
+      deserializedEntity.localPredictionSwimSlowVelocity !== undefined ||
       deserializedEntity.localPredictionJustSubmergedRemainingMs !== undefined ||
       deserializedEntity.localPredictionMovementReferenceYaw !== undefined ||
-      deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs !== undefined
+      deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs !== undefined ||
+      deserializedEntity.localPredictionSwimUpwardVelocity !== undefined ||
+      deserializedEntity.localPredictionWalkVelocity !== undefined
     );
   }
 
@@ -960,6 +1031,42 @@ export default class EntityManager {
       0,
       (deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs ?? 0) / 1000,
     );
+
+    const walkVelocity = deserializedEntity.localPredictionWalkVelocity;
+    const runVelocity = deserializedEntity.localPredictionRunVelocity;
+    const jumpVelocity = deserializedEntity.localPredictionJumpVelocity;
+    const swimFastVelocity = deserializedEntity.localPredictionSwimFastVelocity;
+    const swimSlowVelocity = deserializedEntity.localPredictionSwimSlowVelocity;
+    const swimUpwardVelocity = deserializedEntity.localPredictionSwimUpwardVelocity;
+    const hasAuthoritativeMovementConfig =
+      Number.isFinite(walkVelocity) &&
+      Number.isFinite(runVelocity) &&
+      Number.isFinite(jumpVelocity) &&
+      Number.isFinite(swimFastVelocity) &&
+      Number.isFinite(swimSlowVelocity) &&
+      Number.isFinite(swimUpwardVelocity);
+
+    this._localPredictionState.useAuthoritativeMovementConfig = hasAuthoritativeMovementConfig;
+    this._localPredictionState.authoritativeWalkVelocity = hasAuthoritativeMovementConfig
+      ? Number(walkVelocity)
+      : LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
+    this._localPredictionState.authoritativeRunVelocity = hasAuthoritativeMovementConfig
+      ? Number(runVelocity)
+      : LOCAL_PREDICTION_DEFAULT_RUN_SPEED;
+    this._localPredictionState.authoritativeJumpVelocity = hasAuthoritativeMovementConfig
+      ? Number(jumpVelocity)
+      : LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY;
+    this._localPredictionState.authoritativeSwimFastVelocity = hasAuthoritativeMovementConfig
+      ? Number(swimFastVelocity)
+      : LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED;
+    this._localPredictionState.authoritativeSwimSlowVelocity = hasAuthoritativeMovementConfig
+      ? Number(swimSlowVelocity)
+      : LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED;
+    this._localPredictionState.authoritativeSwimUpwardVelocity = hasAuthoritativeMovementConfig
+      ? Number(swimUpwardVelocity)
+      : LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY;
+    this._localPredictionState.estimatedWalkSpeed = this._localPredictionState.authoritativeWalkVelocity;
+    this._localPredictionState.estimatedRunSpeed = this._localPredictionState.authoritativeRunVelocity;
 
     if (this._localPredictionState.commandBufferCount === 0) {
       this._syncPredictedControllerStateFromAuthoritative();
@@ -1304,17 +1411,31 @@ export default class EntityManager {
     const isActivelyMoving = movementDirection.lengthSq > 0;
     const motionBasisVelocity = controllerState.predictedMotionBasisVelocity;
     const isFastMovement = sh || controllerState.predictedFastMovementByDefault;
+    const walkSpeed = this._localPredictionState.useAuthoritativeMovementConfig
+      ? this._localPredictionState.authoritativeWalkVelocity
+      : Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed);
+    const runSpeed = this._localPredictionState.useAuthoritativeMovementConfig
+      ? Math.max(walkSpeed, this._localPredictionState.authoritativeRunVelocity)
+      : Math.max(
+        Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed),
+        this._localPredictionState.estimatedRunSpeed,
+      );
+    const swimFastSpeed = this._localPredictionState.useAuthoritativeMovementConfig
+      ? this._localPredictionState.authoritativeSwimFastVelocity
+      : LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED;
+    const swimSlowSpeed = this._localPredictionState.useAuthoritativeMovementConfig
+      ? this._localPredictionState.authoritativeSwimSlowVelocity
+      : LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED;
+    const jumpVelocity = this._localPredictionState.useAuthoritativeMovementConfig
+      ? this._localPredictionState.authoritativeJumpVelocity
+      : LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY;
+    const swimUpwardVelocity = this._localPredictionState.useAuthoritativeMovementConfig
+      ? this._localPredictionState.authoritativeSwimUpwardVelocity
+      : LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY;
     const predictedPosition = this._localPredictionState.predictedPosition;
     const movementSpeed = controllerState.predictedSwimming
-      ? (isFastMovement ? LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED : LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED)
-      : (
-        isFastMovement
-          ? Math.max(
-            Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed),
-            this._localPredictionState.estimatedRunSpeed,
-          )
-          : Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed)
-      );
+      ? (isFastMovement ? swimFastSpeed : swimSlowSpeed)
+      : (isFastMovement ? runSpeed : walkSpeed);
 
     const movementVelocityX = isActivelyMoving ? movementDirection.x * movementSpeed : 0;
     const movementVelocityZ = isActivelyMoving ? movementDirection.z * movementSpeed : 0;
@@ -1335,10 +1456,10 @@ export default class EntityManager {
 
     if (controllerState.predictedSwimming) {
       if (c) {
-        predictedVerticalVelocity = -LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY + motionBasisVelocity.y;
+        predictedVerticalVelocity = -swimUpwardVelocity + motionBasisVelocity.y;
       } else if (controllerState.predictedJustSubmergedRemainingS > 0) {
         predictedVerticalVelocity =
-          (-LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY * LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR) +
+          (-swimUpwardVelocity * LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR) +
           motionBasisVelocity.y;
       } else if (!sp) {
         predictedVerticalVelocity =
@@ -1354,13 +1475,13 @@ export default class EntityManager {
         this._localPredictionState.estimatedVerticalVelocity > -0.001 &&
         this._localPredictionState.estimatedVerticalVelocity <= 3
       ) {
-        predictedVerticalVelocity = LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY + motionBasisVelocity.y;
+        predictedVerticalVelocity = jumpVelocity + motionBasisVelocity.y;
         this._setPredictedGrounded(false);
       } else if (
         controllerState.predictedSwimming &&
         controllerState.predictedSwimUpwardCooldownRemainingS <= 0
       ) {
-        predictedVerticalVelocity = LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY + motionBasisVelocity.y;
+        predictedVerticalVelocity = swimUpwardVelocity + motionBasisVelocity.y;
         controllerState.predictedSwimUpwardCooldownRemainingS = 0.6;
       }
     }
@@ -1685,6 +1806,10 @@ export default class EntityManager {
     dz: number,
     calibrationAcknowledgedInputSequenceNumber?: number,
   ): void {
+    if (this._localPredictionState.useAuthoritativeMovementConfig) {
+      return;
+    }
+
     if (calibrationAcknowledgedInputSequenceNumber === undefined) {
       return;
     }

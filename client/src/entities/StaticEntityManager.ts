@@ -354,9 +354,9 @@ export default class StaticEntityManager {
     }
 
     const entry = this._uriToEntry.get(entity.modelUri)!;
-    const instanceIndex = entry.entities.size;
-    entry.entityToInstanceIndex.set(entity, instanceIndex);
-    entry.instanceIndexToEntity.set(instanceIndex, entity);
+    const initialInstanceIndex = entry.entities.size;
+    entry.entityToInstanceIndex.set(entity, initialInstanceIndex);
+    entry.instanceIndexToEntity.set(initialInstanceIndex, entity);
     entry.entities.add(entity);
 
     EntityStats.staticEnvironmentCount++;
@@ -366,6 +366,13 @@ export default class StaticEntityManager {
     } catch (error) {
       console.error(error);
       throw new Error(`StaticEntity: Failed to load GLTF: ${entry.uri}`);
+    }
+
+    // The entity may have been removed or compacted into a different slot while
+    // the GLTF was loading, so resolve its current slot after the await.
+    const instanceIndex = entry.entityToInstanceIndex.get(entity);
+    if (instanceIndex === undefined || !entry.entities.has(entity) || !this._uriToEntry.has(entry.uri)) {
+      return;
     }
 
     entry.gltf!.scene.traverse((sourceMesh) => {
@@ -465,6 +472,95 @@ export default class StaticEntityManager {
 
       instancedMesh.updateShadowCasterLod();
     });
+  }
+
+  public remove(entity: StaticEntity): boolean {
+    const uri = entity.modelUri;
+    if (!uri) {
+      return false;
+    }
+
+    const entry = this._uriToEntry.get(uri);
+    const removedIndex = entry?.entityToInstanceIndex.get(entity);
+    if (!entry || removedIndex === undefined) {
+      return false;
+    }
+
+    const lastIndex = entry.entities.size - 1;
+    const movedEntity = removedIndex !== lastIndex ? entry.instanceIndexToEntity.get(lastIndex) : undefined;
+
+    if (movedEntity) {
+      entry.entityToInstanceIndex.set(movedEntity, removedIndex);
+      entry.instanceIndexToEntity.set(removedIndex, movedEntity);
+    }
+
+    entry.entityToInstanceIndex.delete(entity);
+    entry.instanceIndexToEntity.delete(lastIndex);
+    entry.entities.delete(entity);
+    EntityStats.staticEnvironmentCount = Math.max(0, EntityStats.staticEnvironmentCount - 1);
+
+    for (const instancedMesh of entry.sourceToInstancedMesh.values()) {
+      if (movedEntity) {
+        const matrixArray = instancedMesh.instanceMatrix.array as Float32Array;
+        matrixArray.copyWithin(removedIndex * 16, lastIndex * 16, (lastIndex + 1) * 16);
+        instancedMesh.instanceMatrix.needsUpdate = true;
+
+        const colorAttribute = instancedMesh.instanceColor;
+        if (colorAttribute) {
+          const { itemSize } = colorAttribute;
+          (colorAttribute.array as Float32Array).copyWithin(
+            removedIndex * itemSize,
+            lastIndex * itemSize,
+            (lastIndex + 1) * itemSize,
+          );
+          colorAttribute.needsUpdate = true;
+        }
+
+        const lightLevelAttribute = instancedMesh.geometry.getAttribute(INSTANCE_LIGHT_LEVEL_ATTRIBUTE);
+        lightLevelAttribute.array.copyWithin(removedIndex, lastIndex, lastIndex + 1);
+        lightLevelAttribute.needsUpdate = true;
+
+        const skyLightAttribute = instancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE);
+        skyLightAttribute.array.copyWithin(removedIndex, lastIndex, lastIndex + 1);
+        skyLightAttribute.needsUpdate = true;
+
+        const emissiveAttribute = instancedMesh.geometry.getAttribute(INSTANCE_EMISSIVE_ATTRIBUTE);
+        const emissiveItemSize = emissiveAttribute.itemSize;
+        emissiveAttribute.array.copyWithin(
+          removedIndex * emissiveItemSize,
+          lastIndex * emissiveItemSize,
+          (lastIndex + 1) * emissiveItemSize,
+        );
+        emissiveAttribute.needsUpdate = true;
+      }
+
+      instancedMesh.count = lastIndex;
+      instancedMesh.updateShadowCasterLod();
+    }
+
+    if (entry.entities.size === 0) {
+      for (const instancedMesh of entry.sourceToInstancedMesh.values()) {
+        this._game.renderer.removeFromScene(instancedMesh);
+        instancedMesh.dispose();
+      }
+
+      entry.sourceToInstancedMesh.clear();
+      this._uriToEntry.delete(uri);
+    }
+
+    return true;
+  }
+
+  public removeByEntityId(entityId: number): boolean {
+    for (const entry of this._uriToEntry.values()) {
+      for (const entity of entry.entities) {
+        if (entity.id === entityId) {
+          return this.remove(entity);
+        }
+      }
+    }
+
+    return false;
   }
 
   public get instancedMeshesInScene(): StaticEntityInstancedMesh[] {

@@ -515,7 +515,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
   assert.deepEqual(blockDeltaPackets[0][1], [{ c: [160, 0, 1], i: 4 }]);
 });
 
-test('coalesces same-tick spatial interest loads with same-channel patches', async t => {
+test('coalesces same-tick spatial interest loads with same-channel patches to latest state', async t => {
   const harness = await createChildHarness(t);
   const worldId = 105;
 
@@ -602,22 +602,191 @@ test('coalesces same-tick spatial interest loads with same-channel patches', asy
     worldTick: 4,
   });
 
-  const coalescedBatchMessage = await harness.waitForMessage(message => {
-    if (message.type !== 'player_packet_batch' || message.playerId !== 'player-f') {
-      return false;
+  const collectedPackets = [];
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 4_000) {
+    const batchMessage = await harness.waitForMessage(message => {
+      return message.type === 'player_packet_batch' && message.playerId === 'player-f';
+    }, 4_000 - (Date.now() - startedAt));
+    collectedPackets.push(...decodeWirePackets(batchMessage.wireBytes));
+
+    const entityPayloads = collectedPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+    const particlePayloads = collectedPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).flatMap(packet => packet[1]);
+    const sceneUIPayloads = collectedPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).flatMap(packet => packet[1]);
+
+    const mergedEntityPayload = entityPayloads.find(entity => entity.i === 7101 && entity.n === 'Far Bot Updated');
+    const mergedParticlePayload = particlePayloads.find(particleEmitter => {
+      return particleEmitter.i === 8101 && particleEmitter.tu === 'particles/far-updated.png';
+    });
+    const mergedSceneUIPayload = sceneUIPayloads.find(sceneUI => {
+      return sceneUI.i === 9101 && sceneUI.s?.label === 'far-updated';
+    });
+
+    if (mergedEntityPayload && mergedParticlePayload && mergedSceneUIPayload) {
+      assert.equal(mergedEntityPayload.n, 'Far Bot Updated');
+      assert.equal(mergedParticlePayload.tu, 'particles/far-updated.png');
+      assert.deepEqual(mergedSceneUIPayload.s, { label: 'far-updated' });
+      return;
+    }
+  }
+
+  assert.fail('Timed out waiting for coalesced same-tick spatial interest state.');
+});
+
+test('same-tick spatial removals dominate stale later patches for the same id', async t => {
+  const harness = await createChildHarness(t);
+  const worldId = 106;
+
+  harness.send({
+    options: createWorldBootOptions(worldId),
+    processId: 'shadow-test',
+    type: 'world_boot',
+    world: createWorldDescriptor(worldId),
+  });
+  await harness.waitForMessage(message => message.type === 'world_ready' && message.world?.id === worldId);
+
+  harness.send({
+    player: createPlayerDescriptor('player-g'),
+    type: 'player_attach',
+    worldId,
+  });
+  await harness.waitForMessage(message => message.type === 'player_packet_batch' && message.playerId === 'player-g');
+
+  harness.send({
+    camera: { e: null, p: [0, 2, 0] },
+    playerId: 'player-g',
+    type: 'player_camera',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    entity: {
+      i: 7201,
+      n: 'Temp Bot',
+      p: [0, 2, 0],
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    particleEmitter: {
+      i: 8201,
+      p: [0, 2, 1],
+      tu: 'particles/temp.png',
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    sceneUI: {
+      i: 9201,
+      p: [0, 3, 0],
+      s: { label: 'temp' },
+      t: 'nametag',
+      v: 30,
+    },
+    type: 'scene_ui_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  await harness.waitForMessage(message => message.type === 'player_packet_batch' && message.playerId === 'player-g');
+
+  harness.send({
+    entity: {
+      i: 7201,
+      rm: true,
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    entity: {
+      i: 7201,
+      n: 'Stale Bot Update',
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    particleEmitter: {
+      i: 8201,
+      rm: true,
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    particleEmitter: {
+      i: 8201,
+      tu: 'particles/stale.png',
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    sceneUI: {
+      i: 9201,
+      rm: true,
+    },
+    type: 'scene_ui_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    sceneUI: {
+      i: 9201,
+      s: { label: 'stale' },
+    },
+    type: 'scene_ui_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+
+  const collectedPackets = [];
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 4_000) {
+    const batchMessage = await harness.waitForMessage(message => {
+      return message.type === 'player_packet_batch' && message.playerId === 'player-g';
+    }, 4_000 - (Date.now() - startedAt));
+    collectedPackets.push(...decodeWirePackets(batchMessage.wireBytes));
+
+    const entityPayloads = collectedPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+    const particlePayloads = collectedPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).flatMap(packet => packet[1]);
+    const sceneUIPayloads = collectedPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).flatMap(packet => packet[1]);
+
+    const hasEntityRemoval = entityPayloads.some(entity => entity.i === 7201 && entity.rm === true && !('n' in entity));
+    const hasParticleRemoval = particlePayloads.some(particle => particle.i === 8201 && particle.rm === true && !('tu' in particle));
+    const hasSceneUIRemoval = sceneUIPayloads.some(sceneUI => sceneUI.i === 9201 && sceneUI.rm === true && !('s' in sceneUI));
+
+    if (!hasEntityRemoval || !hasParticleRemoval || !hasSceneUIRemoval) {
+      continue;
     }
 
-    const packets = decodeWirePackets(message.wireBytes);
-    return packets.some(packet => packet[0] === ENTITIES_PACKET_ID && packet[1].length === 2)
-      && packets.some(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID && packet[1].length === 2)
-      && packets.some(packet => packet[0] === SCENE_UIS_PACKET_ID && packet[1].length === 2);
-  });
-  const coalescedPackets = decodeWirePackets(coalescedBatchMessage.wireBytes);
+    assert.equal(entityPayloads.length, 1);
+    assert.equal(entityPayloads[0].i, 7201);
+    assert.equal(entityPayloads[0].rm, true);
+    assert.equal('n' in entityPayloads[0], false);
 
-  assert.equal(coalescedPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).length, 1);
-  assert.equal(coalescedPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).length, 1);
-  assert.equal(coalescedPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).length, 1);
-  assert.equal(coalescedPackets.find(packet => packet[0] === ENTITIES_PACKET_ID)[1][1].n, 'Far Bot Updated');
-  assert.equal(coalescedPackets.find(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID)[1][1].tu, 'particles/far-updated.png');
-  assert.deepEqual(coalescedPackets.find(packet => packet[0] === SCENE_UIS_PACKET_ID)[1][1].s, { label: 'far-updated' });
+    assert.equal(particlePayloads.length, 1);
+    assert.equal(particlePayloads[0].i, 8201);
+    assert.equal(particlePayloads[0].rm, true);
+    assert.equal('tu' in particlePayloads[0], false);
+
+    assert.equal(sceneUIPayloads.length, 1);
+    assert.equal(sceneUIPayloads[0].i, 9201);
+    assert.equal(sceneUIPayloads[0].rm, true);
+    assert.equal('s' in sceneUIPayloads[0], false);
+    return;
+  }
+
+  assert.fail('Timed out waiting for removal-dominated spatial payloads.');
 });

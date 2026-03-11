@@ -64,11 +64,17 @@ const coalesceQueuedBatchPackets = packets => {
     const existingPacketIndex = coalescedPacketIndexesByKey.get(packetKey);
     if (existingPacketIndex === undefined) {
       coalescedPacketIndexesByKey.set(packetKey, coalescedPackets.length);
-      coalescedPackets.push([ packetId, [ ...payload ], worldTick ]);
+      coalescedPackets.push([ packetId, coalesceSpatialBatchPayload(packetId, payload), worldTick ]);
       continue;
     }
 
-    coalescedPackets[existingPacketIndex][1].push(...payload);
+    coalescedPackets[existingPacketIndex][1] = coalesceSpatialBatchPayload(
+      packetId,
+      [
+        ...coalescedPackets[existingPacketIndex][1],
+        ...payload,
+      ],
+    );
   }
 
   return coalescedPackets;
@@ -226,6 +232,73 @@ const cloneSceneUISchema = sceneUI => ({
   o: Array.isArray(sceneUI?.o) ? [ ...sceneUI.o ] : sceneUI?.o,
   p: Array.isArray(sceneUI?.p) ? [ ...sceneUI.p ] : sceneUI?.p,
 });
+const cloneSpatialBatchItem = (packetId, item) => {
+  switch (packetId) {
+    case ENTITIES_PACKET_ID:
+      return cloneEntitySchema(item);
+    case PARTICLE_EMITTERS_PACKET_ID:
+      return cloneParticleEmitterSchema(item);
+    case SCENE_UIS_PACKET_ID:
+      return cloneSceneUISchema(item);
+    default:
+      return { ...item };
+  }
+};
+const mergeSpatialBatchItem = (packetId, existingItem, nextItem) => {
+  const itemId = Number(nextItem?.i ?? existingItem?.i);
+
+  if (existingItem?.rm || nextItem?.rm) {
+    return Number.isFinite(itemId) ? { i: itemId, rm: true } : { rm: true };
+  }
+
+  switch (packetId) {
+    case ENTITIES_PACKET_ID:
+      return mergeEntitySchema(existingItem, nextItem);
+    case PARTICLE_EMITTERS_PACKET_ID:
+      return cloneParticleEmitterSchema({
+        ...existingItem,
+        ...nextItem,
+      });
+    case SCENE_UIS_PACKET_ID:
+      return cloneSceneUISchema({
+        ...existingItem,
+        ...nextItem,
+      });
+    default:
+      return {
+        ...existingItem,
+        ...nextItem,
+      };
+  }
+};
+const coalesceSpatialBatchPayload = (packetId, payload) => {
+  const coalescedPayload = [];
+  const coalescedIndexesById = new Map();
+
+  for (const item of payload) {
+    const itemId = Number(item?.i);
+
+    if (!Number.isFinite(itemId)) {
+      coalescedPayload.push(cloneSpatialBatchItem(packetId, item));
+      continue;
+    }
+
+    const existingIndex = coalescedIndexesById.get(itemId);
+    if (existingIndex === undefined) {
+      coalescedIndexesById.set(itemId, coalescedPayload.length);
+      coalescedPayload.push(cloneSpatialBatchItem(packetId, item));
+      continue;
+    }
+
+    coalescedPayload[existingIndex] = mergeSpatialBatchItem(
+      packetId,
+      coalescedPayload[existingIndex],
+      item,
+    );
+  }
+
+  return coalescedPayload;
+};
 const upsertBlockRotation = (chunk, blockIndex, blockRotation) => {
   const rotations = Array.isArray(chunk.r) ? chunk.r : [];
 
@@ -271,9 +344,12 @@ class ShadowHostedWorldRuntime {
     this.currentCameraStateByPlayerId = new Map();
     this.currentChunkStateByKey = new Map();
     this.currentEntityStateById = new Map();
+    this.lastRemovedEntityWorldTickById = new Map();
     this.currentParticleEmitterStateById = new Map();
+    this.lastRemovedParticleEmitterWorldTickById = new Map();
     this.currentWorldState = toWorldSchema(worldDescriptor, options);
     this.currentSceneUIStateById = new Map();
+    this.lastRemovedSceneUIWorldTickById = new Map();
     this.loadedEntityIdsByPlayer = new Map();
     this.loadedChunkKeysByPlayer = new Map();
     this.loadedParticleEmitterIdsByPlayer = new Map();
@@ -483,9 +559,19 @@ class ShadowHostedWorldRuntime {
       return;
     }
 
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    const lastRemovedWorldTick = this.lastRemovedSceneUIWorldTickById.get(sceneUIId);
+    if (!sceneUI.rm && lastRemovedWorldTick !== undefined && resolvedWorldTick <= lastRemovedWorldTick) {
+      return;
+    }
+
     if (sceneUI.rm) {
+      this.lastRemovedSceneUIWorldTickById.set(sceneUIId, resolvedWorldTick);
       this.currentSceneUIStateById.delete(sceneUIId);
     } else {
+      if (lastRemovedWorldTick !== undefined) {
+        this.lastRemovedSceneUIWorldTickById.delete(sceneUIId);
+      }
       const existingSceneUI = this.currentSceneUIStateById.get(sceneUIId);
       this.currentSceneUIStateById.set(sceneUIId, cloneSceneUISchema({
         ...existingSceneUI,
@@ -493,7 +579,6 @@ class ShadowHostedWorldRuntime {
       }));
     }
 
-    const resolvedWorldTick = this.resolveWorldTick(worldTick);
     for (const playerId of this.players.keys()) {
       const loadedSceneUIIds = this.getOrCreateLoadedSceneUIIds(playerId);
       const shouldSync = !sceneUI.rm && this.shouldSyncSceneUIToPlayer(this.currentSceneUIStateById.get(sceneUIId), playerId);
@@ -673,14 +758,23 @@ class ShadowHostedWorldRuntime {
       return;
     }
 
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    const lastRemovedWorldTick = this.lastRemovedEntityWorldTickById.get(entityId);
+    if (!entity.rm && lastRemovedWorldTick !== undefined && resolvedWorldTick <= lastRemovedWorldTick) {
+      return;
+    }
+
     if (entity.rm) {
+      this.lastRemovedEntityWorldTickById.set(entityId, resolvedWorldTick);
       this.currentEntityStateById.delete(entityId);
     } else {
+      if (lastRemovedWorldTick !== undefined) {
+        this.lastRemovedEntityWorldTickById.delete(entityId);
+      }
       const existingEntity = this.currentEntityStateById.get(entityId);
       this.currentEntityStateById.set(entityId, mergeEntitySchema(existingEntity, entity));
     }
 
-    const resolvedWorldTick = this.resolveWorldTick(worldTick);
     for (const playerId of this.players.keys()) {
       const loadedEntityIds = this.getOrCreateLoadedEntityIds(playerId);
       const shouldSync = !entity.rm && this.shouldSyncEntityToPlayer(this.currentEntityStateById.get(entityId), playerId);
@@ -764,9 +858,19 @@ class ShadowHostedWorldRuntime {
       return;
     }
 
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+    const lastRemovedWorldTick = this.lastRemovedParticleEmitterWorldTickById.get(particleEmitterId);
+    if (!particleEmitter.rm && lastRemovedWorldTick !== undefined && resolvedWorldTick <= lastRemovedWorldTick) {
+      return;
+    }
+
     if (particleEmitter.rm) {
+      this.lastRemovedParticleEmitterWorldTickById.set(particleEmitterId, resolvedWorldTick);
       this.currentParticleEmitterStateById.delete(particleEmitterId);
     } else {
+      if (lastRemovedWorldTick !== undefined) {
+        this.lastRemovedParticleEmitterWorldTickById.delete(particleEmitterId);
+      }
       const existingParticleEmitter = this.currentParticleEmitterStateById.get(particleEmitterId);
       this.currentParticleEmitterStateById.set(particleEmitterId, cloneParticleEmitterSchema({
         ...existingParticleEmitter,
@@ -774,7 +878,6 @@ class ShadowHostedWorldRuntime {
       }));
     }
 
-    const resolvedWorldTick = this.resolveWorldTick(worldTick);
     for (const playerId of this.players.keys()) {
       const loadedParticleEmitterIds = this.getOrCreateLoadedParticleEmitterIds(playerId);
       const shouldSync = !particleEmitter.rm && this.shouldSyncParticleEmitterToPlayer(

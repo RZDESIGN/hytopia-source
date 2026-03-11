@@ -9,7 +9,7 @@ export type OnStateCallback = (data: object) => void;
 
 export interface SceneUIData {
   id: number;
-  attachedToEntityId?: number;
+  attachedToEntityId?: number | null;
   offset?: Vector3Like;
   position?: Vector3Like;
   state?: object;
@@ -21,7 +21,7 @@ export interface SceneUIData {
 export default class SceneUI {
   private _game: Game;
   private _id: number;
-  private _attachedToEntityId: number | undefined;
+  private _attachedToEntityId: number | null | undefined;
   private _containerDiv: HTMLDivElement | null = null;
   private _needsUpdatePosition: boolean = false;
   private _object: CSS2DObject;
@@ -34,7 +34,7 @@ export default class SceneUI {
   private _warnedMissingAttachedEntity: boolean = false;
 
   public constructor(game: Game, data: SceneUIData) {
-    if (data.attachedToEntityId === undefined && data.position === undefined) {
+    if (data.attachedToEntityId == null && data.position === undefined) {
       throw new Error('SceneUI.constructor(): SceneUI must have either an attachedToEntityId or position.');
     }
 
@@ -51,7 +51,7 @@ export default class SceneUI {
   }
 
   public get id(): number { return this._id; }
-  public get attachedToEntityId(): number | undefined { return this._attachedToEntityId; }
+  public get attachedToEntityId(): number | null | undefined { return this._attachedToEntityId; }
   public get object(): CSS2DObject | null { return this._object; }
   public get position(): Vector3Like | undefined { return this._position; }
   public get offset(): Vector3Like | undefined { return this._offset; }
@@ -64,7 +64,7 @@ export default class SceneUI {
     if (!this._containerDiv) return;
 
     // Update position if attached to entity
-    if (this._attachedToEntityId !== undefined) {
+    if (this._attachedToEntityId != null) {
       const entity = this._game.entityManager.getEntity(this._attachedToEntityId);
       if (!entity) {
         if (!this._warnedMissingAttachedEntity) {
@@ -150,8 +150,8 @@ export default class SceneUI {
     this._object.removeFromParent();
   }
 
-  public setAttachedToEntityId(entityId: number) {
-    this._attachedToEntityId = entityId;
+  public setAttachedToEntityId(entityId: number | null | undefined) {
+    this._attachedToEntityId = entityId ?? undefined;
     this._warnedMissingAttachedEntity = false;
   }
 

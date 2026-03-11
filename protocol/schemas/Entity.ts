@@ -17,6 +17,7 @@ export type EntitySchema = {
   fd?: boolean;                  // whether fast movement is the default intent (owner-only)
   js?: number;                    // local prediction just-submerged remaining ms (owner-only)
   i: number;                      // entity id
+  ju?: number;                    // local prediction jump velocity (owner-only)
   bh?: VectorSchema;              // block half extents
   bt?: string;                    // block texture uri
   e?: boolean;                    // environmental
@@ -39,10 +40,15 @@ export type EntitySchema = {
   r?: QuaternionSchema;           // rotation
   ri?: number;                    // rotation interpolation time in milliseconds
   rm?: boolean;                   // removed/remove
+  rv?: number;                    // local prediction run velocity (owner-only)
   sc?: number;                    // local prediction swim-upward cooldown remaining ms (owner-only)
   si?: number;                    // model scale interpolation time in milliseconds
+  sf?: number;                    // local prediction swim-fast velocity (owner-only)
+  sl?: number;                    // local prediction swim-slow velocity (owner-only)
   sv?: VectorSchema;              // model scale vector for each axis
+  su?: number;                    // local prediction swim-upward velocity (owner-only)
   t?: RgbColorSchema;             // tint color
+  wv?: number;                    // local prediction walk velocity (owner-only)
 }
 
 export const entitySchema: JSONSchemaType<EntitySchema> = {
@@ -52,6 +58,7 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
     fd: { type: 'boolean', nullable: true },
     js: { type: 'number', nullable: true },
     i: { type: 'number' },
+    ju: { type: 'number', nullable: true },
     bh: { ...vectorSchema, nullable: true },
     bt: { type: 'string', nullable: true },
     e: { type: 'boolean', nullable: true },
@@ -74,10 +81,15 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
     r: { ...quaternionSchema, nullable: true },
     ri: { type: 'number', nullable: true },
     rm: { type: 'boolean', nullable: true },
+    rv: { type: 'number', nullable: true },
     sc: { type: 'number', nullable: true },
     si: { type: 'number', nullable: true },
+    sf: { type: 'number', nullable: true },
+    sl: { type: 'number', nullable: true },
     sv: { ...vectorSchema, nullable: true },
+    su: { type: 'number', nullable: true },
     t: { ...rgbColorSchema, nullable: true },
+    wv: { type: 'number', nullable: true },
   },
   required: [ 'i' ],
   additionalProperties: false,

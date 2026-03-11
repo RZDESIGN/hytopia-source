@@ -119,6 +119,14 @@ export default class LocalPredictionStats {
     LocalPredictionStats.latestTraceLine = '-';
   }
 
+  public static dumpTrace(): string {
+    return LocalPredictionStats._traceEntries.join('\n');
+  }
+
+  public static getTraceEntries(): string[] {
+    return [...LocalPredictionStats._traceEntries];
+  }
+
   private static _installTraceHelpers(): void {
     if (typeof window === 'undefined' || window.__localPredictionTrace) {
       return;
@@ -126,8 +134,8 @@ export default class LocalPredictionStats {
 
     window.__localPredictionTrace = {
       clear: () => LocalPredictionStats.clearTrace(),
-      dump: () => LocalPredictionStats._traceEntries.join('\n'),
-      entries: () => [...LocalPredictionStats._traceEntries],
+      dump: () => LocalPredictionStats.dumpTrace(),
+      entries: () => LocalPredictionStats.getTraceEntries(),
       latest: () => LocalPredictionStats.latestTraceLine,
     };
   }

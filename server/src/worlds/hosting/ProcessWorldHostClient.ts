@@ -822,11 +822,17 @@ export default class ProcessWorldHostClient implements WorldHostClient {
   private _applyOwnerPredictionEntitySync(
     entitySync: EntitySchema & {
       fd?: boolean;
+      ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rv?: number;
       sc?: number;
+      sf?: number;
+      sl?: number;
+      su?: number;
+      wv?: number;
     },
     playerEntity: PlayerEntity,
   ): void {
@@ -844,9 +850,15 @@ export default class ProcessWorldHostClient implements WorldHostClient {
     }
 
     entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
+    entitySync.ju = controller.jumpVelocity;
     entitySync.pf = predictionFlags || undefined;
     entitySync.py = controller.localPredictionMovementReferenceYaw;
+    entitySync.rv = controller.runVelocity;
     entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
+    entitySync.sf = controller.swimFastVelocity;
+    entitySync.sl = controller.swimSlowVelocity;
+    entitySync.su = controller.swimUpwardVelocity;
+    entitySync.wv = controller.walkVelocity;
 
     const justSubmergedRemainingMs = controller.localPredictionJustSubmergedRemainingMs;
     entitySync.js = justSubmergedRemainingMs > 0 ? justSubmergedRemainingMs : undefined;

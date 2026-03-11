@@ -664,20 +664,22 @@ export default class NetworkSynchronizer {
   };
 
   private _onEntityDespawn = (payload: EventPayloads[EntityEvent.DESPAWN]) => {
+    const entityId = payload.entity.id!;
+
     if (this._mirrorEntityStatePatch({
-      i: payload.entity.id!,
+      i: entityId,
       rm: true,
     })) {
       return;
     }
 
-    const entitySync = this._createOrGetQueuedEntitySync(payload.entity);
+    this._markPerPlayerEntitySyncsRemoved(entityId);
 
-    if (this._spawnedEntities.has(entitySync.i)) {
-      this._queuedEntitySyncs.broadcast.delete(entitySync.i);
-      this._spawnedEntities.delete(entitySync.i);
+    if (this._spawnedEntities.has(entityId)) {
+      this._queuedEntitySyncs.broadcast.delete(entityId);
+      this._spawnedEntities.delete(entityId);
     } else {
-      entitySync.rm = true;
+      this._markEntitySyncRemoved(this._createOrGetQueuedEntitySyncById(entityId));
     }
   };
 
@@ -1180,15 +1182,17 @@ export default class NetworkSynchronizer {
   };
 
   private _onParticleEmitterDespawn = (payload: EventPayloads[ParticleEmitterEvent.DESPAWN]) => {
+    const particleEmitterId = payload.particleEmitter.id!;
+
     if (this._mirrorParticleEmitterStatePatch({
-      i: payload.particleEmitter.id!,
+      i: particleEmitterId,
       rm: true,
     })) {
       return;
     }
 
-    const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
-    particleEmitterSync.rm = true;
+    this._markPerPlayerParticleEmitterSyncsRemoved(particleEmitterId);
+    this._markParticleEmitterSyncRemoved(this._createOrGetQueuedParticleEmitterSyncById(particleEmitterId));
   };
 
   private _onParticleEmitterSetAlphaTest = (payload: EventPayloads[ParticleEmitterEvent.SET_ALPHA_TEST]) => {
@@ -1214,7 +1218,9 @@ export default class NetworkSynchronizer {
 
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(payload.particleEmitter);
     particleEmitterSync.e = payload.entity ? payload.entity.id : undefined;
-    particleEmitterSync.p = payload.entity ? undefined : particleEmitterSync.p;
+    particleEmitterSync.p = payload.entity ? undefined : (
+      payload.particleEmitter.position ? Serializer.serializeVector(payload.particleEmitter.position) : undefined
+    );
   };
 
   private _onParticleEmitterSetAttachedToEntityNodeName = (payload: EventPayloads[ParticleEmitterEvent.SET_ATTACHED_TO_ENTITY_NODE_NAME]) => {
@@ -1937,7 +1943,9 @@ export default class NetworkSynchronizer {
 
     const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
     sceneUISync.e = payload.entity ? payload.entity.id : undefined;
-    sceneUISync.p = payload.entity ? undefined : sceneUISync.p;
+    sceneUISync.p = payload.entity ? undefined : (
+      payload.sceneUI.position ? Serializer.serializeVector(payload.sceneUI.position) : undefined
+    );
   };
 
   private _onSceneUISetOffset = (payload: EventPayloads[SceneUIEvent.SET_OFFSET]) => {
@@ -1991,20 +1999,23 @@ export default class NetworkSynchronizer {
   };
 
   private _onSceneUIUnload = (payload: EventPayloads[SceneUIEvent.UNLOAD]) => {
+    const sceneUIId = payload.sceneUI.id!;
+
     if (this._mirrorSceneUIStatePatch({
-      i: payload.sceneUI.id!,
+      i: sceneUIId,
       rm: true,
     })) {
       return;
     }
 
-    const sceneUISync = this._createOrGetQueuedSceneUISync(payload.sceneUI);
+    this._markPerPlayerSceneUISyncsRemoved(sceneUIId);
+    const sceneUISync = this._createOrGetQueuedSceneUISyncById(sceneUIId);
 
     if (this._loadedSceneUIs.has(sceneUISync.i)) {
       this._queuedSceneUISyncs.broadcast.delete(sceneUISync.i);
       this._loadedSceneUIs.delete(sceneUISync.i);
     } else {
-      sceneUISync.rm = true;
+      this._markSceneUISyncRemoved(sceneUISync);
     }
   };
 
@@ -2177,6 +2188,11 @@ export default class NetworkSynchronizer {
     return this._createOrGetQueuedSync(this._queuedEntitySyncs, entity.id, this._createEntitySync, entity, forPlayer);
   }
 
+  private _createEntitySyncById = (entityId: number) => ({ i: entityId });
+  private _createOrGetQueuedEntitySyncById(entityId: number, forPlayer?: Player): protocol.EntitySchema {
+    return this._createOrGetQueuedSync(this._queuedEntitySyncs, entityId, this._createEntitySyncById, entityId, forPlayer);
+  }
+
   private _createEntityModelAnimationSync = (entityModelAnimation: EntityModelAnimation) => ({ n: entityModelAnimation.name });
   private _createOrGetQueuedEntityModelAnimationSync(entityModelAnimation: EntityModelAnimation, forPlayer?: Player): protocol.ModelAnimationSchema {
     if (entityModelAnimation.entity.id === undefined) { ErrorHandler.fatalError('NetworkSynchronizer._createOrGetQueuedEntityModelAnimationSync(): EntityModelAnimation entity has no id!'); }
@@ -2218,6 +2234,17 @@ export default class NetworkSynchronizer {
     return this._createOrGetQueuedSync(this._queuedParticleEmitterSyncs, particleEmitter.id, this._createParticleEmitterSync, particleEmitter, forPlayer);
   }
 
+  private _createParticleEmitterSyncById = (particleEmitterId: number) => ({ i: particleEmitterId });
+  private _createOrGetQueuedParticleEmitterSyncById(particleEmitterId: number, forPlayer?: Player): protocol.ParticleEmitterSchema {
+    return this._createOrGetQueuedSync(
+      this._queuedParticleEmitterSyncs,
+      particleEmitterId,
+      this._createParticleEmitterSyncById,
+      particleEmitterId,
+      forPlayer,
+    );
+  }
+
   private _createPlayerSync = (player: Player) => ({ i: player.id });
   private _createOrGetQueuedPlayerSync(player: Player, forPlayer?: Player): protocol.PlayerSchema {
     return this._createOrGetQueuedSync(this._queuedPlayerSyncs, player.id, this._createPlayerSync, player, forPlayer);
@@ -2228,6 +2255,17 @@ export default class NetworkSynchronizer {
     if (sceneUI.id === undefined) { ErrorHandler.fatalError('NetworkSynchronizer._createOrGetQueuedSceneUISync(): SceneUI has no id!'); }
 
     return this._createOrGetQueuedSync(this._queuedSceneUISyncs, sceneUI.id, this._createSceneUISync, sceneUI, forPlayer);
+  }
+
+  private _createSceneUISyncById = (sceneUIId: number) => ({ i: sceneUIId });
+  private _createOrGetQueuedSceneUISyncById(sceneUIId: number, forPlayer?: Player): protocol.SceneUISchema {
+    return this._createOrGetQueuedSync(
+      this._queuedSceneUISyncs,
+      sceneUIId,
+      this._createSceneUISyncById,
+      sceneUIId,
+      forPlayer,
+    );
   }
 
   private _createUISync = () => ({});
@@ -2334,6 +2372,64 @@ export default class NetworkSynchronizer {
     }
 
     return sync;
+  }
+
+  private _markEntitySyncRemoved(entitySync: protocol.EntitySchema): void {
+    entitySync.rm = true;
+    delete entitySync.ma;
+    delete entitySync.mo;
+    delete entitySync.p;
+    delete entitySync.r;
+  }
+
+  private _markPerPlayerEntitySyncsRemoved(entityId: number): void {
+    for (const syncMap of this._queuedEntitySyncs.perPlayer.values()) {
+      const entitySync = syncMap.get(entityId);
+      if (!entitySync) {
+        continue;
+      }
+
+      this._markEntitySyncRemoved(entitySync);
+    }
+  }
+
+  private _markParticleEmitterSyncRemoved(particleEmitterSync: protocol.ParticleEmitterSchema): void {
+    particleEmitterSync.rm = true;
+    delete particleEmitterSync.b;
+    delete particleEmitterSync.e;
+    delete particleEmitterSync.en;
+    delete particleEmitterSync.p;
+  }
+
+  private _markPerPlayerParticleEmitterSyncsRemoved(particleEmitterId: number): void {
+    for (const syncMap of this._queuedParticleEmitterSyncs.perPlayer.values()) {
+      const particleEmitterSync = syncMap.get(particleEmitterId);
+      if (!particleEmitterSync) {
+        continue;
+      }
+
+      this._markParticleEmitterSyncRemoved(particleEmitterSync);
+    }
+  }
+
+  private _markSceneUISyncRemoved(sceneUISync: protocol.SceneUISchema): void {
+    sceneUISync.rm = true;
+    delete sceneUISync.e;
+    delete sceneUISync.o;
+    delete sceneUISync.p;
+    delete sceneUISync.s;
+    delete sceneUISync.v;
+  }
+
+  private _markPerPlayerSceneUISyncsRemoved(sceneUIId: number): void {
+    for (const syncMap of this._queuedSceneUISyncs.perPlayer.values()) {
+      const sceneUISync = syncMap.get(sceneUIId);
+      if (!sceneUISync) {
+        continue;
+      }
+
+      this._markSceneUISyncRemoved(sceneUISync);
+    }
   }
 
   private _clearSyncQueue(syncQueue: SyncQueue<any, any>) {
@@ -2464,6 +2560,10 @@ export default class NetworkSynchronizer {
       const entity = this._world.entityManager.getEntity(loadedEntityId);
       if (entity) {
         this._queueEntityRemovalForPlayer(entity, player);
+      } else {
+        // The broadcast remove will be filtered out after we drop the loaded-id entry
+        // below, so synthesize a player-specific remove before clearing the loaded set.
+        this._markEntitySyncRemoved(this._createOrGetQueuedEntitySyncById(loadedEntityId, player));
       }
 
       loadedEntityIds.delete(loadedEntityId);
@@ -2502,6 +2602,8 @@ export default class NetworkSynchronizer {
       const particleEmitter = particleEmittersById.get(loadedParticleEmitterId);
       if (particleEmitter) {
         this._queueParticleEmitterRemovalForPlayer(particleEmitter, player);
+      } else {
+        this._markParticleEmitterSyncRemoved(this._createOrGetQueuedParticleEmitterSyncById(loadedParticleEmitterId, player));
       }
 
       loadedParticleEmitterIds.delete(loadedParticleEmitterId);
@@ -2534,6 +2636,8 @@ export default class NetworkSynchronizer {
       const sceneUI = this._world.sceneUIManager.getSceneUIById(loadedSceneUIId);
       if (sceneUI) {
         this._queueSceneUIRemovalForPlayer(sceneUI, player);
+      } else {
+        this._markSceneUISyncRemoved(this._createOrGetQueuedSceneUISyncById(loadedSceneUIId, player));
       }
 
       loadedSceneUIIds.delete(loadedSceneUIId);
@@ -2634,11 +2738,7 @@ export default class NetworkSynchronizer {
 
   private _queueEntityRemovalForPlayer(entity: Entity, player: Player): void {
     const entitySync = this._createOrGetQueuedEntitySync(entity, player);
-    entitySync.rm = true;
-    delete entitySync.ma;
-    delete entitySync.mo;
-    delete entitySync.p;
-    delete entitySync.r;
+    this._markEntitySyncRemoved(entitySync);
   }
 
   private _queueParticleEmitterStateForPlayer(particleEmitter: ParticleEmitter, player: Player): void {
@@ -2648,9 +2748,7 @@ export default class NetworkSynchronizer {
 
   private _queueParticleEmitterRemovalForPlayer(particleEmitter: ParticleEmitter, player: Player): void {
     const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(particleEmitter, player);
-    particleEmitterSync.rm = true;
-    delete particleEmitterSync.b;
-    delete particleEmitterSync.p;
+    this._markParticleEmitterSyncRemoved(particleEmitterSync);
   }
 
   private _queueSceneUIStateForPlayer(sceneUI: SceneUI, player: Player): void {
@@ -2660,9 +2758,52 @@ export default class NetworkSynchronizer {
 
   private _queueSceneUIRemovalForPlayer(sceneUI: SceneUI, player: Player): void {
     const sceneUISync = this._createOrGetQueuedSceneUISync(sceneUI, player);
-    sceneUISync.rm = true;
-    delete sceneUISync.p;
-    delete sceneUISync.s;
+    this._markSceneUISyncRemoved(sceneUISync);
+  }
+
+  private _coalesceRemovalDominatedSyncs<TSchema extends { i?: number; rm?: boolean }>(syncs: TSchema[]): TSchema[] {
+    const coalescedSyncs: (TSchema | undefined)[] = [];
+    const seenIndexesById: Map<number, number[]> = new Map();
+    const removedIds: Set<number> = new Set();
+
+    for (let i = 0; i < syncs.length; i++) {
+      const sync = syncs[i];
+      const syncId = sync.i;
+
+      if (syncId === undefined) {
+        coalescedSyncs.push(sync);
+        continue;
+      }
+
+      if (removedIds.has(syncId)) {
+        continue;
+      }
+
+      if (sync.rm) {
+        const seenIndexes = seenIndexesById.get(syncId);
+        if (seenIndexes) {
+          for (let j = 0; j < seenIndexes.length; j++) {
+            coalescedSyncs[seenIndexes[j]] = undefined;
+          }
+        }
+
+        coalescedSyncs.push(sync);
+        seenIndexesById.set(syncId, [ coalescedSyncs.length - 1 ]);
+        removedIds.add(syncId);
+        continue;
+      }
+
+      const seenIndexes = seenIndexesById.get(syncId);
+      if (seenIndexes) {
+        seenIndexes.push(coalescedSyncs.length);
+      } else {
+        seenIndexesById.set(syncId, [ coalescedSyncs.length ]);
+      }
+
+      coalescedSyncs.push(sync);
+    }
+
+    return coalescedSyncs.filter((sync): sync is TSchema => sync !== undefined);
   }
 
   private _getOrCreateLoadedChunkKeys(player: Player): Set<string> {
@@ -2921,6 +3062,7 @@ export default class NetworkSynchronizer {
       : PlayerManager.instance.getConnectedPlayersByWorldSet(this._world);
 
     for (const player of targetPlayers) {
+      const pendingUpdates: protocol.EntitySchema[] = [];
       const reliableUpdates: protocol.EntitySchema[] = [];
       const unreliableUpdates: protocol.EntitySchema[] = [];
 
@@ -2933,7 +3075,7 @@ export default class NetworkSynchronizer {
             }
 
             this._sanitizeEntitySync(entitySync);
-            (this._isReliableEntitySync(entitySync) ? reliableUpdates : unreliableUpdates).push(entitySync);
+            pendingUpdates.push(entitySync);
           }
         }
       }
@@ -2942,8 +3084,14 @@ export default class NetworkSynchronizer {
       if (perPlayerEntitySyncs && perPlayerEntitySyncs.size > 0) {
         for (const entitySync of perPlayerEntitySyncs.valuesArray) {
           this._sanitizeEntitySync(entitySync);
-          (this._isReliableEntitySync(entitySync) ? reliableUpdates : unreliableUpdates).push(entitySync);
+          pendingUpdates.push(entitySync);
         }
+      }
+
+      const coalescedUpdates = this._coalesceRemovalDominatedSyncs(pendingUpdates);
+      for (let i = 0; i < coalescedUpdates.length; i++) {
+        const entitySync = coalescedUpdates[i];
+        (this._isReliableEntitySync(entitySync) ? reliableUpdates : unreliableUpdates).push(entitySync);
       }
 
       if (reliableUpdates.length > 0) {
@@ -2966,7 +3114,7 @@ export default class NetworkSynchronizer {
     return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
   }
 
-  private _buildSpatialSyncPacketSlot<TKey, TId extends PacketId, TSchema extends { i?: number }>(
+  private _buildSpatialSyncPacketSlot<TKey, TId extends PacketId, TSchema extends { i?: number; rm?: boolean }>(
     syncQueue: SyncQueue<TKey, TSchema>,
     packetDefinition: IPacketDefinition<TId, TSchema[]>,
     currentTick: number,
@@ -2997,11 +3145,12 @@ export default class NetworkSynchronizer {
         updates.push(...perPlayerSync.valuesArray);
       }
 
-      if (updates.length > 0) {
+      const coalescedUpdates = this._coalesceRemovalDominatedSyncs(updates);
+      if (coalescedUpdates.length > 0) {
         this._appendPerPlayerSlotPacket(
           slot,
           player,
-          protocol.createPacket(packetDefinition, updates, currentTick),
+          protocol.createPacket(packetDefinition, coalescedUpdates, currentTick),
         );
       }
     }
@@ -3337,11 +3486,17 @@ export default class NetworkSynchronizer {
     entitySync: protocol.EntitySchema & {
       aq?: number;
       fd?: boolean;
+      ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rv?: number;
       sc?: number;
+      sf?: number;
+      sl?: number;
+      su?: number;
+      wv?: number;
     },
     playerEntity: PlayerEntity,
   ): void {
@@ -3360,11 +3515,17 @@ export default class NetworkSynchronizer {
     }
 
     entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
+    entitySync.ju = controller.jumpVelocity;
     entitySync.pf = predictionFlags;
     entitySync.py = controller.localPredictionMovementReferenceYaw;
+    entitySync.rv = controller.runVelocity;
     entitySync.mv = Serializer.serializeVector(controller.localPredictionMotionBasisVelocity);
+    entitySync.sf = controller.swimFastVelocity;
+    entitySync.sl = controller.swimSlowVelocity;
+    entitySync.su = controller.swimUpwardVelocity;
     entitySync.js = undefined;
     entitySync.sc = undefined;
+    entitySync.wv = controller.walkVelocity;
 
     const justSubmergedRemainingMs = controller.localPredictionJustSubmergedRemainingMs;
     if (justSubmergedRemainingMs > 0) {
@@ -3384,11 +3545,17 @@ export default class NetworkSynchronizer {
     const entitySync = this._createOrGetQueuedEntitySync(playerEntity, playerEntity.player) as protocol.EntitySchema & {
       aq?: number;
       fd?: boolean;
+      ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rv?: number;
       sc?: number;
+      sf?: number;
+      sl?: number;
+      su?: number;
+      wv?: number;
     };
 
     if (includeTransform) {

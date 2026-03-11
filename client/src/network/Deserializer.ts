@@ -131,10 +131,16 @@ export type DeserializedEntity = {
   parentEntityId?: number | null;
   parentNodeName?: string | null;
   localPredictionFlags?: number;
+  localPredictionJumpVelocity?: number;
   localPredictionJustSubmergedRemainingMs?: number;
   localPredictionMovementReferenceYaw?: number;
   localPredictionMotionBasisVelocity?: THREE.Vector3Like;
+  localPredictionRunVelocity?: number;
+  localPredictionWalkVelocity?: number;
+  localPredictionSwimFastVelocity?: number;
+  localPredictionSwimSlowVelocity?: number;
   localPredictionSwimUpwardCooldownRemainingMs?: number;
+  localPredictionSwimUpwardVelocity?: number;
   position?: THREE.Vector3Like;
   positionInterpolationMs?: number | null;
   rotation?: THREE.QuaternionLike;
@@ -206,8 +212,8 @@ export type DeserializedParticleEmitter = {
   id: number;
   burst?: number;
   removed?: boolean;
-  attachedToEntityId?: number;
-  attachedToEntityNodeName?: string;
+  attachedToEntityId?: number | null;
+  attachedToEntityNodeName?: string | null;
   position?: THREE.Vector3Like;
   offset?: THREE.Vector3Like;
   paused?: boolean;
@@ -270,7 +276,7 @@ export type DeserializedPlayers = DeserializedPlayer[];
 
 export type DeserializedSceneUI = {
   id: number;
-  attachedToEntityId?: number;
+  attachedToEntityId?: number | null;
   offset?: THREE.Vector3Like;
   position?: THREE.Vector3Like;
   removed?: boolean;
@@ -502,11 +508,17 @@ export default class Deserializer {
     const entityWithInputAck = entity as protocol.EntitySchema & {
       aq?: number;
       fd?: boolean;
+      ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rv?: number;
       sc?: number;
+      sf?: number;
+      sl?: number;
+      su?: number;
+      wv?: number;
     };
 
     return {
@@ -528,16 +540,22 @@ export default class Deserializer {
       parentEntityId: 'pe' in entity ? (entity.pe ?? null) : undefined,
       parentNodeName: 'pn' in entity ? (entity.pn ?? null) : undefined,
       localPredictionFlags: entityWithInputAck.pf,
+      localPredictionJumpVelocity: entityWithInputAck.ju,
       localPredictionJustSubmergedRemainingMs: entityWithInputAck.js,
       localPredictionMovementReferenceYaw: entityWithInputAck.py,
       localPredictionMotionBasisVelocity: entityWithInputAck.mv ? this.deserializeVector(entityWithInputAck.mv) : undefined,
+      localPredictionRunVelocity: entityWithInputAck.rv,
+      localPredictionSwimFastVelocity: entityWithInputAck.sf,
+      localPredictionSwimSlowVelocity: entityWithInputAck.sl,
       localPredictionSwimUpwardCooldownRemainingMs: entityWithInputAck.sc,
+      localPredictionSwimUpwardVelocity: entityWithInputAck.su,
       position: entity.p ? this.deserializeVector(entity.p) : undefined,
       positionInterpolationMs: 'pi' in entity ? (entity.pi ?? null) : undefined,
       rotation: entity.r ? this.deserializeQuaternion(entity.r) : undefined,
       rotationInterpolationMs: 'ri' in entity ? (entity.ri ?? null) : undefined,
       removed: entity.rm,
       scale: entity.sv ? this.deserializeVector(entity.sv) : undefined,
+      localPredictionWalkVelocity: entityWithInputAck.wv,
       scaleInterpolationMs: 'si' in entity ? (entity.si ?? null) : undefined,
       tintColor: 't' in entity ? (entity.t ? new THREE.Color(entity.t[0] / 255, entity.t[1] / 255, entity.t[2] / 255) : null) : undefined,
     };
@@ -620,8 +638,8 @@ export default class Deserializer {
     return {
       id: particleEmitter.i,
       alphaTest: particleEmitter.at,
-      attachedToEntityId: particleEmitter.e ?? undefined,
-      attachedToEntityNodeName: particleEmitter.en ?? undefined,
+      attachedToEntityId: 'e' in particleEmitter ? (particleEmitter.e ?? null) : undefined,
+      attachedToEntityNodeName: 'en' in particleEmitter ? (particleEmitter.en ?? null) : undefined,
       burst: particleEmitter.b,
       colorEnd: particleEmitter.ce ? new THREE.Color(particleEmitter.ce[0] / 255, particleEmitter.ce[1] / 255, particleEmitter.ce[2] / 255) : undefined,
       colorEndVariance: particleEmitter.cev ? new THREE.Color(particleEmitter.cev[0] / 255, particleEmitter.cev[1] / 255, particleEmitter.cev[2] / 255) : undefined,
@@ -746,7 +764,7 @@ export default class Deserializer {
   public static deserializeSceneUI(sceneUI: protocol.SceneUISchema): DeserializedSceneUI {
     return {
       id: sceneUI.i,
-      attachedToEntityId: sceneUI.e ?? undefined,
+      attachedToEntityId: 'e' in sceneUI ? (sceneUI.e ?? null) : undefined,
       offset: sceneUI.o ? this.deserializeVector(sceneUI.o) : undefined,
       position: sceneUI.p ? this.deserializeVector(sceneUI.p) : undefined,
       removed: sceneUI.rm,
