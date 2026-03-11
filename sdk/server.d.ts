@@ -1584,8 +1584,12 @@ declare type CameraSchema = {
     m?: number;
     e?: number;
     et?: number;
+    fe?: number;
     fo?: number;
     ffo?: number;
+    fp?: VectorSchema;
+    fs?: number;
+    ft?: VectorSchema;
     fv?: number;
     h?: string[];
     mp?: boolean;
@@ -3349,6 +3353,13 @@ declare function definePacket<TId extends PacketId, TSchema>(id: TId, schema: JS
  * @public
  */
 export declare const disableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
+
+declare type DynamicCameraPresetState = {
+    followEntity: Entity;
+    followOffset: Vector3Like;
+    followOffsetSpace: PlayerCameraPresetOffsetSpace;
+    focusOffset: Vector3Like;
+};
 
 /**
  * The options for a dynamic rigid body, also the default type. @public
@@ -8444,6 +8455,7 @@ export declare class PlayerCamera extends EventRouter implements protocol.Serial
      * **Category:** Players
      */
     get preset(): PlayerCameraPreset | undefined;
+
     /**
      * The shoulder angle of the camera in degrees.
      *

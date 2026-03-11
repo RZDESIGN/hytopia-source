@@ -2372,6 +2372,10 @@ export class PlayerCamera extends EventRouter implements protocol.Serializable {
     get attachedToPosition(): Vector3Like | undefined;
     clearPreset(): void;
     get collidesWithBlocks(): boolean;
+    // Warning: (ae-forgotten-export) The symbol "DynamicCameraPresetState" needs to be exported by the entry point index.d.ts
+    //
+    // @internal (undocumented)
+    get dynamicPresetState(): DynamicCameraPresetState | undefined;
     faceEntity(entity: Entity): void;
     facePosition(position: Vector3Like): void;
     get facingDirection(): Vector3Like;

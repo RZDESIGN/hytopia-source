@@ -572,6 +572,11 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
     return this._preset;
   }
 
+  /** @internal */
+  public get dynamicPresetState(): DynamicCameraPresetState | undefined {
+    return this._dynamicPreset;
+  }
+
   /**
    * The shoulder angle of the camera in degrees.
    *

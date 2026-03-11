@@ -75,6 +75,7 @@ type ReliablePacketSlot = {
 };
 
 type PacketPlan = {
+  perPlayerUnreliablePackets: Map<Player, AnyPacket[]>;
   postPlayerUIAfterChatReliableSlots: ReliablePacketSlot[];
   postPlayerUIBeforeWorldAndPlayersReliableSlots: ReliablePacketSlot[];
   prePlayerUIReliableSlots: ReliablePacketSlot[];
@@ -119,7 +120,10 @@ export default class NetworkSynchronizer {
   private _queuedWorldSyncs: SingletonSyncQueue<protocol.WorldSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   
   private _chunkInterestStateByPlayer: Map<Player, PlayerChunkInterestState> = new Map();
+  private _loadedEntityIdsByPlayer: Map<Player, Set<number>> = new Map();
   private _loadedChunkKeysByPlayer: Map<Player, Set<string>> = new Map();
+  private _loadedParticleEmitterIdsByPlayer: Map<Player, Set<number>> = new Map();
+  private _loadedSceneUIIdsByPlayer: Map<Player, Set<number>> = new Map();
   private _loadedSceneUIs: Set<number> = new Set();
   private _spawnedEntities: Set<number> = new Set();
   private _syncAccumulator: number = 0;
@@ -194,6 +198,7 @@ export default class NetworkSynchronizer {
     const currentTick = this._world.loop.currentTick;
     this._queuePlayerInputAcknowledgements();
     this._refreshPlayerChunkInterests();
+    this._refreshPlayerSpatialInterests();
     const packetPlan = Telemetry.startSpan({
       operation: TelemetrySpanOperation.BUILD_PACKETS,
     }, () => this._buildPacketPlan(currentTick));
@@ -1736,7 +1741,10 @@ export default class NetworkSynchronizer {
     const hostOwnsDerivedState = WorldHostManager.instance.client.ownsDerivedState(this._world);
     this._lastSentInputAcknowledgementByPlayer.delete(player);
     this._chunkInterestStateByPlayer.set(player, { needsRefresh: true });
+    this._loadedEntityIdsByPlayer.set(player, new Set());
     this._loadedChunkKeysByPlayer.set(player, new Set());
+    this._loadedParticleEmitterIdsByPlayer.set(player, new Set());
+    this._loadedSceneUIIdsByPlayer.set(player, new Set());
 
     // Order doesn't matter here - synchronize() handles send order.
     // Use _assignUndefined to avoid overwriting properties already set by other event handlers.
@@ -1767,48 +1775,23 @@ export default class NetworkSynchronizer {
       this._serializeDefaultBlockEditPredictionConfig(player),
     );
 
-    // Sync Entities
-    for (const entity of this._world.entityManager.getAllEntities()) {
-      if (player.camera.attachedToEntity === undefined && entity instanceof PlayerEntity && entity.player === player) {
-        player.camera.setAttachedToEntity(entity);
-      }
+    const playerEntity = this._world.entityManager.getPlayerEntitiesByPlayer(player)[0];
+    if (player.camera.attachedToEntity === undefined && playerEntity) {
+      player.camera.setAttachedToEntity(playerEntity);
+    }
 
-      if (!hostOwnsDerivedState) {
-        const playerEntitySync = this._createOrGetQueuedEntitySync(entity, player);
-        this._assignUndefined(playerEntitySync, entity.serialize());
-
-        if (entity instanceof PlayerEntity && entity.player === player) {
-          this._queuePlayerEntityOwnerPredictionState(playerEntitySync, entity);
-        }
-      } else if (entity instanceof PlayerEntity && entity.player === player) {
-        const playerEntitySync = this._createOrGetQueuedEntitySync(entity, player);
-        this._queuePlayerEntityOwnerPredictionState(playerEntitySync, entity);
-      }
+    if (hostOwnsDerivedState && playerEntity) {
+      const playerEntitySync = this._createOrGetQueuedEntitySync(playerEntity, player);
+      this._queuePlayerEntityOwnerPredictionState(playerEntitySync, playerEntity);
     }
 
     this._syncPlayerCameraAttachedEntityModel(player.camera);
-
-    // Sync Particle Emitters
-    if (!hostOwnsDerivedState) {
-      for (const particleEmitter of this._world.particleEmitterManager.getAllParticleEmitters()) {
-        const playerParticleEmitterSync = this._createOrGetQueuedParticleEmitterSync(particleEmitter, player);
-        this._assignUndefined(playerParticleEmitterSync, particleEmitter.serialize());
-      }
-    }
 
     // Sync Players
     if (!hostOwnsDerivedState) {
       for (const otherPlayer of PlayerManager.instance.getConnectedPlayers()) {
         const playerPlayerSync = this._createOrGetQueuedPlayerSync(otherPlayer, player);
         this._assignUndefined(playerPlayerSync, otherPlayer.serialize());
-      }
-    }
-
-    // Sync Scene UIs
-    if (!hostOwnsDerivedState) {
-      for (const sceneUI of this._world.sceneUIManager.getAllSceneUIs()) {
-        const playerSceneUISync = this._createOrGetQueuedSceneUISync(sceneUI, player);
-        this._assignUndefined(playerSceneUISync, sceneUI.serialize());
       }
     }
 
@@ -1823,13 +1806,17 @@ export default class NetworkSynchronizer {
       const playerSync = this._createOrGetQueuedPlayerSync(player);
       this._assignUndefined(playerSync, player.serialize());
       this._refreshPlayerChunkInterest(player);
+      this._refreshPlayerSpatialInterest(player);
     }
   };
 
   private _onPlayerLeftWorld = (payload: EventPayloads[PlayerEvent.LEFT_WORLD]) => {
     this._lastSentInputAcknowledgementByPlayer.delete(payload.player);
     this._chunkInterestStateByPlayer.delete(payload.player);
+    this._loadedEntityIdsByPlayer.delete(payload.player);
     this._loadedChunkKeysByPlayer.delete(payload.player);
+    this._loadedParticleEmitterIdsByPlayer.delete(payload.player);
+    this._loadedSceneUIIdsByPlayer.delete(payload.player);
     if (WorldHostManager.instance.client.ownsDerivedState(this._world)) {
       return;
     }
@@ -1841,7 +1828,10 @@ export default class NetworkSynchronizer {
   private _onPlayerReconnectedWorld = (payload: EventPayloads[PlayerEvent.RECONNECTED_WORLD]) => {
     this._lastSentInputAcknowledgementByPlayer.delete(payload.player);
     this._chunkInterestStateByPlayer.delete(payload.player);
+    this._loadedEntityIdsByPlayer.delete(payload.player);
     this._loadedChunkKeysByPlayer.delete(payload.player);
+    this._loadedParticleEmitterIdsByPlayer.delete(payload.player);
+    this._loadedSceneUIIdsByPlayer.delete(payload.player);
     this._onPlayerJoinedWorld(payload); // resync player state
   };
 
@@ -2426,6 +2416,130 @@ export default class NetworkSynchronizer {
     state.needsRefresh = hasPendingChunkLoads;
   }
 
+  private _refreshPlayerSpatialInterests(): void {
+    if (WorldHostManager.instance.client.ownsDerivedState(this._world)) {
+      return;
+    }
+
+    for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
+      this._refreshPlayerSpatialInterest(player);
+    }
+  }
+
+  private _refreshPlayerSpatialInterest(player: Player): void {
+    const center = this._getChunkInterestCenter(player);
+    if (!center) {
+      return;
+    }
+
+    const centerChunkOrigin = Chunk.globalCoordinateToOriginCoordinate(center);
+    this._refreshPlayerEntityInterest(player, centerChunkOrigin);
+    this._refreshPlayerParticleEmitterInterest(player, centerChunkOrigin);
+    this._refreshPlayerSceneUIInterest(player, center, centerChunkOrigin);
+  }
+
+  private _refreshPlayerEntityInterest(player: Player, centerChunkOrigin: Vector3Like): void {
+    const loadedEntityIds = this._getOrCreateLoadedEntityIds(player);
+    const desiredEntityIds: Set<number> = new Set();
+
+    for (const entity of this._world.entityManager.getAllEntities()) {
+      if (entity.id === undefined || !this._shouldSyncEntityToPlayer(entity, player, centerChunkOrigin)) {
+        continue;
+      }
+
+      desiredEntityIds.add(entity.id);
+      if (loadedEntityIds.has(entity.id)) {
+        continue;
+      }
+
+      this._queueEntityStateForPlayer(entity, player);
+      loadedEntityIds.add(entity.id);
+    }
+
+    for (const loadedEntityId of Array.from(loadedEntityIds)) {
+      if (desiredEntityIds.has(loadedEntityId)) {
+        continue;
+      }
+
+      const entity = this._world.entityManager.getEntity(loadedEntityId);
+      if (entity) {
+        this._queueEntityRemovalForPlayer(entity, player);
+      }
+
+      loadedEntityIds.delete(loadedEntityId);
+    }
+  }
+
+  private _refreshPlayerParticleEmitterInterest(player: Player, centerChunkOrigin: Vector3Like): void {
+    const loadedParticleEmitterIds = this._getOrCreateLoadedParticleEmitterIds(player);
+    const desiredParticleEmitterIds: Set<number> = new Set();
+    const particleEmittersById: Map<number, ParticleEmitter> = new Map();
+
+    for (const particleEmitter of this._world.particleEmitterManager.getAllParticleEmitters()) {
+      if (particleEmitter.id === undefined) {
+        continue;
+      }
+
+      particleEmittersById.set(particleEmitter.id, particleEmitter);
+      if (!this._shouldSyncParticleEmitterToPlayer(particleEmitter, centerChunkOrigin)) {
+        continue;
+      }
+
+      desiredParticleEmitterIds.add(particleEmitter.id);
+      if (loadedParticleEmitterIds.has(particleEmitter.id)) {
+        continue;
+      }
+
+      this._queueParticleEmitterStateForPlayer(particleEmitter, player);
+      loadedParticleEmitterIds.add(particleEmitter.id);
+    }
+
+    for (const loadedParticleEmitterId of Array.from(loadedParticleEmitterIds)) {
+      if (desiredParticleEmitterIds.has(loadedParticleEmitterId)) {
+        continue;
+      }
+
+      const particleEmitter = particleEmittersById.get(loadedParticleEmitterId);
+      if (particleEmitter) {
+        this._queueParticleEmitterRemovalForPlayer(particleEmitter, player);
+      }
+
+      loadedParticleEmitterIds.delete(loadedParticleEmitterId);
+    }
+  }
+
+  private _refreshPlayerSceneUIInterest(player: Player, center: Vector3Like, centerChunkOrigin: Vector3Like): void {
+    const loadedSceneUIIds = this._getOrCreateLoadedSceneUIIds(player);
+    const desiredSceneUIIds: Set<number> = new Set();
+
+    for (const sceneUI of this._world.sceneUIManager.getAllSceneUIs()) {
+      if (sceneUI.id === undefined || !this._shouldSyncSceneUIToPlayer(sceneUI, center, centerChunkOrigin)) {
+        continue;
+      }
+
+      desiredSceneUIIds.add(sceneUI.id);
+      if (loadedSceneUIIds.has(sceneUI.id)) {
+        continue;
+      }
+
+      this._queueSceneUIStateForPlayer(sceneUI, player);
+      loadedSceneUIIds.add(sceneUI.id);
+    }
+
+    for (const loadedSceneUIId of Array.from(loadedSceneUIIds)) {
+      if (desiredSceneUIIds.has(loadedSceneUIId)) {
+        continue;
+      }
+
+      const sceneUI = this._world.sceneUIManager.getSceneUIById(loadedSceneUIId);
+      if (sceneUI) {
+        this._queueSceneUIRemovalForPlayer(sceneUI, player);
+      }
+
+      loadedSceneUIIds.delete(loadedSceneUIId);
+    }
+  }
+
   private _collectDesiredChunksForCenter(centerChunkOrigin: Vector3Like): { chunk: Chunk; key: string; distanceSq: number }[] {
     const desiredChunks: { chunk: Chunk; key: string; distanceSq: number }[] = [];
 
@@ -2509,6 +2623,48 @@ export default class NetworkSynchronizer {
     delete chunkSync.r;
   }
 
+  private _queueEntityStateForPlayer(entity: Entity, player: Player): void {
+    const entitySync = this._createOrGetQueuedEntitySync(entity, player);
+    this._assignUndefined(entitySync, entity.serialize());
+
+    if (entity instanceof PlayerEntity && entity.player === player) {
+      this._queuePlayerEntityOwnerPredictionState(entitySync, entity);
+    }
+  }
+
+  private _queueEntityRemovalForPlayer(entity: Entity, player: Player): void {
+    const entitySync = this._createOrGetQueuedEntitySync(entity, player);
+    entitySync.rm = true;
+    delete entitySync.ma;
+    delete entitySync.mo;
+    delete entitySync.p;
+    delete entitySync.r;
+  }
+
+  private _queueParticleEmitterStateForPlayer(particleEmitter: ParticleEmitter, player: Player): void {
+    const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(particleEmitter, player);
+    this._assignUndefined(particleEmitterSync, particleEmitter.serialize());
+  }
+
+  private _queueParticleEmitterRemovalForPlayer(particleEmitter: ParticleEmitter, player: Player): void {
+    const particleEmitterSync = this._createOrGetQueuedParticleEmitterSync(particleEmitter, player);
+    particleEmitterSync.rm = true;
+    delete particleEmitterSync.b;
+    delete particleEmitterSync.p;
+  }
+
+  private _queueSceneUIStateForPlayer(sceneUI: SceneUI, player: Player): void {
+    const sceneUISync = this._createOrGetQueuedSceneUISync(sceneUI, player);
+    this._assignUndefined(sceneUISync, sceneUI.serialize());
+  }
+
+  private _queueSceneUIRemovalForPlayer(sceneUI: SceneUI, player: Player): void {
+    const sceneUISync = this._createOrGetQueuedSceneUISync(sceneUI, player);
+    sceneUISync.rm = true;
+    delete sceneUISync.p;
+    delete sceneUISync.s;
+  }
+
   private _getOrCreateLoadedChunkKeys(player: Player): Set<string> {
     let loadedChunkKeys = this._loadedChunkKeysByPlayer.get(player);
     if (!loadedChunkKeys) {
@@ -2519,6 +2675,36 @@ export default class NetworkSynchronizer {
     return loadedChunkKeys;
   }
 
+  private _getOrCreateLoadedEntityIds(player: Player): Set<number> {
+    let loadedEntityIds = this._loadedEntityIdsByPlayer.get(player);
+    if (!loadedEntityIds) {
+      loadedEntityIds = new Set();
+      this._loadedEntityIdsByPlayer.set(player, loadedEntityIds);
+    }
+
+    return loadedEntityIds;
+  }
+
+  private _getOrCreateLoadedParticleEmitterIds(player: Player): Set<number> {
+    let loadedParticleEmitterIds = this._loadedParticleEmitterIdsByPlayer.get(player);
+    if (!loadedParticleEmitterIds) {
+      loadedParticleEmitterIds = new Set();
+      this._loadedParticleEmitterIdsByPlayer.set(player, loadedParticleEmitterIds);
+    }
+
+    return loadedParticleEmitterIds;
+  }
+
+  private _getOrCreateLoadedSceneUIIds(player: Player): Set<number> {
+    let loadedSceneUIIds = this._loadedSceneUIIdsByPlayer.get(player);
+    if (!loadedSceneUIIds) {
+      loadedSceneUIIds = new Set();
+      this._loadedSceneUIIdsByPlayer.set(player, loadedSceneUIIds);
+    }
+
+    return loadedSceneUIIds;
+  }
+
   private _getOrCreatePlayerChunkInterestState(player: Player): PlayerChunkInterestState {
     let state = this._chunkInterestStateByPlayer.get(player);
     if (!state) {
@@ -2527,6 +2713,54 @@ export default class NetworkSynchronizer {
     }
 
     return state;
+  }
+
+  private _shouldSyncEntityToPlayer(
+    entity: Entity,
+    player: Player,
+    centerChunkOrigin: Vector3Like,
+  ): boolean {
+    if (entity instanceof PlayerEntity && entity.player === player) {
+      return true;
+    }
+
+    return this._isPositionInChunkInterestRange(entity.position, centerChunkOrigin);
+  }
+
+  private _shouldSyncParticleEmitterToPlayer(
+    particleEmitter: ParticleEmitter,
+    centerChunkOrigin: Vector3Like,
+  ): boolean {
+    const anchor = particleEmitter.attachedToEntity?.position ?? particleEmitter.position;
+    return anchor ? this._isPositionInChunkInterestRange(anchor, centerChunkOrigin) : false;
+  }
+
+  private _shouldSyncSceneUIToPlayer(
+    sceneUI: SceneUI,
+    center: Vector3Like,
+    centerChunkOrigin: Vector3Like,
+  ): boolean {
+    const anchor = sceneUI.attachedToEntity?.position ?? sceneUI.position;
+    if (!anchor) {
+      return false;
+    }
+
+    if (typeof sceneUI.viewDistance === 'number' && Number.isFinite(sceneUI.viewDistance) && sceneUI.viewDistance >= 0) {
+      const dx = anchor.x - center.x;
+      const dy = anchor.y - center.y;
+      const dz = anchor.z - center.z;
+      return (dx * dx) + (dy * dy) + (dz * dz) <= sceneUI.viewDistance * sceneUI.viewDistance;
+    }
+
+    return this._isPositionInChunkInterestRange(anchor, centerChunkOrigin);
+  }
+
+  private _isPositionInChunkInterestRange(position: Vector3Like | undefined, centerChunkOrigin: Vector3Like): boolean {
+    if (!position) {
+      return false;
+    }
+
+    return this._isChunkOriginInRange(Chunk.globalCoordinateToOriginCoordinate(position), centerChunkOrigin);
   }
 
   private _chunkKeyForGlobalCoordinate(globalCoordinate: Vector3Like): string {
@@ -2565,8 +2799,19 @@ export default class NetworkSynchronizer {
     slot.perPlayerPackets.set(player, [ packet ]);
   }
 
+  private _appendPerPlayerUnreliablePacket(packetPlan: PacketPlan, player: Player, packet: AnyPacket): void {
+    const existingPackets = packetPlan.perPlayerUnreliablePackets.get(player);
+    if (existingPackets) {
+      existingPackets.push(packet);
+      return;
+    }
+
+    packetPlan.perPlayerUnreliablePackets.set(player, [ packet ]);
+  }
+
   private _buildPacketPlan(currentTick: number): PacketPlan {
     const packetPlan: PacketPlan = {
+      perPlayerUnreliablePackets: new Map(),
       postPlayerUIAfterChatReliableSlots: [],
       postPlayerUIBeforeWorldAndPlayersReliableSlots: [],
       prePlayerUIReliableSlots: [],
@@ -2574,7 +2819,7 @@ export default class NetworkSynchronizer {
       sharedUnreliablePackets: [],
     };
 
-    const entitySlot = this._buildEntityPacketSlot(currentTick, packetPlan.sharedUnreliablePackets);
+    const entitySlot = this._buildEntityPacketSlot(currentTick, packetPlan);
     if (entitySlot) {
       packetPlan.prePlayerUISpecialReliableSlots.push(entitySlot);
     }
@@ -2626,13 +2871,23 @@ export default class NetworkSynchronizer {
     // 8. particle emitters
     this._pushReliablePacketSlot(
       packetPlan.prePlayerUIReliableSlots,
-      this._buildSyncPacketSlot(this._queuedParticleEmitterSyncs, protocol.outboundPackets.particleEmittersPacketDefinition, currentTick),
+      this._buildSpatialSyncPacketSlot(
+        this._queuedParticleEmitterSyncs,
+        protocol.outboundPackets.particleEmittersPacketDefinition,
+        currentTick,
+        this._loadedParticleEmitterIdsByPlayer,
+      ),
     );
 
     // 7. scene UIs
     this._pushReliablePacketSlot(
       packetPlan.postPlayerUIBeforeWorldAndPlayersReliableSlots,
-      this._buildSyncPacketSlot(this._queuedSceneUISyncs, protocol.outboundPackets.sceneUIsPacketDefinition, currentTick),
+      this._buildSpatialSyncPacketSlot(
+        this._queuedSceneUISyncs,
+        protocol.outboundPackets.sceneUIsPacketDefinition,
+        currentTick,
+        this._loadedSceneUIIdsByPlayer,
+      ),
     );
 
     // 8. debug renders
@@ -2650,7 +2905,7 @@ export default class NetworkSynchronizer {
     return packetPlan;
   }
 
-  private _buildEntityPacketSlot(currentTick: number, sharedUnreliablePackets: AnyPacket[]): ReliablePacketSlot | undefined {
+  private _buildEntityPacketSlot(currentTick: number, packetPlan: PacketPlan): ReliablePacketSlot | undefined {
     const slot: ReliablePacketSlot = {};
     const hostOwnsDerivedState = WorldHostManager.instance.client.ownsDerivedState(this._world);
 
@@ -2659,48 +2914,94 @@ export default class NetworkSynchronizer {
      * account for 90%+ of all packets sent. Because these are not deltas and
      * send as full position / rotation updates, we can send them over the
      * unreliable channel to drastically reduce blocking on the client and stutter
-     * in poor network conditions. To do this, we split the entity synchronizations
-     * into two arrays, one for reliable updates and one for unreliable updates.
+     * in poor network conditions.
      */
-    if (this._queuedEntitySyncs.broadcast.size > 0) {
+    const targetPlayers = hostOwnsDerivedState
+      ? Array.from(this._queuedEntitySyncs.perPlayer.keys())
+      : PlayerManager.instance.getConnectedPlayersByWorldSet(this._world);
+
+    for (const player of targetPlayers) {
       const reliableUpdates: protocol.EntitySchema[] = [];
       const unreliableUpdates: protocol.EntitySchema[] = [];
 
-      for (const entitySync of this._queuedEntitySyncs.broadcast.valuesArray) {
-        this._sanitizeEntitySync(entitySync);
-        let isReliableUpdate = false;
+      if (!hostOwnsDerivedState && this._queuedEntitySyncs.broadcast.size > 0) {
+        const loadedEntityIds = this._loadedEntityIdsByPlayer.get(player);
+        if (loadedEntityIds && loadedEntityIds.size > 0) {
+          for (const entitySync of this._queuedEntitySyncs.broadcast.valuesArray) {
+            if (!loadedEntityIds.has(entitySync.i)) {
+              continue;
+            }
 
-        for (const key in entitySync) {
-          isReliableUpdate = key !== 'i' && key !== 'p' && key !== 'r';
-          if (isReliableUpdate) { break; }
+            this._sanitizeEntitySync(entitySync);
+            (this._isReliableEntitySync(entitySync) ? reliableUpdates : unreliableUpdates).push(entitySync);
+          }
         }
-
-        (isReliableUpdate ? reliableUpdates : unreliableUpdates).push(entitySync);
       }
 
-      if (unreliableUpdates.length > 0) {
-        sharedUnreliablePackets.push(
-          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, unreliableUpdates, currentTick),
-        );
+      const perPlayerEntitySyncs = this._queuedEntitySyncs.perPlayer.get(player);
+      if (perPlayerEntitySyncs && perPlayerEntitySyncs.size > 0) {
+        for (const entitySync of perPlayerEntitySyncs.valuesArray) {
+          this._sanitizeEntitySync(entitySync);
+          (this._isReliableEntitySync(entitySync) ? reliableUpdates : unreliableUpdates).push(entitySync);
+        }
       }
 
       if (reliableUpdates.length > 0) {
-        slot.sharedPackets = [
-          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, reliableUpdates, currentTick),
-        ];
-      }
-    }
-
-    if (!hostOwnsDerivedState && this._queuedEntitySyncs.perPlayer.size > 0) {
-      for (const [ player, entitySyncs ] of this._queuedEntitySyncs.perPlayer.entries()) {
-        for (const entitySync of entitySyncs.valuesArray) {
-          this._sanitizeEntitySync(entitySync);
-        }
-
         this._appendPerPlayerSlotPacket(
           slot,
           player,
-          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, entitySyncs.valuesArray, currentTick),
+          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, reliableUpdates, currentTick),
+        );
+      }
+
+      if (unreliableUpdates.length > 0) {
+        this._appendPerPlayerUnreliablePacket(
+          packetPlan,
+          player,
+          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, unreliableUpdates, currentTick),
+        );
+      }
+    }
+
+    return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
+  }
+
+  private _buildSpatialSyncPacketSlot<TKey, TId extends PacketId, TSchema extends { i?: number }>(
+    syncQueue: SyncQueue<TKey, TSchema>,
+    packetDefinition: IPacketDefinition<TId, TSchema[]>,
+    currentTick: number,
+    loadedIdsByPlayer: Map<Player, Set<number>>,
+  ): ReliablePacketSlot | undefined {
+    const slot: ReliablePacketSlot = {};
+    const hostOwnsDerivedState = WorldHostManager.instance.client.ownsDerivedState(this._world);
+    const targetPlayers = hostOwnsDerivedState
+      ? Array.from(syncQueue.perPlayer.keys())
+      : PlayerManager.instance.getConnectedPlayersByWorldSet(this._world);
+
+    for (const player of targetPlayers) {
+      const updates: TSchema[] = [];
+
+      if (!hostOwnsDerivedState && syncQueue.broadcast.size > 0) {
+        const loadedIds = loadedIdsByPlayer.get(player);
+        if (loadedIds && loadedIds.size > 0) {
+          for (const sync of syncQueue.broadcast.valuesArray) {
+            if (sync.i !== undefined && loadedIds.has(sync.i)) {
+              updates.push(sync);
+            }
+          }
+        }
+      }
+
+      const perPlayerSync = syncQueue.perPlayer.get(player);
+      if (perPlayerSync && perPlayerSync.size > 0) {
+        updates.push(...perPlayerSync.valuesArray);
+      }
+
+      if (updates.length > 0) {
+        this._appendPerPlayerSlotPacket(
+          slot,
+          player,
+          protocol.createPacket(packetDefinition, updates, currentTick),
         );
       }
     }
@@ -2791,6 +3092,11 @@ export default class NetworkSynchronizer {
 
         if (packetPlan.sharedUnreliablePackets.length > 0) {
           WorldHostManager.instance.client.sendPacketsToPlayer(session, packetPlan.sharedUnreliablePackets, false);
+        }
+
+        const perPlayerUnreliablePackets = packetPlan.perPlayerUnreliablePackets.get(player);
+        if (perPlayerUnreliablePackets && perPlayerUnreliablePackets.length > 0) {
+          WorldHostManager.instance.client.sendPacketsToPlayer(session, perPlayerUnreliablePackets, false);
         }
       }
     });
@@ -2921,13 +3227,19 @@ export default class NetworkSynchronizer {
     syncQueue: SyncQueue<TKey, TSchema>,
     sendSync: (session: GatewayPlayerSession, sync: TSchema[], currentTick: number) => void,
   ): void {
+    const combinedSync: TSchema[] = [];
+
     if (syncQueue.broadcast.size > 0) {
-      sendSync(session, Array.from(syncQueue.broadcast.valuesArray), currentTick);
+      combinedSync.push(...syncQueue.broadcast.valuesArray);
     }
 
     const perPlayerSync = syncQueue.perPlayer.get(player);
     if (perPlayerSync && perPlayerSync.size > 0) {
-      sendSync(session, Array.from(perPlayerSync.valuesArray), currentTick);
+      combinedSync.push(...perPlayerSync.valuesArray);
+    }
+
+    if (combinedSync.length > 0) {
+      sendSync(session, combinedSync, currentTick);
     }
   }
 
@@ -3000,6 +3312,16 @@ export default class NetworkSynchronizer {
         delete (entitySync as Record<string, unknown>)[key];
       }
     }
+  }
+
+  private _isReliableEntitySync(entitySync: protocol.EntitySchema): boolean {
+    for (const key in entitySync) {
+      if (key !== 'i' && key !== 'p' && key !== 'r') {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private _syncPlayerCameraAttachedEntityModel(playerCamera: PlayerCamera): void {

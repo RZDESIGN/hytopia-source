@@ -14,7 +14,9 @@ const BLOCKS_PACKET_ID = 34;
 const CAMERA_PACKET_ID = 40;
 const CHUNKS_PACKET_ID = 37;
 const ENTITIES_PACKET_ID = 38;
+const PARTICLE_EMITTERS_PACKET_ID = 46;
 const PLAYERS_PACKET_ID = 45;
+const SCENE_UIS_PACKET_ID = 43;
 
 const createWorldDescriptor = worldId => ({
   id: worldId,
@@ -178,14 +180,30 @@ test('bootstraps world, entities, and players in stable attach order', async t =
   const packets = decodeWirePackets(batchMessage.wireBytes);
   const packetIds = packets.map(packet => packet[0]);
 
-  assert.deepEqual(packetIds, [ WORLD_PACKET_ID, ENTITIES_PACKET_ID, PLAYERS_PACKET_ID ]);
+  assert.deepEqual(packetIds, [ WORLD_PACKET_ID, PLAYERS_PACKET_ID ]);
   assert.equal(packets[0][1].n, 'Bootstrapped World');
-  assert.equal(packets[1][1][0].n, 'Training Bot');
-  assert.deepEqual(packets[1][1][0].ma, [{ n: 'idle', p: true }]);
-  assert.equal(packets[1][1][0].mo.length, 1);
-  assert.equal(packets[1][1][0].mo[0].n, 'hat');
-  assert.equal(packets[1][1][0].mo[0].h, true);
-  assert.equal(packets[2][1][0].i, 'player-a');
+  assert.equal(packets[1][1][0].i, 'player-a');
+
+  harness.send({
+    camera: { e: 5001 },
+    playerId: 'player-a',
+    type: 'player_camera',
+    worldId,
+    worldTick: 9,
+  });
+
+  const spatialBootstrapMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-a';
+  });
+  const spatialBootstrapPackets = decodeWirePackets(spatialBootstrapMessage.wireBytes);
+  const entityPackets = spatialBootstrapPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID);
+  assert.equal(entityPackets.length > 0, true);
+  const bootstrappedEntities = entityPackets.flatMap(packet => packet[1]);
+  assert.equal(bootstrappedEntities[0].n, 'Training Bot');
+  assert.deepEqual(bootstrappedEntities[0].ma, [{ n: 'idle', p: true }]);
+  assert.equal(bootstrappedEntities[0].mo.length, 1);
+  assert.equal(bootstrappedEntities[0].mo[0].n, 'hat');
+  assert.equal(bootstrappedEntities[0].mo[0].h, true);
 });
 
 test('merges nested entity patches into bootstrap state for future joins', async t => {
@@ -233,7 +251,21 @@ test('merges nested entity patches into bootstrap state for future joins', async
     return message.type === 'player_packet_batch' && message.playerId === 'player-b';
   });
   const packets = decodeWirePackets(batchMessage.wireBytes);
-  const entitiesPacket = packets.find(packet => packet[0] === ENTITIES_PACKET_ID);
+  assert.equal(packets.some(packet => packet[0] === ENTITIES_PACKET_ID), false);
+
+  harness.send({
+    camera: { e: 5002 },
+    playerId: 'player-b',
+    type: 'player_camera',
+    worldId,
+    worldTick: 6,
+  });
+
+  const spatialBootstrapMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-b';
+  });
+  const spatialBootstrapPackets = decodeWirePackets(spatialBootstrapMessage.wireBytes);
+  const entitiesPacket = spatialBootstrapPackets.find(packet => packet[0] === ENTITIES_PACKET_ID);
   const mergedEntity = entitiesPacket[1][0];
 
   assert.deepEqual(mergedEntity.ma, [{ l: 1, n: 'idle', p: true, w: 0.5 }]);
@@ -300,7 +332,7 @@ test('routes targeted entity batches only to the addressed player', async t => {
   await harness.expectNoMessage(message => message.type === 'player_packet_batch' && message.playerId === 'player-d');
 });
 
-test('streams nearby chunks and block deltas only after player camera interest is known', async t => {
+test('streams nearby chunks and spatial state only after player camera interest is known', async t => {
   const harness = await createChildHarness(t);
   const worldId = 104;
   const nearChunkBlocks = new Array(16 ** 3).fill(1);
@@ -337,6 +369,60 @@ test('streams nearby chunks and block deltas only after player camera interest i
     worldTick: 3,
   });
   harness.send({
+    entity: {
+      i: 7002,
+      p: [160, 2, 3],
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    particleEmitter: {
+      i: 8001,
+      p: [2, 2, 2],
+      tu: 'particles/near.png',
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    particleEmitter: {
+      i: 8002,
+      p: [160, 2, 2],
+      tu: 'particles/far.png',
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    sceneUI: {
+      i: 9001,
+      p: [1, 3, 1],
+      s: { label: 'near' },
+      t: 'nametag',
+      v: 30,
+    },
+    type: 'scene_ui_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    sceneUI: {
+      i: 9002,
+      p: [160, 3, 1],
+      s: { label: 'far' },
+      t: 'nametag',
+      v: 30,
+    },
+    type: 'scene_ui_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
     player: createPlayerDescriptor('player-e'),
     type: 'player_attach',
     worldId,
@@ -347,6 +433,9 @@ test('streams nearby chunks and block deltas only after player camera interest i
   });
   const bootstrapPackets = decodeWirePackets(bootstrapMessage.wireBytes);
   assert.equal(bootstrapPackets.some(packet => packet[0] === CHUNKS_PACKET_ID), false);
+  assert.equal(bootstrapPackets.some(packet => packet[0] === ENTITIES_PACKET_ID), false);
+  assert.equal(bootstrapPackets.some(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID), false);
+  assert.equal(bootstrapPackets.some(packet => packet[0] === SCENE_UIS_PACKET_ID), false);
 
   harness.send({
     camera: { e: 7001 },
@@ -360,8 +449,50 @@ test('streams nearby chunks and block deltas only after player camera interest i
     return message.type === 'player_packet_batch' && message.playerId === 'player-e';
   });
   const chunkLoadPackets = decodeWirePackets(chunkLoadMessage.wireBytes);
-  assert.deepEqual(chunkLoadPackets.map(packet => packet[0]), [ CAMERA_PACKET_ID, CHUNKS_PACKET_ID ]);
-  assert.deepEqual(chunkLoadPackets[1][1].map(chunk => chunk.c), [[0, 0, 0]]);
+  assert.equal(chunkLoadPackets[0][0], CAMERA_PACKET_ID);
+  const chunkLoads = chunkLoadPackets.filter(packet => packet[0] === CHUNKS_PACKET_ID).flatMap(packet => packet[1]);
+  const entityLoads = chunkLoadPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+  const particleLoads = chunkLoadPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).flatMap(packet => packet[1]);
+  const sceneUILoads = chunkLoadPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).flatMap(packet => packet[1]);
+  assert.deepEqual(chunkLoads.map(chunk => chunk.c), [[0, 0, 0]]);
+  assert.deepEqual(entityLoads.map(entity => entity.i), [7001]);
+  assert.deepEqual(particleLoads.map(particleEmitter => particleEmitter.i), [8001]);
+  assert.deepEqual(sceneUILoads.map(sceneUI => sceneUI.i), [9001]);
+
+  harness.send({
+    camera: { e: null, p: [160, 2, 3] },
+    playerId: 'player-e',
+    type: 'player_camera',
+    worldId,
+    worldTick: 4,
+  });
+
+  const farInterestMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-e';
+  });
+  const farInterestPackets = decodeWirePackets(farInterestMessage.wireBytes);
+  assert.equal(farInterestPackets[0][0], CAMERA_PACKET_ID);
+  const farChunkPackets = farInterestPackets.filter(packet => packet[0] === CHUNKS_PACKET_ID).flatMap(packet => packet[1]);
+  const farEntityPackets = farInterestPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+  const farParticlePackets = farInterestPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).flatMap(packet => packet[1]);
+  const farSceneUIPackets = farInterestPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).flatMap(packet => packet[1]);
+  assert.deepEqual(farChunkPackets.map(chunk => chunk.c).sort(), [[0, 0, 0], [160, 0, 0]]);
+  assert.deepEqual(
+    farChunkPackets.map(chunk => chunk.rm === true ? { c: chunk.c, rm: true } : { c: chunk.c, rm: false }).sort((a, b) => a.c[0] - b.c[0]),
+    [{ c: [0, 0, 0], rm: true }, { c: [160, 0, 0], rm: false }],
+  );
+  assert.deepEqual(
+    farEntityPackets.map(entity => entity.rm ? { i: entity.i, rm: true } : { i: entity.i, rm: false }).sort((a, b) => a.i - b.i),
+    [{ i: 7001, rm: true }, { i: 7002, rm: false }],
+  );
+  assert.deepEqual(
+    farParticlePackets.map(particleEmitter => particleEmitter.rm ? { i: particleEmitter.i, rm: true } : { i: particleEmitter.i, rm: false }).sort((a, b) => a.i - b.i),
+    [{ i: 8001, rm: true }, { i: 8002, rm: false }],
+  );
+  assert.deepEqual(
+    farSceneUIPackets.map(sceneUI => sceneUI.rm ? { i: sceneUI.i, rm: true } : { i: sceneUI.i, rm: false }).sort((a, b) => a.i - b.i),
+    [{ i: 9001, rm: true }, { i: 9002, rm: false }],
+  );
 
   harness.send({
     block: { c: [1, 0, 1], i: 3 },
@@ -381,5 +512,112 @@ test('streams nearby chunks and block deltas only after player camera interest i
   });
   const blockDeltaPackets = decodeWirePackets(blockDeltaMessage.wireBytes);
   assert.deepEqual(blockDeltaPackets.map(packet => packet[0]), [ BLOCKS_PACKET_ID ]);
-  assert.deepEqual(blockDeltaPackets[0][1], [{ c: [1, 0, 1], i: 3 }]);
+  assert.deepEqual(blockDeltaPackets[0][1], [{ c: [160, 0, 1], i: 4 }]);
+});
+
+test('coalesces same-tick spatial interest loads with same-channel patches', async t => {
+  const harness = await createChildHarness(t);
+  const worldId = 105;
+
+  harness.send({
+    options: createWorldBootOptions(worldId),
+    processId: 'shadow-test',
+    type: 'world_boot',
+    world: createWorldDescriptor(worldId),
+  });
+  await harness.waitForMessage(message => message.type === 'world_ready' && message.world?.id === worldId);
+
+  harness.send({
+    entity: {
+      i: 7101,
+      n: 'Far Bot',
+      p: [160, 2, 3],
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    particleEmitter: {
+      i: 8101,
+      p: [160, 2, 2],
+      tu: 'particles/far.png',
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    sceneUI: {
+      i: 9101,
+      p: [160, 3, 1],
+      s: { label: 'far' },
+      t: 'nametag',
+      v: 30,
+    },
+    type: 'scene_ui_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    player: createPlayerDescriptor('player-f'),
+    type: 'player_attach',
+    worldId,
+  });
+  await harness.waitForMessage(message => message.type === 'player_packet_batch' && message.playerId === 'player-f');
+
+  harness.send({
+    camera: { e: null, p: [160, 2, 3] },
+    playerId: 'player-f',
+    type: 'player_camera',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    entity: {
+      i: 7101,
+      n: 'Far Bot Updated',
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    particleEmitter: {
+      i: 8101,
+      tu: 'particles/far-updated.png',
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+  harness.send({
+    sceneUI: {
+      i: 9101,
+      s: { label: 'far-updated' },
+    },
+    type: 'scene_ui_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+
+  const coalescedBatchMessage = await harness.waitForMessage(message => {
+    if (message.type !== 'player_packet_batch' || message.playerId !== 'player-f') {
+      return false;
+    }
+
+    const packets = decodeWirePackets(message.wireBytes);
+    return packets.some(packet => packet[0] === ENTITIES_PACKET_ID && packet[1].length === 2)
+      && packets.some(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID && packet[1].length === 2)
+      && packets.some(packet => packet[0] === SCENE_UIS_PACKET_ID && packet[1].length === 2);
+  });
+  const coalescedPackets = decodeWirePackets(coalescedBatchMessage.wireBytes);
+
+  assert.equal(coalescedPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).length, 1);
+  assert.equal(coalescedPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).length, 1);
+  assert.equal(coalescedPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).length, 1);
+  assert.equal(coalescedPackets.find(packet => packet[0] === ENTITIES_PACKET_ID)[1][1].n, 'Far Bot Updated');
+  assert.equal(coalescedPackets.find(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID)[1][1].tu, 'particles/far-updated.png');
+  assert.deepEqual(coalescedPackets.find(packet => packet[0] === SCENE_UIS_PACKET_ID)[1][1].s, { label: 'far-updated' });
 });

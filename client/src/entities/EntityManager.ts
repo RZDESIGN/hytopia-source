@@ -312,6 +312,16 @@ export default class EntityManager {
     return this._entities.get(id);
   }
 
+  public get localPredictedEntity(): Entity | undefined {
+    const entityId = this._localPredictionState.entityId;
+    if (entityId === undefined) {
+      return undefined;
+    }
+
+    const entity = this._entities.get(entityId);
+    return entity instanceof Entity ? entity : undefined;
+  }
+
   public getReflectionCandidateObjectsNear(
     worldPosition: { x: number; y: number; z: number },
     maxDistance: number,

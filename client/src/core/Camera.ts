@@ -25,6 +25,7 @@ const CAMERA_ATTACHED_POSITION_SNAP_DISTANCE_SQ = 9;
 const CAMERA_POSITION_DEADZONE_SQ = 0.0004; // 2cm
 const CAMERA_LOOK_AT_MIN_DISTANCE_SQ = 0.0004;
 const ORTHOGRAPHIC_HALF_HEIGHT = 7.5;
+const DYNAMIC_CAMERA_OFFSET_SPACE_ENTITY = 1;
 const SUPPORTS_POINTER_RAW_UPDATE = typeof window !== 'undefined' && 'onpointerrawupdate' in window;
 
 // Working variables
@@ -33,6 +34,8 @@ const vec3 = new Vector3();
 const vec3b = new Vector3();
 const vec3c = new Vector3();
 const vec3d = new Vector3();
+const vec3e = new Vector3();
+const vec3f = new Vector3();
 const modelViewEuler = new Euler(0, 0, 0, 'YXZ');
 const yawOnlyEuler = new Euler(0, 0, 0, 'YXZ');
 const entityYawEuler = new Euler(0, 0, 0, 'YXZ');
@@ -97,6 +100,10 @@ export default class Camera {
   private _gameCameraTrackedEntity: Entity | undefined;
   private _gameCameraTrackedPosition: Vector3 | undefined;
   private _gameCameraTrackedPositionTarget: Vector3 | undefined;
+  private _gameCameraDynamicFollowEntityId: number | null | undefined;
+  private _gameCameraDynamicFollowOffset: Vector3 | undefined;
+  private _gameCameraDynamicFollowFocusOffset: Vector3 | undefined;
+  private _gameCameraDynamicFollowOffsetSpace: number | undefined;
   private _gameCameraViewModelBaseCameraOffsets: Map<string, Vector3> = new Map();
   private _gameCameraPitch: number = 0.2;
   private _gameCameraShoulderRotationOffset: Quaternion = new Quaternion();
@@ -438,6 +445,39 @@ export default class Camera {
 
       this.useGameCamera();
     }
+
+    if (deserializedCamera.dynamicFollowEntityId !== undefined) {
+      this._gameCameraDynamicFollowEntityId = deserializedCamera.dynamicFollowEntityId;
+      if (deserializedCamera.dynamicFollowEntityId === null) {
+        this._gameCameraDynamicFollowOffset = undefined;
+        this._gameCameraDynamicFollowFocusOffset = undefined;
+        this._gameCameraDynamicFollowOffsetSpace = undefined;
+      }
+    }
+
+    if (deserializedCamera.dynamicFollowOffset !== undefined) {
+      this._gameCameraDynamicFollowOffset = deserializedCamera.dynamicFollowOffset
+        ? new Vector3(
+          deserializedCamera.dynamicFollowOffset.x,
+          deserializedCamera.dynamicFollowOffset.y,
+          deserializedCamera.dynamicFollowOffset.z,
+        )
+        : undefined;
+    }
+
+    if (deserializedCamera.dynamicFollowFocusOffset !== undefined) {
+      this._gameCameraDynamicFollowFocusOffset = deserializedCamera.dynamicFollowFocusOffset
+        ? new Vector3(
+          deserializedCamera.dynamicFollowFocusOffset.x,
+          deserializedCamera.dynamicFollowFocusOffset.y,
+          deserializedCamera.dynamicFollowFocusOffset.z,
+        )
+        : undefined;
+    }
+
+    if (deserializedCamera.dynamicFollowOffsetSpace !== undefined) {
+      this._gameCameraDynamicFollowOffsetSpace = deserializedCamera.dynamicFollowOffsetSpace ?? undefined;
+    }
     
     if (deserializedCamera.filmOffset !== undefined) {
       this._gameCameraTargetFilmOffset = deserializedCamera.filmOffset;
@@ -769,6 +809,42 @@ export default class Camera {
     this._gameCameraCollisionRaycastHasSample = true;
   }
 
+  private _getLocallyPredictedDynamicFollowEntity(): Entity | undefined {
+    const localPredictedEntity = this._game.entityManager.localPredictedEntity;
+    if (!localPredictedEntity) {
+      return undefined;
+    }
+
+    return this._gameCameraDynamicFollowEntityId === localPredictedEntity.id
+      ? localPredictedEntity
+      : undefined;
+  }
+
+  private _resolveDynamicFollowAttachmentPosition(target: Vector3): Vector3 | undefined {
+    const followEntity = this._getLocallyPredictedDynamicFollowEntity();
+    const followOffset = this._gameCameraDynamicFollowOffset;
+    if (!followEntity || !followOffset) {
+      return undefined;
+    }
+
+    target.copy(followOffset);
+    if (this._gameCameraDynamicFollowOffsetSpace === DYNAMIC_CAMERA_OFFSET_SPACE_ENTITY) {
+      target.applyQuaternion(followEntity.rotation);
+    }
+
+    return target.add(followEntity.position);
+  }
+
+  private _resolveDynamicFollowTargetPosition(target: Vector3): Vector3 | undefined {
+    const followEntity = this._getLocallyPredictedDynamicFollowEntity();
+    const focusOffset = this._gameCameraDynamicFollowFocusOffset;
+    if (!followEntity || !focusOffset) {
+      return undefined;
+    }
+
+    return target.copy(followEntity.position).add(focusOffset);
+  }
+
   private _updateGameCamera(frameDeltaS: number): void {
     if (!this._gameCameraAttachedEntity && !this._gameCameraAttachedPosition) {
       return console.warn(`Camera._updateGameCamera(): No camera attachment or position set for game camera.`);
@@ -806,9 +882,12 @@ export default class Camera {
       }
     }
 
-    // Get base positions for camera calculations
-    const attachedPosition = this._gameCameraAttachedEntity?.getWorldPosition(vec3) || this._gameCameraAttachedPosition!;
-    const lookAtPosition = this._gameCameraLookAtPosition || this._gameCameraTrackedEntity?.position || this._gameCameraTrackedPosition;
+    // Get base positions for camera calculations.
+    const attachedPosition = this._gameCameraAttachedEntity?.getWorldPosition(vec3)
+      || this._resolveDynamicFollowAttachmentPosition(vec3e)
+      || this._gameCameraAttachedPosition!;
+    const trackedPosition = this._resolveDynamicFollowTargetPosition(vec3f) || this._gameCameraTrackedPosition;
+    const lookAtPosition = this._gameCameraLookAtPosition || this._gameCameraTrackedEntity?.position || trackedPosition;
     let lookAtDirection: Vector3 | undefined;
 
     // Calculate look direction and orientation if we have a look target

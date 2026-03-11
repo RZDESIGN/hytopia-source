@@ -16,6 +16,7 @@ import type Outline from '@/shared/types/Outline';
 import type ParticleEmitter from '@/worlds/particles/ParticleEmitter';
 import type Player from '@/players/Player';
 import type PlayerCamera from '@/players/PlayerCamera';
+import { PlayerCameraPresetOffsetSpace } from '@/players/PlayerCamera';
 import type QuaternionLike from '@/shared/types/math/QuaternionLike';
 import type RgbColor from '@/shared/types/RgbColor';
 import type SceneUI from '@/worlds/ui/SceneUI';
@@ -36,6 +37,10 @@ import type World from '@/worlds/World';
  * @internal
  */
 export default class Serializer {
+  private static _serializeDynamicCameraOffsetSpace(offsetSpace: PlayerCameraPresetOffsetSpace): number {
+    return offsetSpace === PlayerCameraPresetOffsetSpace.ENTITY ? 1 : 0;
+  }
+
   /**
    * Serializes an audio instance into a protocol schema.
    *
@@ -383,13 +388,19 @@ export default class Serializer {
       viewModelShownNodes[shownNodeIndex++] = shownNode;
     }
 
+    const dynamicPreset = playerCamera.dynamicPresetState;
+
     return {
       cb: playerCamera.collidesWithBlocks,
       m: playerCamera.mode,
       e: playerCamera.attachedToEntity?.isSpawned ? playerCamera.attachedToEntity.id : undefined,
       et: playerCamera.targetEntity?.isSpawned ? playerCamera.targetEntity.id : undefined,
+      fe: dynamicPreset?.followEntity.isSpawned ? dynamicPreset.followEntity.id : undefined,
       fo: playerCamera.filmOffset,
       ffo: playerCamera.forwardOffset,
+      fp: dynamicPreset ? this.serializeVector(dynamicPreset.followOffset) : undefined,
+      fs: dynamicPreset ? this._serializeDynamicCameraOffsetSpace(dynamicPreset.followOffsetSpace) : undefined,
+      ft: dynamicPreset ? this.serializeVector(dynamicPreset.focusOffset) : undefined,
       fv: playerCamera.fov,
       h: viewModelHiddenNodes,
       mp: playerCamera.viewModelPitchesWithCamera,

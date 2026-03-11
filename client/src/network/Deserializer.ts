@@ -68,6 +68,10 @@ export type DeserializedCamera = {
   mode?: number;
   attachedToEntityId?: number | null;
   attachedToPosition?: THREE.Vector3Like | null;
+  dynamicFollowEntityId?: number | null;
+  dynamicFollowFocusOffset?: THREE.Vector3Like | null;
+  dynamicFollowOffset?: THREE.Vector3Like | null;
+  dynamicFollowOffsetSpace?: number | null;
   filmOffset?: number;
   forwardOffset?: number;
   fov?: number;
@@ -425,6 +429,10 @@ export default class Deserializer {
       mode: camera.m,
       attachedToEntityId: 'e' in camera ? (camera.e ?? null) : undefined,
       attachedToPosition: 'p' in camera ? (camera.p ? this.deserializeVector(camera.p) : null) : undefined,
+      dynamicFollowEntityId: 'fe' in camera ? (camera.fe ?? null) : undefined,
+      dynamicFollowFocusOffset: 'ft' in camera ? (camera.ft ? this.deserializeVector(camera.ft) : null) : undefined,
+      dynamicFollowOffset: 'fp' in camera ? (camera.fp ? this.deserializeVector(camera.fp) : null) : undefined,
+      dynamicFollowOffsetSpace: 'fs' in camera ? (camera.fs ?? null) : undefined,
       filmOffset: camera.fo,
       forwardOffset: camera.ffo,
       fov: camera.fv,

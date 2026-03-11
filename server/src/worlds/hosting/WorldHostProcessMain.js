@@ -19,6 +19,11 @@ const UI_PACKET_ID = 41;
 const UI_DATAS_PACKET_ID = 42;
 const SCENE_UIS_PACKET_ID = 43;
 const NOTIFICATION_PERMISSION_REQUEST_PACKET_ID = 47;
+const COALESCIBLE_BATCH_PACKET_IDS = new Set([
+  ENTITIES_PACKET_ID,
+  PARTICLE_EMITTERS_PACKET_ID,
+  SCENE_UIS_PACKET_ID,
+]);
 const DEFAULT_TICK_RATE = 20;
 const CHUNK_AXES_RANGE = 15;
 const CHUNK_SIZE_BITS = 4;
@@ -40,6 +45,33 @@ const serializePackets = packets => {
     rawBytes: rawBuffer.byteLength,
     wireBytes: wireBuffer,
   };
+};
+const coalesceQueuedBatchPackets = packets => {
+  const coalescedPackets = [];
+  const coalescedPacketIndexesByKey = new Map();
+
+  for (const packet of packets) {
+    const packetId = packet?.[0];
+    const payload = packet?.[1];
+    const worldTick = packet?.[2];
+
+    if (!COALESCIBLE_BATCH_PACKET_IDS.has(packetId) || !Array.isArray(payload)) {
+      coalescedPackets.push(packet);
+      continue;
+    }
+
+    const packetKey = `${packetId}:${typeof worldTick === 'number' ? worldTick : 'na'}`;
+    const existingPacketIndex = coalescedPacketIndexesByKey.get(packetKey);
+    if (existingPacketIndex === undefined) {
+      coalescedPacketIndexesByKey.set(packetKey, coalescedPackets.length);
+      coalescedPackets.push([ packetId, [ ...payload ], worldTick ]);
+      continue;
+    }
+
+    coalescedPackets[existingPacketIndex][1].push(...payload);
+  }
+
+  return coalescedPackets;
 };
 
 const sendToGateway = message => {
@@ -175,6 +207,25 @@ const mergeEntitySchema = (existingEntity, entityPatch) => {
 
   return cloneEntitySchema(mergedEntity);
 };
+const cloneParticleEmitterSchema = particleEmitter => ({
+  ...particleEmitter,
+  ce: Array.isArray(particleEmitter?.ce) ? [ ...particleEmitter.ce ] : particleEmitter?.ce,
+  cev: Array.isArray(particleEmitter?.cev) ? [ ...particleEmitter.cev ] : particleEmitter?.cev,
+  cs: Array.isArray(particleEmitter?.cs) ? [ ...particleEmitter.cs ] : particleEmitter?.cs,
+  csv: Array.isArray(particleEmitter?.csv) ? [ ...particleEmitter.csv ] : particleEmitter?.csv,
+  g: Array.isArray(particleEmitter?.g) ? [ ...particleEmitter.g ] : particleEmitter?.g,
+  o: Array.isArray(particleEmitter?.o) ? [ ...particleEmitter.o ] : particleEmitter?.o,
+  ofr: Array.isArray(particleEmitter?.ofr) ? [ ...particleEmitter.ofr ] : particleEmitter?.ofr,
+  p: Array.isArray(particleEmitter?.p) ? [ ...particleEmitter.p ] : particleEmitter?.p,
+  pv: Array.isArray(particleEmitter?.pv) ? [ ...particleEmitter.pv ] : particleEmitter?.pv,
+  v: Array.isArray(particleEmitter?.v) ? [ ...particleEmitter.v ] : particleEmitter?.v,
+  vv: Array.isArray(particleEmitter?.vv) ? [ ...particleEmitter.vv ] : particleEmitter?.vv,
+});
+const cloneSceneUISchema = sceneUI => ({
+  ...sceneUI,
+  o: Array.isArray(sceneUI?.o) ? [ ...sceneUI.o ] : sceneUI?.o,
+  p: Array.isArray(sceneUI?.p) ? [ ...sceneUI.p ] : sceneUI?.p,
+});
 const upsertBlockRotation = (chunk, blockIndex, blockRotation) => {
   const rotations = Array.isArray(chunk.r) ? chunk.r : [];
 
@@ -223,7 +274,10 @@ class ShadowHostedWorldRuntime {
     this.currentParticleEmitterStateById = new Map();
     this.currentWorldState = toWorldSchema(worldDescriptor, options);
     this.currentSceneUIStateById = new Map();
+    this.loadedEntityIdsByPlayer = new Map();
     this.loadedChunkKeysByPlayer = new Map();
+    this.loadedParticleEmitterIdsByPlayer = new Map();
+    this.loadedSceneUIIdsByPlayer = new Map();
     this.packetsReceived = 0;
     this.players = new Map();
     this.pendingPacketsByPlayer = new Map();
@@ -238,7 +292,10 @@ class ShadowHostedWorldRuntime {
     const existingPlayers = Array.from(this.players.values());
     this.players.set(playerDescriptor.id, playerDescriptor);
     this.chunkInterestStateByPlayer.set(playerDescriptor.id, { needsRefresh: true });
+    this.loadedEntityIdsByPlayer.set(playerDescriptor.id, new Set());
     this.loadedChunkKeysByPlayer.set(playerDescriptor.id, new Set());
+    this.loadedParticleEmitterIdsByPlayer.set(playerDescriptor.id, new Set());
+    this.loadedSceneUIIdsByPlayer.set(playerDescriptor.id, new Set());
 
     this.queuePacket(playerDescriptor.id, [
       WORLD_PACKET_ID,
@@ -259,32 +316,11 @@ class ShadowHostedWorldRuntime {
         this.getTickMetrics().currentTick,
       ]);
     }
-    if (this.currentEntityStateById.size > 0) {
-      this.queuePacket(playerDescriptor.id, [
-        ENTITIES_PACKET_ID,
-        Array.from(this.currentEntityStateById.values(), cloneEntitySchema),
-        this.getTickMetrics().currentTick,
-      ]);
-    }
-    if (this.currentParticleEmitterStateById.size > 0) {
-      this.queuePacket(playerDescriptor.id, [
-        PARTICLE_EMITTERS_PACKET_ID,
-        Array.from(this.currentParticleEmitterStateById.values(), particleEmitter => ({ ...particleEmitter })),
-        this.getTickMetrics().currentTick,
-      ]);
-    }
     this.queuePacket(playerDescriptor.id, [
       PLAYERS_PACKET_ID,
       Array.from(this.players.values(), toPlayerSchema),
       this.getTickMetrics().currentTick,
     ]);
-    if (this.currentSceneUIStateById.size > 0) {
-      this.queuePacket(playerDescriptor.id, [
-        SCENE_UIS_PACKET_ID,
-        Array.from(this.currentSceneUIStateById.values(), sceneUI => ({ ...sceneUI })),
-        this.getTickMetrics().currentTick,
-      ]);
-    }
 
     const newPlayerSync = toPlayerSchema(playerDescriptor);
     for (const existingPlayer of existingPlayers) {
@@ -296,13 +332,17 @@ class ShadowHostedWorldRuntime {
     }
 
     this.syncPlayerChunkInterest(playerDescriptor.id, this.getTickMetrics().currentTick);
+    this.syncPlayerSpatialInterest(playerDescriptor.id, this.getTickMetrics().currentTick);
   }
 
   detachPlayer(playerId) {
     const existingPlayer = this.players.get(playerId);
     this.chunkInterestStateByPlayer.delete(playerId);
     this.currentCameraStateByPlayerId.delete(playerId);
+    this.loadedEntityIdsByPlayer.delete(playerId);
     this.loadedChunkKeysByPlayer.delete(playerId);
+    this.loadedParticleEmitterIdsByPlayer.delete(playerId);
+    this.loadedSceneUIIdsByPlayer.delete(playerId);
     this.players.delete(playerId);
     this.pendingPacketsByPlayer.delete(playerId);
 
@@ -365,6 +405,7 @@ class ShadowHostedWorldRuntime {
     ]);
 
     this.syncPlayerChunkInterest(playerId, worldTick);
+    this.syncPlayerSpatialInterest(playerId, worldTick);
   }
 
   queueEntities(playerId, entities, worldTick) {
@@ -446,17 +487,58 @@ class ShadowHostedWorldRuntime {
       this.currentSceneUIStateById.delete(sceneUIId);
     } else {
       const existingSceneUI = this.currentSceneUIStateById.get(sceneUIId);
-      this.currentSceneUIStateById.set(sceneUIId, {
+      this.currentSceneUIStateById.set(sceneUIId, cloneSceneUISchema({
         ...existingSceneUI,
         ...sceneUI,
-      });
+      }));
     }
 
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
     for (const playerId of this.players.keys()) {
+      const loadedSceneUIIds = this.getOrCreateLoadedSceneUIIds(playerId);
+      const shouldSync = !sceneUI.rm && this.shouldSyncSceneUIToPlayer(this.currentSceneUIStateById.get(sceneUIId), playerId);
+
+      if (sceneUI.rm) {
+        if (!loadedSceneUIIds.has(sceneUIId)) {
+          continue;
+        }
+
+        loadedSceneUIIds.delete(sceneUIId);
+        this.queuePacket(playerId, [
+          SCENE_UIS_PACKET_ID,
+          [ sceneUI ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      if (loadedSceneUIIds.has(sceneUIId)) {
+        if (!shouldSync) {
+          loadedSceneUIIds.delete(sceneUIId);
+          this.queuePacket(playerId, [
+            SCENE_UIS_PACKET_ID,
+            [ { i: sceneUIId, rm: true } ],
+            resolvedWorldTick,
+          ]);
+          continue;
+        }
+
+        this.queuePacket(playerId, [
+          SCENE_UIS_PACKET_ID,
+          [ sceneUI ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      if (!shouldSync) {
+        continue;
+      }
+
+      loadedSceneUIIds.add(sceneUIId);
       this.queuePacket(playerId, [
         SCENE_UIS_PACKET_ID,
-        [ sceneUI ],
+        [ cloneSceneUISchema(this.currentSceneUIStateById.get(sceneUIId)) ],
         resolvedWorldTick,
       ]);
     }
@@ -600,9 +682,50 @@ class ShadowHostedWorldRuntime {
 
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
     for (const playerId of this.players.keys()) {
+      const loadedEntityIds = this.getOrCreateLoadedEntityIds(playerId);
+      const shouldSync = !entity.rm && this.shouldSyncEntityToPlayer(this.currentEntityStateById.get(entityId), playerId);
+
+      if (entity.rm) {
+        if (!loadedEntityIds.has(entityId)) {
+          continue;
+        }
+
+        loadedEntityIds.delete(entityId);
+        this.queuePacket(playerId, [
+          ENTITIES_PACKET_ID,
+          [ cloneEntitySchema(entity) ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      if (loadedEntityIds.has(entityId)) {
+        if (!shouldSync) {
+          loadedEntityIds.delete(entityId);
+          this.queuePacket(playerId, [
+            ENTITIES_PACKET_ID,
+            [ { i: entityId, rm: true } ],
+            resolvedWorldTick,
+          ]);
+          continue;
+        }
+
+        this.queuePacket(playerId, [
+          ENTITIES_PACKET_ID,
+          [ cloneEntitySchema(entity) ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      if (!shouldSync) {
+        continue;
+      }
+
+      loadedEntityIds.add(entityId);
       this.queuePacket(playerId, [
         ENTITIES_PACKET_ID,
-        [ cloneEntitySchema(entity) ],
+        [ cloneEntitySchema(this.currentEntityStateById.get(entityId)) ],
         resolvedWorldTick,
       ]);
     }
@@ -612,11 +735,26 @@ class ShadowHostedWorldRuntime {
     }
 
     for (const [ playerId, camera ] of this.currentCameraStateByPlayerId.entries()) {
-      if (camera?.e !== entityId) {
+      if (camera?.e !== entityId && camera?.et !== entityId) {
         continue;
       }
 
       this.syncPlayerChunkInterest(playerId, resolvedWorldTick);
+      this.syncPlayerSpatialInterest(playerId, resolvedWorldTick);
+    }
+
+    const hasAttachedParticleEmitters = Array.from(this.currentParticleEmitterStateById.values()).some(particleEmitter => particleEmitter?.e === entityId);
+    if (hasAttachedParticleEmitters) {
+      for (const playerId of this.players.keys()) {
+        this.syncPlayerParticleEmitterInterest(playerId, resolvedWorldTick);
+      }
+    }
+
+    const hasAttachedSceneUIs = Array.from(this.currentSceneUIStateById.values()).some(sceneUI => sceneUI?.e === entityId);
+    if (hasAttachedSceneUIs) {
+      for (const playerId of this.players.keys()) {
+        this.syncPlayerSceneUIInterest(playerId, resolvedWorldTick);
+      }
     }
   }
 
@@ -630,17 +768,61 @@ class ShadowHostedWorldRuntime {
       this.currentParticleEmitterStateById.delete(particleEmitterId);
     } else {
       const existingParticleEmitter = this.currentParticleEmitterStateById.get(particleEmitterId);
-      this.currentParticleEmitterStateById.set(particleEmitterId, {
+      this.currentParticleEmitterStateById.set(particleEmitterId, cloneParticleEmitterSchema({
         ...existingParticleEmitter,
         ...particleEmitter,
-      });
+      }));
     }
 
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
     for (const playerId of this.players.keys()) {
+      const loadedParticleEmitterIds = this.getOrCreateLoadedParticleEmitterIds(playerId);
+      const shouldSync = !particleEmitter.rm && this.shouldSyncParticleEmitterToPlayer(
+        this.currentParticleEmitterStateById.get(particleEmitterId),
+        playerId,
+      );
+
+      if (particleEmitter.rm) {
+        if (!loadedParticleEmitterIds.has(particleEmitterId)) {
+          continue;
+        }
+
+        loadedParticleEmitterIds.delete(particleEmitterId);
+        this.queuePacket(playerId, [
+          PARTICLE_EMITTERS_PACKET_ID,
+          [ particleEmitter ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      if (loadedParticleEmitterIds.has(particleEmitterId)) {
+        if (!shouldSync) {
+          loadedParticleEmitterIds.delete(particleEmitterId);
+          this.queuePacket(playerId, [
+            PARTICLE_EMITTERS_PACKET_ID,
+            [ { i: particleEmitterId, rm: true } ],
+            resolvedWorldTick,
+          ]);
+          continue;
+        }
+
+        this.queuePacket(playerId, [
+          PARTICLE_EMITTERS_PACKET_ID,
+          [ particleEmitter ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      if (!shouldSync) {
+        continue;
+      }
+
+      loadedParticleEmitterIds.add(particleEmitterId);
       this.queuePacket(playerId, [
         PARTICLE_EMITTERS_PACKET_ID,
-        [ particleEmitter ],
+        [ cloneParticleEmitterSchema(this.currentParticleEmitterStateById.get(particleEmitterId)) ],
         resolvedWorldTick,
       ]);
     }
@@ -682,6 +864,36 @@ class ShadowHostedWorldRuntime {
     }
 
     return loadedChunkKeys;
+  }
+
+  getOrCreateLoadedEntityIds(playerId) {
+    let loadedEntityIds = this.loadedEntityIdsByPlayer.get(playerId);
+    if (!loadedEntityIds) {
+      loadedEntityIds = new Set();
+      this.loadedEntityIdsByPlayer.set(playerId, loadedEntityIds);
+    }
+
+    return loadedEntityIds;
+  }
+
+  getOrCreateLoadedParticleEmitterIds(playerId) {
+    let loadedParticleEmitterIds = this.loadedParticleEmitterIdsByPlayer.get(playerId);
+    if (!loadedParticleEmitterIds) {
+      loadedParticleEmitterIds = new Set();
+      this.loadedParticleEmitterIdsByPlayer.set(playerId, loadedParticleEmitterIds);
+    }
+
+    return loadedParticleEmitterIds;
+  }
+
+  getOrCreateLoadedSceneUIIds(playerId) {
+    let loadedSceneUIIds = this.loadedSceneUIIdsByPlayer.get(playerId);
+    if (!loadedSceneUIIds) {
+      loadedSceneUIIds = new Set();
+      this.loadedSceneUIIdsByPlayer.set(playerId, loadedSceneUIIds);
+    }
+
+    return loadedSceneUIIds;
   }
 
   getOrCreateChunkInterestState(playerId) {
@@ -752,6 +964,15 @@ class ShadowHostedWorldRuntime {
       (dx * dx + dz * dz) <= CHUNK_STREAM_HORIZONTAL_RADIUS * CHUNK_STREAM_HORIZONTAL_RADIUS;
   }
 
+  isPositionInChunkInterestRange(position, centerChunkOrigin) {
+    if (!Array.isArray(position) || position.length !== 3) {
+      return false;
+    }
+
+    const chunkKey = packOriginForGlobalCoordinate(position);
+    return !!chunkKey && this.isChunkKeyInRange(chunkKey, centerChunkOrigin);
+  }
+
   collectDesiredChunksForCenter(centerChunkOrigin) {
     const desiredChunks = [];
 
@@ -780,6 +1001,186 @@ class ShadowHostedWorldRuntime {
 
     desiredChunks.sort((a, b) => a.distanceSq - b.distanceSq);
     return desiredChunks;
+  }
+
+  shouldSyncEntityToPlayer(entity, playerId) {
+    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+    if (!centerChunkOrigin) {
+      return false;
+    }
+
+    return this.isPositionInChunkInterestRange(entity?.p, centerChunkOrigin);
+  }
+
+  shouldSyncParticleEmitterToPlayer(particleEmitter, playerId) {
+    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+    if (!centerChunkOrigin) {
+      return false;
+    }
+
+    const anchor = Number.isFinite(particleEmitter?.e)
+      ? this.currentEntityStateById.get(particleEmitter.e)?.p
+      : particleEmitter?.p;
+    return this.isPositionInChunkInterestRange(anchor, centerChunkOrigin);
+  }
+
+  shouldSyncSceneUIToPlayer(sceneUI, playerId) {
+    const center = this.getPlayerChunkInterestCenter(playerId);
+    if (!center) {
+      return false;
+    }
+
+    const anchor = Number.isFinite(sceneUI?.e)
+      ? this.currentEntityStateById.get(sceneUI.e)?.p
+      : sceneUI?.p;
+    if (!Array.isArray(anchor) || anchor.length !== 3) {
+      return false;
+    }
+
+    if (Number.isFinite(sceneUI?.v)) {
+      const dx = anchor[0] - center[0];
+      const dy = anchor[1] - center[1];
+      const dz = anchor[2] - center[2];
+      return (dx * dx) + (dy * dy) + (dz * dz) <= sceneUI.v * sceneUI.v;
+    }
+
+    return this.isPositionInChunkInterestRange(anchor, this.getPlayerChunkInterestCenterOrigin(playerId));
+  }
+
+  syncPlayerSpatialInterest(playerId, worldTick) {
+    if (!this.players.has(playerId)) {
+      return;
+    }
+
+    this.syncPlayerEntityInterest(playerId, worldTick);
+    this.syncPlayerParticleEmitterInterest(playerId, worldTick);
+    this.syncPlayerSceneUIInterest(playerId, worldTick);
+  }
+
+  syncPlayerEntityInterest(playerId, worldTick) {
+    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+    if (!centerChunkOrigin) {
+      return;
+    }
+
+    const loadedEntityIds = this.getOrCreateLoadedEntityIds(playerId);
+    const desiredEntityIds = new Set();
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+
+    for (const [entityId, entity] of this.currentEntityStateById.entries()) {
+      if (!this.shouldSyncEntityToPlayer(entity, playerId)) {
+        continue;
+      }
+
+      desiredEntityIds.add(entityId);
+      if (loadedEntityIds.has(entityId)) {
+        continue;
+      }
+
+      loadedEntityIds.add(entityId);
+      this.queuePacket(playerId, [
+        ENTITIES_PACKET_ID,
+        [ cloneEntitySchema(entity) ],
+        resolvedWorldTick,
+      ]);
+    }
+
+    for (const loadedEntityId of Array.from(loadedEntityIds)) {
+      if (desiredEntityIds.has(loadedEntityId)) {
+        continue;
+      }
+
+      loadedEntityIds.delete(loadedEntityId);
+      this.queuePacket(playerId, [
+        ENTITIES_PACKET_ID,
+        [ { i: loadedEntityId, rm: true } ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  syncPlayerParticleEmitterInterest(playerId, worldTick) {
+    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+    if (!centerChunkOrigin) {
+      return;
+    }
+
+    const loadedParticleEmitterIds = this.getOrCreateLoadedParticleEmitterIds(playerId);
+    const desiredParticleEmitterIds = new Set();
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+
+    for (const [particleEmitterId, particleEmitter] of this.currentParticleEmitterStateById.entries()) {
+      if (!this.shouldSyncParticleEmitterToPlayer(particleEmitter, playerId)) {
+        continue;
+      }
+
+      desiredParticleEmitterIds.add(particleEmitterId);
+      if (loadedParticleEmitterIds.has(particleEmitterId)) {
+        continue;
+      }
+
+      loadedParticleEmitterIds.add(particleEmitterId);
+      this.queuePacket(playerId, [
+        PARTICLE_EMITTERS_PACKET_ID,
+        [ cloneParticleEmitterSchema(particleEmitter) ],
+        resolvedWorldTick,
+      ]);
+    }
+
+    for (const loadedParticleEmitterId of Array.from(loadedParticleEmitterIds)) {
+      if (desiredParticleEmitterIds.has(loadedParticleEmitterId)) {
+        continue;
+      }
+
+      loadedParticleEmitterIds.delete(loadedParticleEmitterId);
+      this.queuePacket(playerId, [
+        PARTICLE_EMITTERS_PACKET_ID,
+        [ { i: loadedParticleEmitterId, rm: true } ],
+        resolvedWorldTick,
+      ]);
+    }
+  }
+
+  syncPlayerSceneUIInterest(playerId, worldTick) {
+    const center = this.getPlayerChunkInterestCenter(playerId);
+    if (!center) {
+      return;
+    }
+
+    const loadedSceneUIIds = this.getOrCreateLoadedSceneUIIds(playerId);
+    const desiredSceneUIIds = new Set();
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+
+    for (const [sceneUIId, sceneUI] of this.currentSceneUIStateById.entries()) {
+      if (!this.shouldSyncSceneUIToPlayer(sceneUI, playerId)) {
+        continue;
+      }
+
+      desiredSceneUIIds.add(sceneUIId);
+      if (loadedSceneUIIds.has(sceneUIId)) {
+        continue;
+      }
+
+      loadedSceneUIIds.add(sceneUIId);
+      this.queuePacket(playerId, [
+        SCENE_UIS_PACKET_ID,
+        [ cloneSceneUISchema(sceneUI) ],
+        resolvedWorldTick,
+      ]);
+    }
+
+    for (const loadedSceneUIId of Array.from(loadedSceneUIIds)) {
+      if (desiredSceneUIIds.has(loadedSceneUIId)) {
+        continue;
+      }
+
+      loadedSceneUIIds.delete(loadedSceneUIId);
+      this.queuePacket(playerId, [
+        SCENE_UIS_PACKET_ID,
+        [ { i: loadedSceneUIId, rm: true } ],
+        resolvedWorldTick,
+      ]);
+    }
   }
 
   syncPlayerChunkInterest(playerId, worldTick) {
@@ -860,10 +1261,11 @@ class ShadowHostedWorldRuntime {
         continue;
       }
 
-      const serialized = serializePackets(packets);
+      const coalescedPackets = coalesceQueuedBatchPackets(packets);
+      const serialized = serializePackets(coalescedPackets);
       sendToGateway({
         type: 'player_packet_batch',
-        packetCount: packets.length,
+        packetCount: coalescedPackets.length,
         playerId,
         processId: PROCESS_ID,
         rawBytes: serialized.rawBytes,
