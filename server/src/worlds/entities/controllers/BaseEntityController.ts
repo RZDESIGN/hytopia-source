@@ -3,6 +3,10 @@ import type Entity from '@/worlds/entities/Entity';
 import type PlayerEntity from '@/worlds/entities/PlayerEntity';
 import type { PlayerInput, PredictedBlockEditBatch } from '@/players/Player';
 import type { PlayerCameraOrientation } from '@/players/PlayerCamera';
+import type {
+  RollbackPredictedInputSnapshot,
+  RollbackPredictableInput,
+} from '@gameplay-shared/InputContract';
 
 /**
  * Event types a BaseEntityController instance can emit.
@@ -16,6 +20,7 @@ export enum BaseEntityControllerEvent {
   ATTACH                 = 'BASE_ENTITY_CONTROLLER.ATTACH',
   DESPAWN                = 'BASE_ENTITY_CONTROLLER.DESPAWN',
   DETACH                 = 'BASE_ENTITY_CONTROLLER.DETACH',
+  ROLLBACK_PREDICTION_STEP = 'BASE_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP',
   SPAWN                  = 'BASE_ENTITY_CONTROLLER.SPAWN',
   TICK                   = 'BASE_ENTITY_CONTROLLER.TICK',
   TICK_WITH_PLAYER_INPUT = 'BASE_ENTITY_CONTROLLER.TICK_WITH_PLAYER_INPUT',
@@ -40,6 +45,22 @@ export interface BaseEntityControllerEventPayloads {
   /** Emitted when an entity is spawned. */
   [BaseEntityControllerEvent.SPAWN]:                  { entity: Entity }
 
+  /** Emitted for rollback-predicted player input steps. */
+  [BaseEntityControllerEvent.ROLLBACK_PREDICTION_STEP]: {
+    entity: PlayerEntity,
+    input: PlayerInput,
+    cameraOrientation: PlayerCameraOrientation,
+    sequenceNumber: number,
+    deltaTimeMs: number,
+    deltaTimeS: number,
+    isReplay: false,
+    isFirstSubstep: true,
+    yaw: number,
+    joystickDirection: number | null,
+    rollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+    previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+  }
+
   /** Emitted when an entity is ticked. */
   [BaseEntityControllerEvent.TICK]:                   { entity: Entity, deltaTimeMs: number }
 
@@ -49,6 +70,9 @@ export interface BaseEntityControllerEventPayloads {
     input: PlayerInput,
     predictedBlockEditBatches: readonly PredictedBlockEditBatch[],
     cameraOrientation: PlayerCameraOrientation,
+    rollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+    previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+    rollbackInputSequenceNumber?: number,
     deltaTimeMs: number
   }
 }
@@ -80,6 +104,17 @@ export interface BaseEntityControllerEventPayloads {
  * @public
  */
 export default abstract class BaseEntityController extends EventRouter {
+  /**
+   * Raw input keys that should be sequenced with rollback prediction.
+   *
+   * @remarks
+   * Player-owned controllers can override this to opt custom keys into the
+   * rollback queue without changing the game-facing input API.
+   *
+   * **Category:** Controllers
+   */
+  public rollbackPredictedInputs?: readonly RollbackPredictableInput[];
+
   /**
    * Override this method to handle the attachment of an entity
    * to your entity controller.
@@ -171,7 +206,24 @@ export default abstract class BaseEntityController extends EventRouter {
       input,
       predictedBlockEditBatches: entity.player.predictedBlockEditBatches,
       cameraOrientation,
+      rollbackInputs: entity.player.rollbackPredictedInputSnapshot,
+      previousRollbackInputs: entity.player.previousRollbackPredictedInputSnapshot,
+      rollbackInputSequenceNumber: entity.player.currentRollbackPredictedInputSequenceNumber,
       deltaTimeMs,
+    });
+    this.emit(BaseEntityControllerEvent.ROLLBACK_PREDICTION_STEP, {
+      entity,
+      input,
+      cameraOrientation,
+      sequenceNumber: entity.player.currentRollbackPredictedInputSequenceNumber ?? -1,
+      deltaTimeMs,
+      deltaTimeS: deltaTimeMs / 1000,
+      isReplay: false,
+      isFirstSubstep: true,
+      yaw: cameraOrientation.yaw,
+      joystickDirection: typeof input.jd === 'number' ? input.jd : null,
+      rollbackInputs: entity.player.rollbackPredictedInputSnapshot,
+      previousRollbackInputs: entity.player.previousRollbackPredictedInputSnapshot,
     });
   }
 

@@ -11,6 +11,7 @@ import { resolveDeterministicLocomotionStep } from '@gameplay-shared/Determinist
 import {
   DEFAULT_ROLLBACK_PREDICTED_INPUTS,
   normalizeRollbackPredictedInputs,
+  type RollbackPredictedInputSnapshot,
   type RollbackPredictableInput,
 } from '@gameplay-shared/InputContract';
 import type { PlayerInput } from '@/players/Player';
@@ -104,6 +105,42 @@ export interface DefaultPlayerEntityControllerOptions {
 
   /** The normalized horizontal velocity applied to the entity when it walks. */
   walkVelocity?: number;
+}
+
+/**
+ * Event types emitted by `DefaultPlayerEntityController`.
+ *
+ * **Category:** Events
+ * @public
+ */
+export enum DefaultPlayerEntityControllerEvent {
+  ROLLBACK_PREDICTION_STEP = 'DEFAULT_PLAYER_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP',
+}
+
+/**
+ * Event payloads emitted by `DefaultPlayerEntityController`.
+ *
+ * **Category:** Events
+ * @public
+ */
+export interface DefaultPlayerEntityControllerEventPayloads {
+  [DefaultPlayerEntityControllerEvent.ROLLBACK_PREDICTION_STEP]: {
+    entity: PlayerEntity,
+    input: PlayerInput,
+    cameraOrientation: PlayerCameraOrientation,
+    sequenceNumber: number,
+    deltaTimeS: number,
+    isReplay: false,
+    isFirstSubstep: true,
+    yaw: number,
+    joystickDirection: number | null,
+    previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+    rollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+    grounded: boolean,
+    swimming: boolean,
+    motionBasisVelocity: Readonly<Vector3Like>,
+    addMotionBasisVelocity: (delta: Vector3Like) => void,
+  }
 }
 
 /**
@@ -395,6 +432,21 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
     this._reusableOwnerPredictionMotionBasisVelocity.z = platformVelocity.z + this._externalVelocity.z;
 
     return this._reusableOwnerPredictionMotionBasisVelocity;
+  }
+
+  /**
+   * Adds deterministic ability velocity on top of base locomotion.
+   *
+   * @remarks
+   * This modifies the same external velocity state that owner prediction mirrors,
+   * making it suitable for rollback-predicted dash, recoil, and boost abilities.
+   *
+   * **Category:** Controllers
+   */
+  public addRollbackPredictedMotionBasisVelocity(delta: Vector3Like): void {
+    this._externalVelocity.x += delta.x;
+    this._externalVelocity.y += delta.y;
+    this._externalVelocity.z += delta.z;
   }
 
   /**
@@ -719,6 +771,23 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
       },
     );
     this._isActivelyMoving = locomotion.hasMovementIntent;
+    this.emit(DefaultPlayerEntityControllerEvent.ROLLBACK_PREDICTION_STEP, {
+      entity,
+      input,
+      cameraOrientation,
+      sequenceNumber: entity.player.currentRollbackPredictedInputSequenceNumber ?? -1,
+      deltaTimeS: deltaTimeMs / 1000,
+      isReplay: false,
+      isFirstSubstep: true,
+      yaw,
+      joystickDirection: typeof jd === 'number' ? jd : null,
+      previousRollbackInputs: entity.player.previousRollbackPredictedInputSnapshot,
+      rollbackInputs: entity.player.rollbackPredictedInputSnapshot,
+      grounded: this.isGrounded,
+      swimming: this.isSwimming,
+      motionBasisVelocity: this._externalVelocity,
+      addMotionBasisVelocity: (delta) => this.addRollbackPredictedMotionBasisVelocity(delta),
+    });
 
     // Handle movement animations and audio
     if (this.isGrounded && !this.isSwimming && this._isActivelyMoving && !locomotion.hasConflictingInputs && locomotion.canMove) {

@@ -7,7 +7,6 @@ import type { EntityOptions } from '@/worlds/entities/Entity';
 import type QuaternionLike from '@/shared/types/math/QuaternionLike';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 import type World from '@/worlds/World';
-import type { RollbackPredictableInput } from '@gameplay-shared/InputContract';
 
 /** @internal */
 export const PLAYER_POSITION_UPDATE_THRESHOLD_SQ = 0.1 * 0.1;
@@ -179,14 +178,10 @@ export default class PlayerEntity extends Entity {
   }
 
   private _syncRollbackPredictedInputsFromController(): void {
-    const controllerWithRollbackInputs = this.controller as typeof this.controller & {
-      rollbackPredictedInputs?: readonly RollbackPredictableInput[];
-    };
-
-    if (!controllerWithRollbackInputs?.rollbackPredictedInputs) {
+    if (!this.controller?.rollbackPredictedInputs) {
       return;
     }
 
-    this.player.setRollbackPredictedInputs(controllerWithRollbackInputs.rollbackPredictedInputs);
+    this.player.setRollbackPredictedInputs(this.controller.rollbackPredictedInputs);
   }
 }

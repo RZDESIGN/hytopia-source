@@ -4264,7 +4264,43 @@
                 },
                 {
                   "kind": "Content",
-                  "text": ";\n        deltaTimeMs: number;\n    }"
+                  "text": ";\n        rollbackInputs: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Readonly",
+                  "canonicalReference": "!Readonly:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictedInputSnapshot",
+                  "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ">;\n        previousRollbackInputs: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Readonly",
+                  "canonicalReference": "!Readonly:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictedInputSnapshot",
+                  "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ">;\n        rollbackInputSequenceNumber?: number;\n        deltaTimeMs: number;\n    }"
                 },
                 {
                   "kind": "Content",
@@ -4277,7 +4313,7 @@
               "name": "\"BASE_ENTITY_CONTROLLER.TICK_WITH_PLAYER_INPUT\"",
               "propertyTypeTokenRange": {
                 "startIndex": 3,
-                "endIndex": 12
+                "endIndex": 20
               }
             },
             {
@@ -12669,6 +12705,29 @@
           }
         },
         {
+          "kind": "Variable",
+          "canonicalReference": "server!DEFAULT_ROLLBACK_PREDICTED_INPUTS:var",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "DEFAULT_ROLLBACK_PREDICTED_INPUTS: "
+            },
+            {
+              "kind": "Content",
+              "text": "readonly [\"w\", \"a\", \"s\", \"d\", \"sp\", \"sh\", \"c\", \"jd\"]"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "isReadonly": true,
+          "releaseTag": "Public",
+          "name": "DEFAULT_ROLLBACK_PREDICTED_INPUTS",
+          "variableTypeTokenRange": {
+            "startIndex": 1,
+            "endIndex": 2
+          }
+        },
+        {
           "kind": "TypeAlias",
           "canonicalReference": "server!DefaultBlockEditPredictionConfig:type",
           "docComment": "/**\n * Owner-only client prediction settings for stock block break/place helpers.\n *\n * @public\n */\n",
@@ -12851,6 +12910,55 @@
                   "isOptional": true
                 }
               ]
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!DefaultPlayerEntityController#addRollbackPredictedMotionBasisVelocity:member(1)",
+              "docComment": "/**\n * Adds deterministic ability velocity on top of base locomotion.\n *\n * @remarks\n *\n * This modifies the same external velocity state that owner prediction mirrors, making it suitable for rollback-predicted dash, recoil, and boost abilities.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "addRollbackPredictedMotionBasisVelocity(delta: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "delta",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "addRollbackPredictedMotionBasisVelocity"
             },
             {
               "kind": "Property",
@@ -13645,7 +13753,7 @@
                 {
                   "kind": "Reference",
                   "text": "RollbackPredictableInput",
-                  "canonicalReference": "server!~RollbackPredictableInput:type"
+                  "canonicalReference": "server!RollbackPredictableInput:type"
                 },
                 {
                   "kind": "Content",
@@ -14184,6 +14292,188 @@
           "implementsTokenRanges": []
         },
         {
+          "kind": "Enum",
+          "canonicalReference": "server!DefaultPlayerEntityControllerEvent:enum",
+          "docComment": "/**\n * Event types emitted by `DefaultPlayerEntityController`.\n *\n * **Category:** Events\n *\n * @public\n */\n",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export declare enum DefaultPlayerEntityControllerEvent "
+            }
+          ],
+          "fileUrlPath": "src/worlds/entities/controllers/DefaultPlayerEntityController.ts",
+          "releaseTag": "Public",
+          "name": "DefaultPlayerEntityControllerEvent",
+          "preserveMemberOrder": false,
+          "members": [
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!DefaultPlayerEntityControllerEvent.ROLLBACK_PREDICTION_STEP:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "ROLLBACK_PREDICTION_STEP = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"DEFAULT_PLAYER_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "ROLLBACK_PREDICTION_STEP"
+            }
+          ]
+        },
+        {
+          "kind": "Interface",
+          "canonicalReference": "server!DefaultPlayerEntityControllerEventPayloads:interface",
+          "docComment": "/**\n * Event payloads emitted by `DefaultPlayerEntityController`.\n *\n * **Category:** Events\n *\n * @public\n */\n",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export interface DefaultPlayerEntityControllerEventPayloads "
+            }
+          ],
+          "fileUrlPath": "src/worlds/entities/controllers/DefaultPlayerEntityController.ts",
+          "releaseTag": "Public",
+          "name": "DefaultPlayerEntityControllerEventPayloads",
+          "preserveMemberOrder": false,
+          "members": [
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!DefaultPlayerEntityControllerEventPayloads#\"DEFAULT_PLAYER_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP\":member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "["
+                },
+                {
+                  "kind": "Reference",
+                  "text": "DefaultPlayerEntityControllerEvent.ROLLBACK_PREDICTION_STEP",
+                  "canonicalReference": "server!DefaultPlayerEntityControllerEvent.ROLLBACK_PREDICTION_STEP:member"
+                },
+                {
+                  "kind": "Content",
+                  "text": "]: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "{\n        entity: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerEntity",
+                  "canonicalReference": "server!PlayerEntity:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n        input: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerInput",
+                  "canonicalReference": "server!PlayerInput:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n        cameraOrientation: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerCameraOrientation",
+                  "canonicalReference": "server!PlayerCameraOrientation:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n        sequenceNumber: number;\n        deltaTimeS: number;\n        isReplay: false;\n        isFirstSubstep: true;\n        yaw: number;\n        joystickDirection: number | null;\n        previousRollbackInputs: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Readonly",
+                  "canonicalReference": "!Readonly:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictedInputSnapshot",
+                  "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ">;\n        rollbackInputs: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Readonly",
+                  "canonicalReference": "!Readonly:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictedInputSnapshot",
+                  "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ">;\n        grounded: boolean;\n        swimming: boolean;\n        motionBasisVelocity: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Readonly",
+                  "canonicalReference": "!Readonly:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": ">;\n        addMotionBasisVelocity: (delta: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": ") => void;\n    }"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "\"DEFAULT_PLAYER_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP\"",
+              "propertyTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 24
+              }
+            }
+          ],
+          "extendsTokenRanges": []
+        },
+        {
           "kind": "Interface",
           "canonicalReference": "server!DefaultPlayerEntityControllerOptions:interface",
           "docComment": "/**\n * Options for creating a DefaultPlayerEntityController instance.\n *\n * Use for: configuring default player movement and animation behavior at construction time. Do NOT use for: per-frame changes; override methods or adjust controller state instead.\n *\n * **Category:** Controllers\n *\n * @public\n */\n",
@@ -14565,7 +14855,7 @@
                 {
                   "kind": "Reference",
                   "text": "RollbackPredictableInput",
-                  "canonicalReference": "server!~RollbackPredictableInput:type"
+                  "canonicalReference": "server!RollbackPredictableInput:type"
                 },
                 {
                   "kind": "Content",
@@ -14951,6 +15241,210 @@
             "startIndex": 1,
             "endIndex": 5
           }
+        },
+        {
+          "kind": "Function",
+          "canonicalReference": "server!didRollbackPredictedInputPress:function(1)",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "didRollbackPredictedInputPress: (previousSnapshot: "
+            },
+            {
+              "kind": "Reference",
+              "text": "Readonly",
+              "canonicalReference": "!Readonly:type"
+            },
+            {
+              "kind": "Content",
+              "text": "<"
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictedInputSnapshot",
+              "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+            },
+            {
+              "kind": "Content",
+              "text": ">"
+            },
+            {
+              "kind": "Content",
+              "text": ", nextSnapshot: "
+            },
+            {
+              "kind": "Reference",
+              "text": "Readonly",
+              "canonicalReference": "!Readonly:type"
+            },
+            {
+              "kind": "Content",
+              "text": "<"
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictedInputSnapshot",
+              "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+            },
+            {
+              "kind": "Content",
+              "text": ">"
+            },
+            {
+              "kind": "Content",
+              "text": ", input: "
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictableInput",
+              "canonicalReference": "server!RollbackPredictableInput:type"
+            },
+            {
+              "kind": "Content",
+              "text": ") => "
+            },
+            {
+              "kind": "Content",
+              "text": "boolean"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "returnTypeTokenRange": {
+            "startIndex": 13,
+            "endIndex": 14
+          },
+          "releaseTag": "Public",
+          "overloadIndex": 1,
+          "parameters": [
+            {
+              "parameterName": "previousSnapshot",
+              "parameterTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 5
+              },
+              "isOptional": false
+            },
+            {
+              "parameterName": "nextSnapshot",
+              "parameterTypeTokenRange": {
+                "startIndex": 6,
+                "endIndex": 10
+              },
+              "isOptional": false
+            },
+            {
+              "parameterName": "input",
+              "parameterTypeTokenRange": {
+                "startIndex": 11,
+                "endIndex": 12
+              },
+              "isOptional": false
+            }
+          ],
+          "name": "didRollbackPredictedInputPress"
+        },
+        {
+          "kind": "Function",
+          "canonicalReference": "server!didRollbackPredictedInputRelease:function(1)",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "didRollbackPredictedInputRelease: (previousSnapshot: "
+            },
+            {
+              "kind": "Reference",
+              "text": "Readonly",
+              "canonicalReference": "!Readonly:type"
+            },
+            {
+              "kind": "Content",
+              "text": "<"
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictedInputSnapshot",
+              "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+            },
+            {
+              "kind": "Content",
+              "text": ">"
+            },
+            {
+              "kind": "Content",
+              "text": ", nextSnapshot: "
+            },
+            {
+              "kind": "Reference",
+              "text": "Readonly",
+              "canonicalReference": "!Readonly:type"
+            },
+            {
+              "kind": "Content",
+              "text": "<"
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictedInputSnapshot",
+              "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+            },
+            {
+              "kind": "Content",
+              "text": ">"
+            },
+            {
+              "kind": "Content",
+              "text": ", input: "
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictableInput",
+              "canonicalReference": "server!RollbackPredictableInput:type"
+            },
+            {
+              "kind": "Content",
+              "text": ") => "
+            },
+            {
+              "kind": "Content",
+              "text": "boolean"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "returnTypeTokenRange": {
+            "startIndex": 13,
+            "endIndex": 14
+          },
+          "releaseTag": "Public",
+          "overloadIndex": 1,
+          "parameters": [
+            {
+              "parameterName": "previousSnapshot",
+              "parameterTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 5
+              },
+              "isOptional": false
+            },
+            {
+              "parameterName": "nextSnapshot",
+              "parameterTypeTokenRange": {
+                "startIndex": 6,
+                "endIndex": 10
+              },
+              "isOptional": false
+            },
+            {
+              "parameterName": "input",
+              "parameterTypeTokenRange": {
+                "startIndex": 11,
+                "endIndex": 12
+              },
+              "isOptional": false
+            }
+          ],
+          "name": "didRollbackPredictedInputRelease"
         },
         {
           "kind": "Function",
@@ -24709,6 +25203,15 @@
             },
             {
               "kind": "Reference",
+              "text": "DefaultPlayerEntityControllerEventPayloads",
+              "canonicalReference": "server!DefaultPlayerEntityControllerEventPayloads:interface"
+            },
+            {
+              "kind": "Content",
+              "text": ", "
+            },
+            {
+              "kind": "Reference",
               "text": "PlayerCameraEventPayloads",
               "canonicalReference": "server!PlayerCameraEventPayloads:interface"
             },
@@ -24891,6 +25394,10 @@
             {
               "startIndex": 43,
               "endIndex": 44
+            },
+            {
+              "startIndex": 45,
+              "endIndex": 46
             }
           ]
         },
@@ -27148,6 +27655,78 @@
             "startIndex": 1,
             "endIndex": 6
           }
+        },
+        {
+          "kind": "Function",
+          "canonicalReference": "server!isRollbackPredictedInputActive:function(1)",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "isRollbackPredictedInputActive: (snapshot: "
+            },
+            {
+              "kind": "Reference",
+              "text": "Readonly",
+              "canonicalReference": "!Readonly:type"
+            },
+            {
+              "kind": "Content",
+              "text": "<"
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictedInputSnapshot",
+              "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+            },
+            {
+              "kind": "Content",
+              "text": ">"
+            },
+            {
+              "kind": "Content",
+              "text": ", input: "
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictableInput",
+              "canonicalReference": "server!RollbackPredictableInput:type"
+            },
+            {
+              "kind": "Content",
+              "text": ") => "
+            },
+            {
+              "kind": "Content",
+              "text": "boolean"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "returnTypeTokenRange": {
+            "startIndex": 8,
+            "endIndex": 9
+          },
+          "releaseTag": "Public",
+          "overloadIndex": 1,
+          "parameters": [
+            {
+              "parameterName": "snapshot",
+              "parameterTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 5
+              },
+              "isOptional": false
+            },
+            {
+              "parameterName": "input",
+              "parameterTypeTokenRange": {
+                "startIndex": 6,
+                "endIndex": 7
+              },
+              "isOptional": false
+            }
+          ],
+          "name": "isRollbackPredictedInputActive"
         },
         {
           "kind": "Class",
@@ -33515,6 +34094,61 @@
               "endIndex": 2
             }
           ]
+        },
+        {
+          "kind": "Function",
+          "canonicalReference": "server!normalizeRollbackPredictedInputs:function(1)",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "normalizeRollbackPredictedInputs: (inputs: "
+            },
+            {
+              "kind": "Content",
+              "text": "readonly (keyof "
+            },
+            {
+              "kind": "Reference",
+              "text": "InputSchema",
+              "canonicalReference": "server!~InputSchema:type"
+            },
+            {
+              "kind": "Content",
+              "text": ")[] | undefined"
+            },
+            {
+              "kind": "Content",
+              "text": ") => "
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictableInput",
+              "canonicalReference": "server!RollbackPredictableInput:type"
+            },
+            {
+              "kind": "Content",
+              "text": "[]"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "returnTypeTokenRange": {
+            "startIndex": 5,
+            "endIndex": 7
+          },
+          "releaseTag": "Public",
+          "overloadIndex": 1,
+          "parameters": [
+            {
+              "parameterName": "inputs",
+              "parameterTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 4
+              },
+              "isOptional": false
+            }
+          ],
+          "name": "normalizeRollbackPredictedInputs"
         },
         {
           "kind": "Interface",
@@ -42071,7 +42705,7 @@
                 {
                   "kind": "Reference",
                   "text": "RollbackPredictableInput",
-                  "canonicalReference": "server!~RollbackPredictableInput:type"
+                  "canonicalReference": "server!RollbackPredictableInput:type"
                 },
                 {
                   "kind": "Content",
@@ -54354,6 +54988,125 @@
               "name": "KINEMATIC_VELOCITY"
             }
           ]
+        },
+        {
+          "kind": "TypeAlias",
+          "canonicalReference": "server!RollbackPredictableInput:type",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export type RollbackPredictableInput = "
+            },
+            {
+              "kind": "Content",
+              "text": "typeof "
+            },
+            {
+              "kind": "Reference",
+              "text": "ROLLBACK_PREDICTABLE_INPUTS",
+              "canonicalReference": "server!~ROLLBACK_PREDICTABLE_INPUTS:var"
+            },
+            {
+              "kind": "Content",
+              "text": "[number]"
+            },
+            {
+              "kind": "Content",
+              "text": ";"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "releaseTag": "Public",
+          "name": "RollbackPredictableInput",
+          "typeTokenRange": {
+            "startIndex": 1,
+            "endIndex": 4
+          }
+        },
+        {
+          "kind": "TypeAlias",
+          "canonicalReference": "server!RollbackPredictedInputSnapshot:type",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export type RollbackPredictedInputSnapshot = "
+            },
+            {
+              "kind": "Reference",
+              "text": "Partial",
+              "canonicalReference": "!Partial:type"
+            },
+            {
+              "kind": "Content",
+              "text": "<"
+            },
+            {
+              "kind": "Reference",
+              "text": "Record",
+              "canonicalReference": "!Record:type"
+            },
+            {
+              "kind": "Content",
+              "text": "<"
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictableInput",
+              "canonicalReference": "server!RollbackPredictableInput:type"
+            },
+            {
+              "kind": "Content",
+              "text": ", "
+            },
+            {
+              "kind": "Reference",
+              "text": "RollbackPredictedInputValue",
+              "canonicalReference": "server!RollbackPredictedInputValue:type"
+            },
+            {
+              "kind": "Content",
+              "text": ">>"
+            },
+            {
+              "kind": "Content",
+              "text": ";"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "releaseTag": "Public",
+          "name": "RollbackPredictedInputSnapshot",
+          "typeTokenRange": {
+            "startIndex": 1,
+            "endIndex": 9
+          }
+        },
+        {
+          "kind": "TypeAlias",
+          "canonicalReference": "server!RollbackPredictedInputValue:type",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export type RollbackPredictedInputValue = "
+            },
+            {
+              "kind": "Content",
+              "text": "boolean | number | null"
+            },
+            {
+              "kind": "Content",
+              "text": ";"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/InputContract.ts",
+          "releaseTag": "Public",
+          "name": "RollbackPredictedInputValue",
+          "typeTokenRange": {
+            "startIndex": 1,
+            "endIndex": 2
+          }
         },
         {
           "kind": "Interface",

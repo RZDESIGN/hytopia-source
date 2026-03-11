@@ -39,6 +39,10 @@ export const ROLLBACK_PREDICTABLE_INPUTS = [
 ] as const satisfies readonly (keyof InputSchema)[];
 
 export type RollbackPredictableInput = typeof ROLLBACK_PREDICTABLE_INPUTS[number];
+export type RollbackPredictedInputValue = boolean | number | null;
+export type RollbackPredictedInputSnapshot = Partial<
+  Record<RollbackPredictableInput, RollbackPredictedInputValue>
+>;
 
 export const DEFAULT_ROLLBACK_PREDICTED_INPUTS = [
   ...SEQUENCED_MOVEMENT_INPUTS,
@@ -154,4 +158,67 @@ export const decodeRollbackPredictedInputMask = (
   return inputs.length > 0
     ? inputs
     : [ ...DEFAULT_ROLLBACK_PREDICTED_INPUTS ];
+};
+
+export const replaceRollbackPredictedInputSnapshot = (
+  target: RollbackPredictedInputSnapshot,
+  source: Readonly<RollbackPredictedInputSnapshot>,
+): RollbackPredictedInputSnapshot => {
+  for (const key in target) {
+    delete target[key as RollbackPredictableInput];
+  }
+
+  for (const key in source) {
+    target[key as RollbackPredictableInput] = source[key as RollbackPredictableInput];
+  }
+
+  return target;
+};
+
+export const cloneRollbackPredictedInputSnapshot = (
+  source: Readonly<RollbackPredictedInputSnapshot>,
+): RollbackPredictedInputSnapshot => {
+  return replaceRollbackPredictedInputSnapshot({}, source);
+};
+
+export const isRollbackPredictedInputActive = (
+  snapshot: Readonly<RollbackPredictedInputSnapshot>,
+  input: RollbackPredictableInput,
+): boolean => {
+  if (input === 'jd') {
+    return snapshot.jd !== undefined && snapshot.jd !== null;
+  }
+
+  return !!snapshot[input];
+};
+
+export const hasActiveRollbackPredictedInputSnapshot = (
+  inputs: ReadonlySet<RollbackPredictableInput>,
+  snapshot: Readonly<RollbackPredictedInputSnapshot>,
+): boolean => {
+  for (const input of inputs) {
+    if (isRollbackPredictedInputActive(snapshot, input)) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const didRollbackPredictedInputPress = (
+  previousSnapshot: Readonly<RollbackPredictedInputSnapshot>,
+  nextSnapshot: Readonly<RollbackPredictedInputSnapshot>,
+  input: RollbackPredictableInput,
+): boolean => {
+  return !isRollbackPredictedInputActive(previousSnapshot, input) &&
+    isRollbackPredictedInputActive(nextSnapshot, input);
+};
+
+export const didRollbackPredictedInputRelease = (
+  previousSnapshot: Readonly<RollbackPredictedInputSnapshot>,
+  nextSnapshot: Readonly<RollbackPredictedInputSnapshot>,
+  input: RollbackPredictableInput,
+): boolean => {
+  return isRollbackPredictedInputActive(previousSnapshot, input) &&
+    !isRollbackPredictedInputActive(nextSnapshot, input);
 };

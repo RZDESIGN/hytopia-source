@@ -3,6 +3,7 @@ import EventRouter from '../events/EventRouter';
 import MobileManager from '../mobile/MobileManager';
 import {
   DEFAULT_ROLLBACK_PREDICTED_INPUT_SET,
+  type RollbackPredictedInputSnapshot,
   type RollbackPredictableInput,
 } from '@gameplay-shared/InputContract';
 import { CameraEventType } from '../core/Camera';
@@ -192,6 +193,7 @@ export namespace InputManagerEventPayload {
     deltaTimeS: number;
     yaw: number;
     joystickDirection: number | null;
+    rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
     w: boolean;
     a: boolean;
     s: boolean;
@@ -458,6 +460,23 @@ export default class InputManager {
     return false;
   }
 
+  private _createRollbackPredictedInputSnapshot(
+    rollbackPredictedInputSet: ReadonlySet<RollbackPredictableInput>,
+  ): RollbackPredictedInputSnapshot {
+    const snapshot: RollbackPredictedInputSnapshot = {};
+
+    for (const input of rollbackPredictedInputSet) {
+      if (input === 'jd') {
+        snapshot.jd = this._joystickDirection;
+        continue;
+      }
+
+      snapshot[input] = !!this._inputState[input as keyof InputState];
+    }
+
+    return snapshot;
+  }
+
   private _drainPacketQueue(queueDeltaS: number): void {
     if (!this._networkedInputEnabled) {
       this._continuousInputState = {};
@@ -485,18 +504,21 @@ export default class InputManager {
     }
 
     const inputPacket: Record<string, any> = {};
+    const rollbackInputs = shouldSendMovementState
+      ? this._createRollbackPredictedInputSnapshot(rollbackPredictedInputSet)
+      : undefined;
 
     if (shouldSendMovementState) {
       for (const input of rollbackPredictedInputSet) {
         if (input === 'jd') {
-          if (this._joystickDirection !== null || shouldResendMovementState) {
-            inputPacket.jd = this._joystickDirection;
+          if (rollbackInputs?.jd !== undefined) {
+            inputPacket.jd = rollbackInputs.jd;
           }
 
           continue;
         }
 
-        inputPacket[input] = !!this._inputState[input as keyof InputState];
+        inputPacket[input] = rollbackInputs?.[input] ?? false;
       }
     }
 
@@ -519,6 +541,7 @@ export default class InputManager {
         deltaTimeS: queueDeltaS,
         yaw: this._game.camera.gameCameraYaw,
         joystickDirection: this._joystickDirection,
+        rollbackInputs: rollbackInputs ?? {},
         w: !!this._inputState.w,
         a: !!this._inputState.a,
         s: !!this._inputState.s,

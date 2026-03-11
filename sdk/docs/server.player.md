@@ -265,7 +265,7 @@ The profile picture URL for the player.
 
 </td><td>
 
-readonly RollbackPredictableInput\[\]
+readonly [RollbackPredictableInput](./server.rollbackpredictableinput.md)<!-- -->\[\]
 
 
 </td><td>

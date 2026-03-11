@@ -123,7 +123,7 @@ Emitted when an entity is spawned.
 
 </td><td>
 
-{ entity: [PlayerEntity](./server.playerentity.md)<!-- -->; input: [PlayerInput](./server.playerinput.md)<!-- -->; predictedBlockEditBatches: readonly [PredictedBlockEditBatch](./server.predictedblockeditbatch.md)<!-- -->\[\]; cameraOrientation: [PlayerCameraOrientation](./server.playercameraorientation.md)<!-- -->; deltaTimeMs: number; }
+{ entity: [PlayerEntity](./server.playerentity.md)<!-- -->; input: [PlayerInput](./server.playerinput.md)<!-- -->; predictedBlockEditBatches: readonly [PredictedBlockEditBatch](./server.predictedblockeditbatch.md)<!-- -->\[\]; cameraOrientation: [PlayerCameraOrientation](./server.playercameraorientation.md)<!-- -->; rollbackInputs: Readonly&lt;[RollbackPredictedInputSnapshot](./server.rollbackpredictedinputsnapshot.md)<!-- -->&gt;; previousRollbackInputs: Readonly&lt;[RollbackPredictedInputSnapshot](./server.rollbackpredictedinputsnapshot.md)<!-- -->&gt;; rollbackInputSequenceNumber?: number; deltaTimeMs: number; }
 
 
 </td><td>

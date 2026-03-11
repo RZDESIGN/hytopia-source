@@ -244,6 +244,9 @@ export interface BaseEntityControllerEventPayloads {
         input: PlayerInput;
         predictedBlockEditBatches: readonly PredictedBlockEditBatch[];
         cameraOrientation: PlayerCameraOrientation;
+        rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        rollbackInputSequenceNumber?: number;
         deltaTimeMs: number;
     };
 }
@@ -914,6 +917,9 @@ export const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
 // @public
 export const DEFAULT_ENTITY_RIGID_BODY_OPTIONS: RigidBodyOptions;
 
+// @public (undocumented)
+export const DEFAULT_ROLLBACK_PREDICTED_INPUTS: readonly ["w", "a", "s", "d", "sp", "sh", "c", "jd"];
+
 // @public
 export type DefaultBlockEditPredictionConfig = {
     maxDistance: number;
@@ -932,6 +938,7 @@ export class DefaultPlayerEntity extends PlayerEntity {
 // @public
 export class DefaultPlayerEntityController extends BaseEntityController {
     constructor(options?: DefaultPlayerEntityControllerOptions);
+    addRollbackPredictedMotionBasisVelocity(delta: Vector3Like): void;
     applyDirectionalMovementRotations: boolean;
     attach(entity: Entity): void;
     autoCancelMouseLeftClick: boolean;
@@ -956,7 +963,6 @@ export class DefaultPlayerEntityController extends BaseEntityController {
     get localPredictionMovementReferenceYaw(): number | undefined;
     get localPredictionSwimUpwardCooldownRemainingMs(): number;
     get platform(): Entity | undefined;
-    // Warning: (ae-forgotten-export) The symbol "RollbackPredictableInput" needs to be exported by the entry point index.d.ts
     rollbackPredictedInputs: RollbackPredictableInput[];
     runLoopedAnimations: string[];
     runVelocity: number;
@@ -972,6 +978,34 @@ export class DefaultPlayerEntityController extends BaseEntityController {
     tickWithPlayerInput(entity: PlayerEntity, input: PlayerInput, cameraOrientation: PlayerCameraOrientation, deltaTimeMs: number): void;
     walkLoopedAnimations: string[];
     walkVelocity: number;
+}
+
+// @public
+export enum DefaultPlayerEntityControllerEvent {
+    // (undocumented)
+    ROLLBACK_PREDICTION_STEP = "DEFAULT_PLAYER_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP"
+}
+
+// @public
+export interface DefaultPlayerEntityControllerEventPayloads {
+    // (undocumented)
+    [DefaultPlayerEntityControllerEvent.ROLLBACK_PREDICTION_STEP]: {
+        entity: PlayerEntity;
+        input: PlayerInput;
+        cameraOrientation: PlayerCameraOrientation;
+        sequenceNumber: number;
+        deltaTimeS: number;
+        isReplay: false;
+        isFirstSubstep: true;
+        yaw: number;
+        joystickDirection: number | null;
+        previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        grounded: boolean;
+        swimming: boolean;
+        motionBasisVelocity: Readonly<Vector3Like>;
+        addMotionBasisVelocity: (delta: Vector3Like) => void;
+    };
 }
 
 // @public
@@ -1008,6 +1042,12 @@ export interface DefaultPlayerEntityControllerOptions {
 export type DefaultPlayerEntityOptions = {
     cosmeticHiddenSlots?: PlayerCosmeticSlot[];
 } & PlayerEntityOptions;
+
+// @public (undocumented)
+export const didRollbackPredictedInputPress: (previousSnapshot: Readonly<RollbackPredictedInputSnapshot>, nextSnapshot: Readonly<RollbackPredictedInputSnapshot>, input: RollbackPredictableInput) => boolean;
+
+// @public (undocumented)
+export const didRollbackPredictedInputRelease: (previousSnapshot: Readonly<RollbackPredictedInputSnapshot>, nextSnapshot: Readonly<RollbackPredictedInputSnapshot>, input: RollbackPredictableInput) => boolean;
 
 // @public
 export const disableConnectionFeature: (featureFlag: ConnectionFeatureFlag) => void;
@@ -1568,7 +1608,7 @@ export class ErrorHandler {
 // Warning: (ae-forgotten-export) The symbol "WebServerEventPayloads" needs to be exported by the entry point index.d.ts
 //
 // @public
-export interface EventPayloads extends AudioEventPayloads, BaseEntityControllerEventPayloads, BlockTypeEventPayloads, BlockTypeRegistryEventPayloads, ChatEventPayloads, ChunkLatticeEventPayloads, ConnectionEventPayloads, EntityEventPayloads, EntityModelAnimationEventPayloads, EntityModelNodeOverrideEventPayloads, GameServerEventPayloads, ParticleEmitterEventPayloads, PlayerCameraEventPayloads, PlayerEventPayloads, PlayerManagerEventPayloads, PlayerUIEventPayloads, SceneUIEventPayloads, SimulationEventPayloads, WebServerEventPayloads, WorldEventPayloads, WorldLoopEventPayloads, WorldManagerEventPayloads {
+export interface EventPayloads extends AudioEventPayloads, BaseEntityControllerEventPayloads, BlockTypeEventPayloads, BlockTypeRegistryEventPayloads, ChatEventPayloads, ChunkLatticeEventPayloads, ConnectionEventPayloads, EntityEventPayloads, EntityModelAnimationEventPayloads, EntityModelNodeOverrideEventPayloads, GameServerEventPayloads, ParticleEmitterEventPayloads, DefaultPlayerEntityControllerEventPayloads, PlayerCameraEventPayloads, PlayerEventPayloads, PlayerManagerEventPayloads, PlayerUIEventPayloads, SceneUIEventPayloads, SimulationEventPayloads, WebServerEventPayloads, WorldEventPayloads, WorldLoopEventPayloads, WorldManagerEventPayloads {
 }
 
 // @public
@@ -1677,6 +1717,9 @@ export type IntersectionResult = {
     intersectedBlockType?: BlockType;
     intersectedEntity?: Entity;
 };
+
+// @public (undocumented)
+export const isRollbackPredictedInputActive: (snapshot: Readonly<RollbackPredictedInputSnapshot>, input: RollbackPredictableInput) => boolean;
 
 // @public
 export class IterationMap<K, V> {
@@ -1869,6 +1912,11 @@ export interface NoneColliderOptions extends BaseColliderOptions {
     // (undocumented)
     shape: ColliderShape.NONE;
 }
+
+// Warning: (ae-forgotten-export) The symbol "InputSchema" needs to be exported by the entry point index.d.ts
+//
+// @public (undocumented)
+export const normalizeRollbackPredictedInputs: (inputs: readonly (keyof InputSchema)[] | undefined) => RollbackPredictableInput[];
 
 // @public
 export interface Outline {
@@ -2329,6 +2377,8 @@ export class Player extends EventRouter implements protocol.Serializable {
     // @internal (undocumented)
     readonly connection: Connection;
     readonly cosmetics: Promise<PlayerCosmetics | void>;
+    // @internal (undocumented)
+    get currentRollbackPredictedInputSequenceNumber(): number | undefined;
     get defaultBlockEditPredictionConfig(): DefaultBlockEditPredictionConfig;
     // @internal (undocumented)
     discardInputForSimulation(): void;
@@ -2350,6 +2400,8 @@ export class Player extends EventRouter implements protocol.Serializable {
     markInputAppliedForSimulation(): void;
     get maxInteractDistance(): number;
     get predictedBlockEditBatches(): readonly PredictedBlockEditBatch[];
+    // @internal (undocumented)
+    get previousRollbackPredictedInputSnapshot(): Readonly<RollbackPredictedInputSnapshot>;
     readonly profilePictureUrl: string | undefined;
     // @internal (undocumented)
     reconnected(): void;
@@ -2360,6 +2412,8 @@ export class Player extends EventRouter implements protocol.Serializable {
     // @internal (undocumented)
     get rollbackPredictedInputMaskLow(): number;
     get rollbackPredictedInputs(): readonly RollbackPredictableInput[];
+    // @internal (undocumented)
+    get rollbackPredictedInputSnapshot(): Readonly<RollbackPredictedInputSnapshot>;
     scheduleNotification(type: string, scheduledFor: number): Promise<string | void>;
     // @internal (undocumented)
     serialize(): protocol.PlayerSchema;
@@ -2367,7 +2421,6 @@ export class Player extends EventRouter implements protocol.Serializable {
     setInteractEnabled(enabled: boolean): void;
     setMaxInteractDistance(distance: number): void;
     setPersistedData(data: Record<string, unknown>): void;
-    // Warning: (ae-forgotten-export) The symbol "InputSchema" needs to be exported by the entry point index.d.ts
     setRollbackPredictedInputs(inputs?: readonly (keyof InputSchema)[]): void;
     readonly ui: PlayerUI;
     unscheduleNotification(notificationId: string): Promise<boolean>;
@@ -3049,6 +3102,17 @@ export enum RigidBodyType {
     // (undocumented)
     KINEMATIC_VELOCITY = "kinematic_velocity"
 }
+
+// Warning: (ae-forgotten-export) The symbol "ROLLBACK_PREDICTABLE_INPUTS" needs to be exported by the entry point index.d.ts
+//
+// @public (undocumented)
+export type RollbackPredictableInput = typeof ROLLBACK_PREDICTABLE_INPUTS[number];
+
+// @public (undocumented)
+export type RollbackPredictedInputSnapshot = Partial<Record<RollbackPredictableInput, RollbackPredictedInputValue>>;
+
+// @public (undocumented)
+export type RollbackPredictedInputValue = boolean | number | null;
 
 // @public
 export interface RoundCylinderColliderOptions extends BaseColliderOptions {

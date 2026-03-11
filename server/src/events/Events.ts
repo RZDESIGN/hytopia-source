@@ -14,6 +14,7 @@ import type { PlayerCameraEventPayloads } from '@/players/PlayerCamera';
 import type { PlayerEventPayloads } from '@/players/Player';
 import type { PlayerManagerEventPayloads } from '@/players/PlayerManager';
 import type { PlayerUIEventPayloads } from '@/players/PlayerUI';
+import type { DefaultPlayerEntityControllerEventPayloads } from '@/worlds/entities/controllers/DefaultPlayerEntityController';
 import type { SceneUIEventPayloads } from '@/worlds/ui/SceneUI';
 import type { SimulationEventPayloads } from '@/worlds/physics/Simulation';
 import type { WebServerEventPayloads } from '@/networking/WebServer';
@@ -40,6 +41,7 @@ export interface EventPayloads extends
   EntityModelNodeOverrideEventPayloads,
   GameServerEventPayloads,
   ParticleEmitterEventPayloads,
+  DefaultPlayerEntityControllerEventPayloads,
   PlayerCameraEventPayloads,
   PlayerEventPayloads,
   PlayerManagerEventPayloads,

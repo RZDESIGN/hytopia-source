@@ -56,8 +56,14 @@ export { default as DefaultPlayerEntity } from '@/worlds/entities/DefaultPlayerE
 export type { DefaultPlayerEntityOptions, PlayerCosmeticSlot } from '@/worlds/entities/DefaultPlayerEntity';
 
 // DefaultPlayerEntityController
-export { default as DefaultPlayerEntityController } from '@/worlds/entities/controllers/DefaultPlayerEntityController';
-export type { DefaultPlayerEntityControllerOptions } from '@/worlds/entities/controllers/DefaultPlayerEntityController';
+export {
+  default as DefaultPlayerEntityController,
+  DefaultPlayerEntityControllerEvent,
+} from '@/worlds/entities/controllers/DefaultPlayerEntityController';
+export type {
+  DefaultPlayerEntityControllerEventPayloads,
+  DefaultPlayerEntityControllerOptions,
+} from '@/worlds/entities/controllers/DefaultPlayerEntityController';
 
 // Entity
 export { default as Entity, EntityEvent, DEFAULT_ENTITY_RIGID_BODY_OPTIONS, ENTITY_POSITION_UPDATE_THRESHOLD_SQ, ENTITY_ROTATION_UPDATE_THRESHOLD } from '@/worlds/entities/Entity';
@@ -143,6 +149,20 @@ export type { PlayerCosmetics, PlayerCosmeticsEquippedItem } from '@/networking/
 // Player
 export { default as Player, PlayerEvent, SUPPORTED_INPUTS } from '@/players/Player';
 export type { PlayerEventPayloads, PlayerInput, PredictedBlockEditAttempt, PredictedBlockEditBatch } from '@/players/Player';
+
+// Rollback prediction helpers
+export {
+  DEFAULT_ROLLBACK_PREDICTED_INPUTS,
+  didRollbackPredictedInputPress,
+  didRollbackPredictedInputRelease,
+  isRollbackPredictedInputActive,
+  normalizeRollbackPredictedInputs,
+} from '@gameplay-shared/InputContract';
+export type {
+  RollbackPredictedInputSnapshot,
+  RollbackPredictedInputValue,
+  RollbackPredictableInput,
+} from '@gameplay-shared/InputContract';
 
 // PlayerCamera
 export {

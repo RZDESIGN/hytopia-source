@@ -14,6 +14,9 @@ Emitted when an entity is ticked with player input.
         input: PlayerInput;
         predictedBlockEditBatches: readonly PredictedBlockEditBatch[];
         cameraOrientation: PlayerCameraOrientation;
+        rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        rollbackInputSequenceNumber?: number;
         deltaTimeMs: number;
     };
 ```

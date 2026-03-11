@@ -812,6 +812,9 @@ export declare interface BaseEntityControllerEventPayloads {
         input: PlayerInput;
         predictedBlockEditBatches: readonly PredictedBlockEditBatch[];
         cameraOrientation: PlayerCameraOrientation;
+        rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        rollbackInputSequenceNumber?: number;
         deltaTimeMs: number;
     };
 }
@@ -2940,6 +2943,8 @@ export declare const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
  */
 export declare const DEFAULT_ENTITY_RIGID_BODY_OPTIONS: RigidBodyOptions;
 
+export declare const DEFAULT_ROLLBACK_PREDICTED_INPUTS: readonly ["w", "a", "s", "d", "sp", "sh", "c", "jd"];
+
 /**
  * Owner-only client prediction settings for stock block break/place helpers.
  *
@@ -3175,6 +3180,16 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
      */
     get localPredictionMotionBasisVelocity(): Vector3Like;
     /**
+     * Adds deterministic ability velocity on top of base locomotion.
+     *
+     * @remarks
+     * This modifies the same external velocity state that owner prediction mirrors,
+     * making it suitable for rollback-predicted dash, recoil, and boost abilities.
+     *
+     * **Category:** Controllers
+     */
+    addRollbackPredictedMotionBasisVelocity(delta: Vector3Like): void;
+    /**
      * Remaining just-submerged sinking time for owner prediction, in milliseconds.
      *
      * **Category:** Controllers
@@ -3282,6 +3297,42 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
 }
 
 /**
+ * Event types emitted by `DefaultPlayerEntityController`.
+ *
+ * **Category:** Events
+ * @public
+ */
+export declare enum DefaultPlayerEntityControllerEvent {
+    ROLLBACK_PREDICTION_STEP = "DEFAULT_PLAYER_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP"
+}
+
+/**
+ * Event payloads emitted by `DefaultPlayerEntityController`.
+ *
+ * **Category:** Events
+ * @public
+ */
+export declare interface DefaultPlayerEntityControllerEventPayloads {
+    [DefaultPlayerEntityControllerEvent.ROLLBACK_PREDICTION_STEP]: {
+        entity: PlayerEntity;
+        input: PlayerInput;
+        cameraOrientation: PlayerCameraOrientation;
+        sequenceNumber: number;
+        deltaTimeS: number;
+        isReplay: false;
+        isFirstSubstep: true;
+        yaw: number;
+        joystickDirection: number | null;
+        previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        grounded: boolean;
+        swimming: boolean;
+        motionBasisVelocity: Readonly<Vector3Like>;
+        addMotionBasisVelocity: (delta: Vector3Like) => void;
+    };
+}
+
+/**
  * Options for creating a DefaultPlayerEntityController instance.
  *
  * Use for: configuring default player movement and animation behavior at construction time.
@@ -3360,6 +3411,10 @@ export declare type DefaultPlayerEntityOptions = {
 } & PlayerEntityOptions;
 
 declare function definePacket<TId extends PacketId, TSchema>(id: TId, schema: JSONSchemaType<TSchema>): IPacketDefinition<TId, TSchema>;
+
+export declare const didRollbackPredictedInputPress: (previousSnapshot: Readonly<RollbackPredictedInputSnapshot>, nextSnapshot: Readonly<RollbackPredictedInputSnapshot>, input: RollbackPredictableInput) => boolean;
+
+export declare const didRollbackPredictedInputRelease: (previousSnapshot: Readonly<RollbackPredictedInputSnapshot>, nextSnapshot: Readonly<RollbackPredictedInputSnapshot>, input: RollbackPredictableInput) => boolean;
 
 /**
  * Disables a connection feature bit in the server-wide negotiation mask.
@@ -5261,7 +5316,7 @@ export declare class ErrorHandler {
  * **Category:** Events
  * @public
  */
-export declare interface EventPayloads extends AudioEventPayloads, BaseEntityControllerEventPayloads, BlockTypeEventPayloads, BlockTypeRegistryEventPayloads, ChatEventPayloads, ChunkLatticeEventPayloads, ConnectionEventPayloads, EntityEventPayloads, EntityModelAnimationEventPayloads, EntityModelNodeOverrideEventPayloads, GameServerEventPayloads, ParticleEmitterEventPayloads, PlayerCameraEventPayloads, PlayerEventPayloads, PlayerManagerEventPayloads, PlayerUIEventPayloads, SceneUIEventPayloads, SimulationEventPayloads, WebServerEventPayloads, WorldEventPayloads, WorldLoopEventPayloads, WorldManagerEventPayloads {
+export declare interface EventPayloads extends AudioEventPayloads, BaseEntityControllerEventPayloads, BlockTypeEventPayloads, BlockTypeRegistryEventPayloads, ChatEventPayloads, ChunkLatticeEventPayloads, ConnectionEventPayloads, EntityEventPayloads, EntityModelAnimationEventPayloads, EntityModelNodeOverrideEventPayloads, GameServerEventPayloads, ParticleEmitterEventPayloads, DefaultPlayerEntityControllerEventPayloads, PlayerCameraEventPayloads, PlayerEventPayloads, PlayerManagerEventPayloads, PlayerUIEventPayloads, SceneUIEventPayloads, SimulationEventPayloads, WebServerEventPayloads, WorldEventPayloads, WorldLoopEventPayloads, WorldManagerEventPayloads {
 }
 
 /**
@@ -5684,6 +5739,8 @@ declare interface IPacketDefinition<TId extends PacketId, TSchema> {
     schema: JSONSchemaType<TSchema>;
     validate: ValidateFunction<TSchema>;
 }
+
+export declare const isRollbackPredictedInputActive: (snapshot: Readonly<RollbackPredictedInputSnapshot>, input: RollbackPredictableInput) => boolean;
 
 declare function isValidPacket(packet: IPacket<PacketId, unknown>): packet is AnyPacket;
 
@@ -6799,6 +6856,8 @@ export declare type MoveOptions = {
 export declare interface NoneColliderOptions extends BaseColliderOptions {
     shape: ColliderShape.NONE;
 }
+
+export declare const normalizeRollbackPredictedInputs: (inputs: readonly (keyof InputSchema)[] | undefined) => RollbackPredictableInput[];
 
 declare type NotificationPermissionRequestPacket = IPacket<typeof PacketId.NOTIFICATION_PERMISSION_REQUEST, NotificationPermissionRequestSchema> & [WorldTick];
 
@@ -8126,6 +8185,9 @@ export declare class Player extends EventRouter implements protocol.Serializable
 
 
 
+
+
+
     /**
      * The current `PlayerInput` of the player.
      *
@@ -8154,6 +8216,9 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     get rollbackPredictedInputs(): readonly RollbackPredictableInput[];
+
+
+
     /**
      * Whether player click/tap input triggers interactions.
      *
@@ -8332,6 +8397,9 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     setPersistedData(data: Record<string, unknown>): void;
+
+
+
 
 
 
@@ -10886,9 +10954,13 @@ export declare enum RigidBodyType {
     KINEMATIC_VELOCITY = "kinematic_velocity"
 }
 
-declare const ROLLBACK_PREDICTABLE_INPUTS: readonly ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "i" | "f" | "k" | "x" | "z" | "w" | "a" | "s" | "d" | "q" | "e" | "r" | "c" | "v" | "u" | "o" | "j" | "l" | "n" | "m" | "sp" | "sh" | "tb" | "ml" | "mr" | "jd")[];
+declare const ROLLBACK_PREDICTABLE_INPUTS: readonly ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "i" | "f" | "k" | "w" | "a" | "s" | "d" | "q" | "e" | "r" | "z" | "x" | "c" | "v" | "u" | "o" | "j" | "l" | "n" | "m" | "sp" | "sh" | "tb" | "ml" | "mr" | "jd")[];
 
-declare type RollbackPredictableInput = typeof ROLLBACK_PREDICTABLE_INPUTS[number];
+export declare type RollbackPredictableInput = typeof ROLLBACK_PREDICTABLE_INPUTS[number];
+
+export declare type RollbackPredictedInputSnapshot = Partial<Record<RollbackPredictableInput, RollbackPredictedInputValue>>;
+
+export declare type RollbackPredictedInputValue = boolean | number | null;
 
 /**
  * The options for a round cylinder collider. @public

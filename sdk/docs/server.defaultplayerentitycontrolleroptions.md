@@ -296,7 +296,7 @@ _(Optional)_ The upward velocity applied to the entity when it jumps.
 
 </td><td>
 
-readonly RollbackPredictableInput\[\]
+readonly [RollbackPredictableInput](./server.rollbackpredictableinput.md)<!-- -->\[\]
 
 
 </td><td>

@@ -14,6 +14,8 @@ import {
   encodeRollbackPredictedInputMask,
   isRollbackPredictableInput,
   normalizeRollbackPredictedInputs,
+  replaceRollbackPredictedInputSnapshot,
+  type RollbackPredictedInputSnapshot,
   type RollbackPredictableInput,
   SUPPORTED_INPUTS as SHARED_SUPPORTED_INPUTS,
 } from '@gameplay-shared/InputContract';
@@ -246,6 +248,15 @@ export default class Player extends EventRouter implements protocol.Serializable
   )[1];
 
   /** @internal */
+  private _rollbackPredictedInputSnapshot: RollbackPredictedInputSnapshot = {};
+
+  /** @internal */
+  private _previousRollbackPredictedInputSnapshot: RollbackPredictedInputSnapshot = {};
+
+  /** @internal */
+  private _currentRollbackPredictedInputSequenceNumber: number | undefined;
+
+  /** @internal */
   private _defaultBlockEditPredictionConfig: DefaultBlockEditPredictionConfig = createDefaultBlockEditPredictionConfig();
 
   /** @internal */
@@ -318,6 +329,21 @@ export default class Player extends EventRouter implements protocol.Serializable
    */
   public get rollbackPredictedInputs(): readonly RollbackPredictableInput[] {
     return this._rollbackPredictedInputs;
+  }
+
+  /** @internal */
+  public get rollbackPredictedInputSnapshot(): Readonly<RollbackPredictedInputSnapshot> {
+    return this._rollbackPredictedInputSnapshot;
+  }
+
+  /** @internal */
+  public get previousRollbackPredictedInputSnapshot(): Readonly<RollbackPredictedInputSnapshot> {
+    return this._previousRollbackPredictedInputSnapshot;
+  }
+
+  /** @internal */
+  public get currentRollbackPredictedInputSequenceNumber(): number | undefined {
+    return this._currentRollbackPredictedInputSequenceNumber;
   }
 
   /**
@@ -539,6 +565,9 @@ export default class Player extends EventRouter implements protocol.Serializable
   public resetInputs() {
     this._input = {};
     this._queuedSequencedMovementInputs = [];
+    replaceRollbackPredictedInputSnapshot(this._rollbackPredictedInputSnapshot, {});
+    replaceRollbackPredictedInputSnapshot(this._previousRollbackPredictedInputSnapshot, {});
+    this._currentRollbackPredictedInputSequenceNumber = undefined;
   }
 
   /**
@@ -579,6 +608,10 @@ export default class Player extends EventRouter implements protocol.Serializable
     this._rollbackPredictedInputSet = createRollbackPredictedInputSet(normalizedInputs);
     this._rollbackPredictedInputMaskLow = lowMask;
     this._rollbackPredictedInputMaskHigh = highMask;
+    const currentSnapshot = this._createRollbackPredictedInputSnapshotFromCurrentInput();
+    replaceRollbackPredictedInputSnapshot(this._rollbackPredictedInputSnapshot, currentSnapshot);
+    replaceRollbackPredictedInputSnapshot(this._previousRollbackPredictedInputSnapshot, currentSnapshot);
+    this._currentRollbackPredictedInputSequenceNumber = undefined;
   }
 
   /**
@@ -739,6 +772,9 @@ export default class Player extends EventRouter implements protocol.Serializable
   /** @internal */
   public discardInputForSimulation(): void {
     this._input = {};
+    replaceRollbackPredictedInputSnapshot(this._rollbackPredictedInputSnapshot, {});
+    replaceRollbackPredictedInputSnapshot(this._previousRollbackPredictedInputSnapshot, {});
+    this._currentRollbackPredictedInputSequenceNumber = undefined;
     this._rollbackPendingPredictedBlockEditBatches(this._queuedPredictedBlockEditBatches);
     this._predictedBlockEditBatches = [];
     this._queuedPredictedBlockEditBatches.length = 0;
@@ -767,6 +803,9 @@ export default class Player extends EventRouter implements protocol.Serializable
     this._queuedPredictedBlockEditCount = 0;
 
     if (this._queuedSequencedMovementInputs.length === 0) {
+      this._advanceRollbackPredictedInputSnapshots(
+        this._createRollbackPredictedInputSnapshotFromCurrentInput(),
+      );
       this.markInputAppliedForSimulation();
       return;
     }
@@ -804,6 +843,10 @@ export default class Player extends EventRouter implements protocol.Serializable
       this.camera.setOrientationYaw(command.input.cy);
     }
 
+    this._advanceRollbackPredictedInputSnapshots(
+      this._createRollbackPredictedInputSnapshotFromQueuedCommand(command.input),
+      command.sequenceNumber,
+    );
     this._lastAppliedInputSequenceNumber = command.sequenceNumber;
   }
 
@@ -972,6 +1015,53 @@ export default class Player extends EventRouter implements protocol.Serializable
     }
 
     return false;
+  }
+
+  /** @internal */
+  private _advanceRollbackPredictedInputSnapshots(
+    nextSnapshot: Readonly<RollbackPredictedInputSnapshot>,
+    sequenceNumber?: number,
+  ): void {
+    replaceRollbackPredictedInputSnapshot(
+      this._previousRollbackPredictedInputSnapshot,
+      this._rollbackPredictedInputSnapshot,
+    );
+    replaceRollbackPredictedInputSnapshot(this._rollbackPredictedInputSnapshot, nextSnapshot);
+    this._currentRollbackPredictedInputSequenceNumber = sequenceNumber;
+  }
+
+  /** @internal */
+  private _createRollbackPredictedInputSnapshotFromCurrentInput(): RollbackPredictedInputSnapshot {
+    const snapshot: RollbackPredictedInputSnapshot = {};
+
+    for (const inputKey of this._rollbackPredictedInputs) {
+      if (inputKey === 'jd') {
+        snapshot.jd = this._input.jd ?? null;
+        continue;
+      }
+
+      snapshot[inputKey] = !!this._input[inputKey];
+    }
+
+    return snapshot;
+  }
+
+  /** @internal */
+  private _createRollbackPredictedInputSnapshotFromQueuedCommand(
+    input: SequencedMovementInputCommand['input'],
+  ): RollbackPredictedInputSnapshot {
+    const snapshot: RollbackPredictedInputSnapshot = {};
+
+    for (const inputKey of this._rollbackPredictedInputs) {
+      if (inputKey === 'jd') {
+        snapshot.jd = input.jd ?? null;
+        continue;
+      }
+
+      snapshot[inputKey] = !!input[inputKey];
+    }
+
+    return snapshot;
   }
 
   /** @internal */

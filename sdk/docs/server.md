@@ -805,6 +805,19 @@ Bit flags negotiated between the server and a client connection.
 </td></tr>
 <tr><td>
 
+[DefaultPlayerEntityControllerEvent](./server.defaultplayerentitycontrollerevent.md)
+
+
+</td><td>
+
+Event types emitted by `DefaultPlayerEntityController`<!-- -->.
+
+\*\*Category:\*\* Events
+
+
+</td></tr>
+<tr><td>
+
 [EntityEvent](./server.entityevent.md)
 
 
@@ -1145,6 +1158,24 @@ Creates the default client block edit prediction config used by stock helpers.
 </td></tr>
 <tr><td>
 
+[didRollbackPredictedInputPress(previousSnapshot, nextSnapshot, input)](./server.didrollbackpredictedinputpress.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+[didRollbackPredictedInputRelease(previousSnapshot, nextSnapshot, input)](./server.didrollbackpredictedinputrelease.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 [disableConnectionFeature(featureFlag)](./server.disableconnectionfeature.md)
 
 
@@ -1162,6 +1193,24 @@ Disables a connection feature bit in the server-wide negotiation mask.
 </td><td>
 
 Enables a connection feature bit in the server-wide negotiation mask.
+
+
+</td></tr>
+<tr><td>
+
+[isRollbackPredictedInputActive(snapshot, input)](./server.isrollbackpredictedinputactive.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+[normalizeRollbackPredictedInputs(inputs)](./server.normalizerollbackpredictedinputs.md)
+
+
+</td><td>
 
 
 </td></tr>
@@ -1448,6 +1497,19 @@ The options for a cylinder collider.
 Use for: cylinder-shaped colliders. Do NOT use for: other shapes; use the matching collider option type.
 
 \*\*Category:\*\* Physics
+
+
+</td></tr>
+<tr><td>
+
+[DefaultPlayerEntityControllerEventPayloads](./server.defaultplayerentitycontrollereventpayloads.md)
+
+
+</td><td>
+
+Event payloads emitted by `DefaultPlayerEntityController`<!-- -->.
+
+\*\*Category:\*\* Events
 
 
 </td></tr>
@@ -2077,6 +2139,15 @@ The default rigid body options for a model entity when `EntityOptions.rigidBodyO
 </td></tr>
 <tr><td>
 
+[DEFAULT\_ROLLBACK\_PREDICTED\_INPUTS](./server.default_rollback_predicted_inputs.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 [SUPPORTED\_INPUTS](./server.supported_inputs.md)
 
 
@@ -2639,6 +2710,33 @@ The options for a rigid body.
 Use for: constructing rigid bodies; choose an option type matching `RigidBodyType`<!-- -->. Do NOT use for: runtime changes; use `RigidBody` methods instead.
 
 \*\*Category:\*\* Physics
+
+
+</td></tr>
+<tr><td>
+
+[RollbackPredictableInput](./server.rollbackpredictableinput.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+[RollbackPredictedInputSnapshot](./server.rollbackpredictedinputsnapshot.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+[RollbackPredictedInputValue](./server.rollbackpredictedinputvalue.md)
+
+
+</td><td>
 
 
 </td></tr>

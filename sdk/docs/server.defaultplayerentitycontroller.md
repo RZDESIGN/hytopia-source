@@ -573,7 +573,7 @@ The platform the entity is on, if any.
 
 </td><td>
 
-RollbackPredictableInput\[\]
+[RollbackPredictableInput](./server.rollbackpredictableinput.md)<!-- -->\[\]
 
 
 </td><td>
@@ -831,6 +831,20 @@ Description
 
 </th></tr></thead>
 <tbody><tr><td>
+
+[addRollbackPredictedMotionBasisVelocity(delta)](./server.defaultplayerentitycontroller.addrollbackpredictedmotionbasisvelocity.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Adds deterministic ability velocity on top of base locomotion.
+
+
+</td></tr>
+<tr><td>
 
 [attach(entity)](./server.defaultplayerentitycontroller.attach.md)
 
