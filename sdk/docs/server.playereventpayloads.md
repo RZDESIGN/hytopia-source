@@ -96,6 +96,25 @@ Emitted when server gameplay confirms a speculative block edit prediction.
 </td></tr>
 <tr><td>
 
+["PLAYER.DEFAULT\_BLOCK\_EDIT\_PREDICTION\_CONFIG\_UPDATE"](./server.playereventpayloads._player.default_block_edit_prediction_config_update_.md)
+
+
+</td><td>
+
+
+</td><td>
+
+{ player: [Player](./server.player.md)<!-- -->; config: [DefaultBlockEditPredictionConfig](./server.defaultblockeditpredictionconfig.md)<!-- -->; }
+
+
+</td><td>
+
+Emitted when owner-only default block edit prediction settings change.
+
+
+</td></tr>
+<tr><td>
+
 ["PLAYER.INTERACT"](./server.playereventpayloads._player.interact_.md)
 
 

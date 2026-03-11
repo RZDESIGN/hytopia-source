@@ -11,6 +11,7 @@ import {
   CHUNK_BUFFER_GEOMETRY_NUM_SURFACE_FLAG_COMPONENTS,
   CHUNK_BUFFER_GEOMETRY_NUM_WIND_DATA_COMPONENTS,
   type BatchId,
+  type ChunkId,
 } from './ChunkConstants';
 import ChunkStats from './ChunkStats';
 import type { BlocksBufferGeometryData } from '../blocks/BlockConstants';
@@ -27,10 +28,16 @@ export default class ChunkMeshManager {
   private _batchLiquidMeshes: Map<BatchId, Mesh<BufferGeometry, ShaderMaterial>> = new Map();
   private _batchOpaqueSolidMeshes: Map<BatchId, Mesh<BufferGeometry, Material>> = new Map();
   private _batchTransparentSolidMeshes: Map<BatchId, Mesh<BufferGeometry, Material>> = new Map();
+  private _promotedChunkFoliageMeshes: Map<ChunkId, Mesh<BufferGeometry, ShaderMaterial>> = new Map();
+  private _promotedChunkLiquidMeshes: Map<ChunkId, Mesh<BufferGeometry, ShaderMaterial>> = new Map();
+  private _promotedChunkOpaqueSolidMeshes: Map<ChunkId, Mesh<BufferGeometry, Material>> = new Map();
+  private _promotedChunkTransparentSolidMeshes: Map<ChunkId, Mesh<BufferGeometry, Material>> = new Map();
+  private _promotedChunkIdsByBatch: Map<BatchId, Set<ChunkId>> = new Map();
   // Track all batch IDs for efficient iteration
   private _batchIds: Set<BatchId> = new Set();
   private _foliageMeshesInScene: Mesh<BufferGeometry, ShaderMaterial>[] = [];
   private _liquidMeshesInScene: Mesh<BufferGeometry, ShaderMaterial>[] = [];
+  private _nearbyBlockRaycastMeshes: Mesh<BufferGeometry, Material | ShaderMaterial>[] = [];
   private _nearbyReflectionMeshes: Mesh<BufferGeometry, Material | ShaderMaterial>[] = [];
   private _nearbySolidMeshes: Mesh<BufferGeometry, Material>[] = [];
   private _solidMeshesInScene: Mesh<BufferGeometry, Material>[] = [];
@@ -52,10 +59,10 @@ export default class ChunkMeshManager {
     return this._batchIds.has(batchId);
   }
 
-  private _createOrUpdateMesh(
-    id: BatchId,
+  private _createOrUpdateMesh<TKey extends string>(
+    id: TKey,
     data: BlocksBufferGeometryData,
-    cache: Map<BatchId, Mesh>,
+    cache: Map<TKey, Mesh>,
     material: Material,
     castShadow: boolean,
     receiveShadow: boolean,
@@ -133,7 +140,6 @@ export default class ChunkMeshManager {
       mesh.matrixWorldAutoUpdate = false;
 
       cache.set(id, mesh);
-      this._batchIds.add(id);
     }
 
     mesh.castShadow = castShadow;
@@ -161,7 +167,7 @@ export default class ChunkMeshManager {
     }
   }
 
-  private _removeMesh(id: BatchId, cache: Map<BatchId, Mesh>, affectsSolidList: boolean): void {
+  private _removeMesh<TKey extends string>(id: TKey, cache: Map<TKey, Mesh>, affectsSolidList: boolean): void {
     const mesh = cache.get(id);
 
     if (mesh) {
@@ -175,6 +181,7 @@ export default class ChunkMeshManager {
   }
 
   public createOrUpdateBatchFoliageMesh(batchId: BatchId, data: BlocksBufferGeometryData): void {
+    this._batchIds.add(batchId);
     this._createOrUpdateMesh(
       batchId,
       data,
@@ -186,6 +193,7 @@ export default class ChunkMeshManager {
   }
 
   public createOrUpdateBatchLiquidMesh(batchId: BatchId, data: BlocksBufferGeometryData): void {
+    this._batchIds.add(batchId);
     this._createOrUpdateMesh(
       batchId,
       data,
@@ -197,6 +205,7 @@ export default class ChunkMeshManager {
   }
 
   public createOrUpdateBatchOpaqueSolidMesh(batchId: BatchId, data: BlocksBufferGeometryData): void {
+    this._batchIds.add(batchId);
     this._createOrUpdateMesh(
       batchId,
       data,
@@ -208,6 +217,7 @@ export default class ChunkMeshManager {
   }
 
   public createOrUpdateBatchTransparentSolidMesh(batchId: BatchId, data: BlocksBufferGeometryData): void {
+    this._batchIds.add(batchId);
     this._createOrUpdateMesh(
       batchId,
       data,
@@ -243,7 +253,7 @@ export default class ChunkMeshManager {
     this._removeMesh(batchId, this._batchLiquidMeshes, false);
     this._removeMesh(batchId, this._batchOpaqueSolidMeshes, true);
     this._removeMesh(batchId, this._batchTransparentSolidMeshes, true);
-    this._batchIds.delete(batchId);
+    this._cleanupBatchId(batchId);
   }
 
   private _cleanupBatchId(batchId: BatchId): void {
@@ -251,9 +261,127 @@ export default class ChunkMeshManager {
     if (!this._batchFoliageMeshes.has(batchId) &&
         !this._batchLiquidMeshes.has(batchId) &&
         !this._batchOpaqueSolidMeshes.has(batchId) && 
-        !this._batchTransparentSolidMeshes.has(batchId)) {
+        !this._batchTransparentSolidMeshes.has(batchId) &&
+        !this._promotedChunkIdsByBatch.has(batchId)) {
       this._batchIds.delete(batchId);
     }
+  }
+
+  private _trackPromotedChunk(chunkId: ChunkId): void {
+    const batchId = Chunk.chunkIdToBatchId(chunkId);
+    let chunkIds = this._promotedChunkIdsByBatch.get(batchId);
+
+    if (!chunkIds) {
+      chunkIds = new Set();
+      this._promotedChunkIdsByBatch.set(batchId, chunkIds);
+    }
+
+    chunkIds.add(chunkId);
+    this._batchIds.add(batchId);
+  }
+
+  private _cleanupPromotedChunk(chunkId: ChunkId): void {
+    const batchId = Chunk.chunkIdToBatchId(chunkId);
+
+    if (
+      this._promotedChunkFoliageMeshes.has(chunkId) ||
+      this._promotedChunkLiquidMeshes.has(chunkId) ||
+      this._promotedChunkOpaqueSolidMeshes.has(chunkId) ||
+      this._promotedChunkTransparentSolidMeshes.has(chunkId)
+    ) {
+      return;
+    }
+
+    const chunkIds = this._promotedChunkIdsByBatch.get(batchId);
+    if (!chunkIds) {
+      this._cleanupBatchId(batchId);
+      return;
+    }
+
+    chunkIds.delete(chunkId);
+    if (chunkIds.size === 0) {
+      this._promotedChunkIdsByBatch.delete(batchId);
+    }
+
+    this._cleanupBatchId(batchId);
+  }
+
+  public applyPromotedChunkBuild(
+    chunkId: ChunkId,
+    data: {
+      foliageGeometry?: BlocksBufferGeometryData;
+      liquidGeometry?: BlocksBufferGeometryData;
+      opaqueSolidGeometry?: BlocksBufferGeometryData;
+      transparentSolidGeometry?: BlocksBufferGeometryData;
+    },
+  ): void {
+    this._trackPromotedChunk(chunkId);
+
+    if (data.foliageGeometry) {
+      this._createOrUpdateMesh(
+        chunkId,
+        data.foliageGeometry,
+        this._promotedChunkFoliageMeshes,
+        this._game.blockMaterialManager.foliageMaterial,
+        false,
+        false,
+      );
+    } else {
+      this._removeMesh(chunkId, this._promotedChunkFoliageMeshes, false);
+    }
+
+    if (data.liquidGeometry) {
+      this._createOrUpdateMesh(
+        chunkId,
+        data.liquidGeometry,
+        this._promotedChunkLiquidMeshes,
+        this._game.blockMaterialManager.liquidMaterial,
+        false,
+        false,
+      );
+    } else {
+      this._removeMesh(chunkId, this._promotedChunkLiquidMeshes, false);
+    }
+
+    if (data.opaqueSolidGeometry) {
+      this._createOrUpdateMesh(
+        chunkId,
+        data.opaqueSolidGeometry,
+        this._promotedChunkOpaqueSolidMeshes,
+        !!data.opaqueSolidGeometry.lightLevels
+          ? this._game.blockMaterialManager.opaqueMaterial
+          : this._game.blockMaterialManager.opaqueNonLitMaterial,
+        true,
+        true,
+      );
+    } else {
+      this._removeMesh(chunkId, this._promotedChunkOpaqueSolidMeshes, true);
+    }
+
+    if (data.transparentSolidGeometry) {
+      this._createOrUpdateMesh(
+        chunkId,
+        data.transparentSolidGeometry,
+        this._promotedChunkTransparentSolidMeshes,
+        !!data.transparentSolidGeometry.lightLevels
+          ? this._game.blockMaterialManager.transparentMaterial
+          : this._game.blockMaterialManager.transparentNonLitMaterial,
+        true,
+        true,
+      );
+    } else {
+      this._removeMesh(chunkId, this._promotedChunkTransparentSolidMeshes, true);
+    }
+
+    this._cleanupPromotedChunk(chunkId);
+  }
+
+  public removePromotedChunkMeshes(chunkId: ChunkId): void {
+    this._removeMesh(chunkId, this._promotedChunkFoliageMeshes, false);
+    this._removeMesh(chunkId, this._promotedChunkLiquidMeshes, false);
+    this._removeMesh(chunkId, this._promotedChunkOpaqueSolidMeshes, true);
+    this._removeMesh(chunkId, this._promotedChunkTransparentSolidMeshes, true);
+    this._cleanupPromotedChunk(chunkId);
   }
 
   public applyBatchViewDistance(fromVec2: Vector2, viewDistanceSquared: number): void {
@@ -262,8 +390,9 @@ export default class ChunkMeshManager {
       const liquidMesh = this._batchLiquidMeshes.get(batchId);
       const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
       const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
+      const promotedChunkIds = this._promotedChunkIdsByBatch.get(batchId);
 
-      if (!foliageMesh && !liquidMesh && !opaqueSolidMesh && !transparentSolidMesh) {
+      if (!foliageMesh && !liquidMesh && !opaqueSolidMesh && !transparentSolidMesh && !promotedChunkIds?.size) {
         continue;
       }
 
@@ -291,6 +420,28 @@ export default class ChunkMeshManager {
       }
       if (transparentSolidMesh) {
         this._setMeshInScene(transparentSolidMesh, inRange, true);
+      }
+
+      if (promotedChunkIds) {
+        for (const chunkId of promotedChunkIds) {
+          const promotedFoliageMesh = this._promotedChunkFoliageMeshes.get(chunkId);
+          const promotedLiquidMesh = this._promotedChunkLiquidMeshes.get(chunkId);
+          const promotedOpaqueMesh = this._promotedChunkOpaqueSolidMeshes.get(chunkId);
+          const promotedTransparentMesh = this._promotedChunkTransparentSolidMeshes.get(chunkId);
+
+          if (promotedFoliageMesh) {
+            this._setMeshInScene(promotedFoliageMesh, inRange, false);
+          }
+          if (promotedLiquidMesh) {
+            this._setMeshInScene(promotedLiquidMesh, inRange, false);
+          }
+          if (promotedOpaqueMesh) {
+            this._setMeshInScene(promotedOpaqueMesh, inRange, true);
+          }
+          if (promotedTransparentMesh) {
+            this._setMeshInScene(promotedTransparentMesh, inRange, true);
+          }
+        }
       }
 
       if (inRange) {
@@ -333,6 +484,31 @@ export default class ChunkMeshManager {
     if (transparentSolidMesh) {
       this._setMeshInScene(transparentSolidMesh, inScene, true);
     }
+
+    const promotedChunkIds = this._promotedChunkIdsByBatch.get(batchId);
+    if (!promotedChunkIds) {
+      return;
+    }
+
+    for (const chunkId of promotedChunkIds) {
+      const promotedFoliageMesh = this._promotedChunkFoliageMeshes.get(chunkId);
+      const promotedLiquidMesh = this._promotedChunkLiquidMeshes.get(chunkId);
+      const promotedOpaqueMesh = this._promotedChunkOpaqueSolidMeshes.get(chunkId);
+      const promotedTransparentMesh = this._promotedChunkTransparentSolidMeshes.get(chunkId);
+
+      if (promotedFoliageMesh) {
+        this._setMeshInScene(promotedFoliageMesh, inScene, false);
+      }
+      if (promotedLiquidMesh) {
+        this._setMeshInScene(promotedLiquidMesh, inScene, false);
+      }
+      if (promotedOpaqueMesh) {
+        this._setMeshInScene(promotedOpaqueMesh, inScene, true);
+      }
+      if (promotedTransparentMesh) {
+        this._setMeshInScene(promotedTransparentMesh, inScene, true);
+      }
+    }
   }
 
   public get solidMeshesInScene(): Mesh<BufferGeometry, Material>[] {
@@ -344,6 +520,16 @@ export default class ChunkMeshManager {
         }
       }
       for (const mesh of this._batchTransparentSolidMeshes.values()) {
+        if (mesh.parent) {
+          this._solidMeshesInScene.push(mesh);
+        }
+      }
+      for (const mesh of this._promotedChunkOpaqueSolidMeshes.values()) {
+        if (mesh.parent) {
+          this._solidMeshesInScene.push(mesh);
+        }
+      }
+      for (const mesh of this._promotedChunkTransparentSolidMeshes.values()) {
         if (mesh.parent) {
           this._solidMeshesInScene.push(mesh);
         }
@@ -362,6 +548,12 @@ export default class ChunkMeshManager {
       }
     }
 
+    for (const mesh of this._promotedChunkLiquidMeshes.values()) {
+      if (mesh.parent) {
+        this._liquidMeshesInScene.push(mesh);
+      }
+    }
+
     return this._liquidMeshesInScene;
   }
 
@@ -369,6 +561,12 @@ export default class ChunkMeshManager {
     this._foliageMeshesInScene.length = 0;
 
     for (const mesh of this._batchFoliageMeshes.values()) {
+      if (mesh.parent) {
+        this._foliageMeshesInScene.push(mesh);
+      }
+    }
+
+    for (const mesh of this._promotedChunkFoliageMeshes.values()) {
       if (mesh.parent) {
         this._foliageMeshesInScene.push(mesh);
       }
@@ -405,11 +603,93 @@ export default class ChunkMeshManager {
           if (transparentSolidMesh?.parent) {
             nearbySolidMeshes.push(transparentSolidMesh);
           }
+
+          const promotedChunkIds = this._promotedChunkIdsByBatch.get(batchId);
+          if (!promotedChunkIds) {
+            continue;
+          }
+
+          for (const chunkId of promotedChunkIds) {
+            const promotedOpaqueMesh = this._promotedChunkOpaqueSolidMeshes.get(chunkId);
+            const promotedTransparentMesh = this._promotedChunkTransparentSolidMeshes.get(chunkId);
+
+            if (promotedOpaqueMesh?.parent) {
+              nearbySolidMeshes.push(promotedOpaqueMesh);
+            }
+
+            if (promotedTransparentMesh?.parent) {
+              nearbySolidMeshes.push(promotedTransparentMesh);
+            }
+          }
         }
       }
     }
 
     return nearbySolidMeshes;
+  }
+
+  public getBlockRaycastMeshesNear(
+    worldPosition: { x: number, y: number, z: number },
+    maxDistance: number,
+  ): Mesh<BufferGeometry, Material | ShaderMaterial>[] {
+    const nearbyBlockRaycastMeshes = this._nearbyBlockRaycastMeshes;
+    nearbyBlockRaycastMeshes.length = 0;
+
+    const searchPadding = BATCH_WORLD_SIZE;
+    const minX = Math.floor((worldPosition.x - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxX = Math.floor((worldPosition.x + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const minY = Math.floor((worldPosition.y - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxY = Math.floor((worldPosition.y + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const minZ = Math.floor((worldPosition.z - maxDistance - searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+    const maxZ = Math.floor((worldPosition.z + maxDistance + searchPadding) / BATCH_WORLD_SIZE) * BATCH_WORLD_SIZE;
+
+    for (let x = minX; x <= maxX; x += BATCH_WORLD_SIZE) {
+      for (let y = minY; y <= maxY; y += BATCH_WORLD_SIZE) {
+        for (let z = minZ; z <= maxZ; z += BATCH_WORLD_SIZE) {
+          const batchId = `${x},${y},${z}` as BatchId;
+          const opaqueSolidMesh = this._batchOpaqueSolidMeshes.get(batchId);
+          const transparentSolidMesh = this._batchTransparentSolidMeshes.get(batchId);
+          const liquidMesh = this._batchLiquidMeshes.get(batchId);
+
+          if (opaqueSolidMesh?.parent) {
+            nearbyBlockRaycastMeshes.push(opaqueSolidMesh);
+          }
+
+          if (transparentSolidMesh?.parent) {
+            nearbyBlockRaycastMeshes.push(transparentSolidMesh);
+          }
+
+          if (liquidMesh?.parent) {
+            nearbyBlockRaycastMeshes.push(liquidMesh);
+          }
+
+          const promotedChunkIds = this._promotedChunkIdsByBatch.get(batchId);
+          if (!promotedChunkIds) {
+            continue;
+          }
+
+          for (const chunkId of promotedChunkIds) {
+            const promotedOpaqueMesh = this._promotedChunkOpaqueSolidMeshes.get(chunkId);
+            const promotedTransparentMesh = this._promotedChunkTransparentSolidMeshes.get(chunkId);
+            const promotedLiquidMesh = this._promotedChunkLiquidMeshes.get(chunkId);
+
+            if (promotedOpaqueMesh?.parent) {
+              nearbyBlockRaycastMeshes.push(promotedOpaqueMesh);
+            }
+
+            if (promotedTransparentMesh?.parent) {
+              nearbyBlockRaycastMeshes.push(promotedTransparentMesh);
+            }
+
+            if (promotedLiquidMesh?.parent) {
+              nearbyBlockRaycastMeshes.push(promotedLiquidMesh);
+            }
+          }
+        }
+      }
+    }
+
+    return nearbyBlockRaycastMeshes;
   }
 
   public getReflectionCandidateMeshesNear(
@@ -445,6 +725,29 @@ export default class ChunkMeshManager {
 
           if (transparentSolidMesh?.parent) {
             nearbyMeshes.push(transparentSolidMesh);
+          }
+
+          const promotedChunkIds = this._promotedChunkIdsByBatch.get(batchId);
+          if (!promotedChunkIds) {
+            continue;
+          }
+
+          for (const chunkId of promotedChunkIds) {
+            const promotedFoliageMesh = this._promotedChunkFoliageMeshes.get(chunkId);
+            const promotedOpaqueMesh = this._promotedChunkOpaqueSolidMeshes.get(chunkId);
+            const promotedTransparentMesh = this._promotedChunkTransparentSolidMeshes.get(chunkId);
+
+            if (promotedFoliageMesh?.parent) {
+              nearbyMeshes.push(promotedFoliageMesh);
+            }
+
+            if (promotedOpaqueMesh?.parent) {
+              nearbyMeshes.push(promotedOpaqueMesh);
+            }
+
+            if (promotedTransparentMesh?.parent) {
+              nearbyMeshes.push(promotedTransparentMesh);
+            }
           }
         }
       }

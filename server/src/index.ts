@@ -80,11 +80,13 @@ export { default as ErrorHandler } from '@/errors/ErrorHandler';
 // Connection features
 export {
   ConnectionFeatureFlag,
+  createDefaultBlockEditPredictionConfig,
   DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE,
   DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID,
   disableConnectionFeature,
   enableConnectionFeature,
 } from '@engine-shared/network/ConnectionFeatureFlags';
+export type { DefaultBlockEditPredictionConfig } from '@engine-shared/network/ConnectionFeatureFlags';
 
 // Events
 export type { EventPayloads } from '@/events/Events';
@@ -140,7 +142,7 @@ export type { PlayerCosmetics, PlayerCosmeticsEquippedItem } from '@/networking/
 
 // Player
 export { default as Player, PlayerEvent, SUPPORTED_INPUTS } from '@/players/Player';
-export type { PlayerEventPayloads, PlayerInput, PredictedBlockEditAttempt } from '@/players/Player';
+export type { PlayerEventPayloads, PlayerInput, PredictedBlockEditAttempt, PredictedBlockEditBatch } from '@/players/Player';
 
 // PlayerCamera
 export {

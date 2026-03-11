@@ -3,6 +3,7 @@ import type {
   ChunkWorkerBlockTextureAtlasMetadataMessage,
   ChunkWorkerBlockTextureAtlasUpdatedMessage,
   ChunkWorkerChunkBatchBuiltMessage,
+  ChunkWorkerChunkBuiltMessage,
   ChunkWorkerLightLevelVolumeBuiltMessage,
   ChunkWorkerSkyDistanceVolumeBuiltMessage,
   FromChunkWorkerMessage,
@@ -31,6 +32,8 @@ export default class ChunkWorkerClient {
       switch (data.type) {
         case 'chunk_batch_built':
           return this._onChunkBatchBuilt(data);
+        case 'chunk_built':
+          return this._onChunkBuilt(data);
         case 'block_entity_built':
           return this._onBlockEntityBuilt(data);
         case 'block_texture_atlas_updated':
@@ -55,6 +58,18 @@ export default class ChunkWorkerClient {
       liquidGeometry: message.liquidGeometry,
       opaqueSolidGeometry: message.opaqueSolidGeometry,
       requestVersion: message.requestVersion,
+      transparentSolidGeometry: message.transparentSolidGeometry,
+      blockCount: message.blockCount,
+    });
+  };
+
+  private _onChunkBuilt = (message: ChunkWorkerChunkBuiltMessage): void => {
+    EventRouter.instance.emit(WorkerEventType.ChunkBuilt, {
+      batchId: message.batchId,
+      chunkId: message.chunkId,
+      foliageGeometry: message.foliageGeometry,
+      liquidGeometry: message.liquidGeometry,
+      opaqueSolidGeometry: message.opaqueSolidGeometry,
       transparentSolidGeometry: message.transparentSolidGeometry,
       blockCount: message.blockCount,
     });

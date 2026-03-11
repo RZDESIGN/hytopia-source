@@ -1134,6 +1134,17 @@ Description
 </th></tr></thead>
 <tbody><tr><td>
 
+[createDefaultBlockEditPredictionConfig()](./server.createdefaultblockeditpredictionconfig.md)
+
+
+</td><td>
+
+Creates the default client block edit prediction config used by stock helpers.
+
+
+</td></tr>
+<tr><td>
+
 [disableConnectionFeature(featureFlag)](./server.disableconnectionfeature.md)
 
 
@@ -2209,6 +2220,17 @@ A decoded set of collision groups represented as their string equivalents.
 </td></tr>
 <tr><td>
 
+[DefaultBlockEditPredictionConfig](./server.defaultblockeditpredictionconfig.md)
+
+
+</td><td>
+
+Owner-only client prediction settings for stock block break/place helpers.
+
+
+</td></tr>
+<tr><td>
+
 [DefaultPlayerEntityOptions](./server.defaultplayerentityoptions.md)
 
 
@@ -2507,6 +2529,19 @@ The input state of a `Player`<!-- -->.
 </td><td>
 
 A client-submitted speculative block edit intent.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
+[PredictedBlockEditBatch](./server.predictedblockeditbatch.md)
+
+
+</td><td>
+
+A speculative block edit batch grouped by a client prediction id.
 
 \*\*Category:\*\* Players
 

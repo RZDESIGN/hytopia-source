@@ -12,6 +12,7 @@ Emitted when an entity is ticked with player input.
 [BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT]: {
         entity: PlayerEntity;
         input: PlayerInput;
+        predictedBlockEditBatches: readonly PredictedBlockEditBatch[];
         cameraOrientation: PlayerCameraOrientation;
         deltaTimeMs: number;
     };

@@ -34,7 +34,7 @@ export const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
  */
 export type DefaultBlockEditPredictionConfig = {
   maxDistance: number;
-  placeBlockTypeId: number | null;
+  placeBlockTypeId: number;
   placeBlockRotationIndex?: number;
 };
 

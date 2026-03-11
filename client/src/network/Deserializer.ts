@@ -35,6 +35,12 @@ export type DeserializedBlockEditPredictionResult = {
 }
 export type DeserializedBlockEditPredictionResults = DeserializedBlockEditPredictionResult[];
 
+export type DeserializedBlockEditPredictionConfig = {
+  maxDistance: number;
+  placeBlockTypeId: number;
+  placeBlockRotationIndex?: number;
+}
+
 export type DeserializedBlock = {
   id: number;
   globalCoordinate: {
@@ -379,6 +385,16 @@ export default class Deserializer {
     }
 
     return deserializedResults;
+  }
+
+  public static deserializeBlockEditPredictionConfig(
+    config: protocol.BlockEditPredictionConfigSchema,
+  ): DeserializedBlockEditPredictionConfig {
+    return {
+      maxDistance: config.m,
+      placeBlockTypeId: config.i,
+      placeBlockRotationIndex: config.r ?? undefined,
+    };
   }
 
   public static deserializeBlockType(blockType: protocol.BlockTypeSchema): DeserializedBlockType {

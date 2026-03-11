@@ -265,21 +265,14 @@ export class HytopiaUI {
     edits: PredictedBlockEdit[],
     timeoutMs?: number,
   ): string | undefined {
-    const predictionId = this.predictBlocks(edits, timeoutMs);
-    if (!predictionId) {
-      return undefined;
-    }
-
-    Game.instance.networkManager.sendPredictedBlockEditsPacket(
-      predictionId,
+    return Game.instance.chunkManager.submitPredictedBlocks(
       edits.map(edit => ({
         globalCoordinate: edit.globalCoordinate,
-        blockTypeId: edit.blockTypeId,
+        blockId: edit.blockTypeId,
         blockRotationIndex: edit.blockRotationIndex,
       })),
+      timeoutMs,
     );
-
-    return predictionId;
   }
 
   /**

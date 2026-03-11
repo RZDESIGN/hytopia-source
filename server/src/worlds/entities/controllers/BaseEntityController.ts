@@ -1,7 +1,7 @@
 import EventRouter from '@/events/EventRouter';
 import type Entity from '@/worlds/entities/Entity';
 import type PlayerEntity from '@/worlds/entities/PlayerEntity';
-import type { PlayerInput } from '@/players/Player';
+import type { PlayerInput, PredictedBlockEditBatch } from '@/players/Player';
 import type { PlayerCameraOrientation } from '@/players/PlayerCamera';
 
 /**
@@ -44,7 +44,13 @@ export interface BaseEntityControllerEventPayloads {
   [BaseEntityControllerEvent.TICK]:                   { entity: Entity, deltaTimeMs: number }
 
   /** Emitted when an entity is ticked with player input. */
-  [BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT]: { entity: PlayerEntity, input: PlayerInput, cameraOrientation: PlayerCameraOrientation, deltaTimeMs: number }
+  [BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT]: {
+    entity: PlayerEntity,
+    input: PlayerInput,
+    predictedBlockEditBatches: readonly PredictedBlockEditBatch[],
+    cameraOrientation: PlayerCameraOrientation,
+    deltaTimeMs: number
+  }
 }
 
 /**
@@ -160,7 +166,13 @@ export default abstract class BaseEntityController extends EventRouter {
    * **Category:** Controllers
    */
   public tickWithPlayerInput(entity: PlayerEntity, input: PlayerInput, cameraOrientation: PlayerCameraOrientation, deltaTimeMs: number): void {
-    this.emit(BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT, { entity, input, cameraOrientation, deltaTimeMs });
+    this.emit(BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT, {
+      entity,
+      input,
+      predictedBlockEditBatches: entity.player.predictedBlockEditBatches,
+      cameraOrientation,
+      deltaTimeMs,
+    });
   }
 
   /**

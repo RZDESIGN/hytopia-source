@@ -3,6 +3,8 @@ import { gunzipSync } from 'fflate';
 import { Packr, FLOAT32_OPTIONS } from 'msgpackr';
 import {
   connectionFeatureFlagsToFeatures,
+  createDefaultBlockEditPredictionConfig,
+  type DefaultBlockEditPredictionConfig,
   type NegotiatedConnectionFeatures,
 } from '@engine-shared/network/ConnectionFeatureFlags';
 import { SEQUENCED_MOVEMENT_INPUT_SET, UNSEQUENCED_UNRELIABLE_INPUT_SET } from '@gameplay-shared/InputContract';
@@ -17,6 +19,7 @@ import Game from '../Game';
 import { NetworkManagerEventType } from './NetworkEvents';
 
 import type {
+  DeserializedBlockEditPredictionConfig,
   DeserializedConnection,
   DeserializedSyncResponse,
 } from './Deserializer';
@@ -57,6 +60,7 @@ export default class NetworkManager {
   private _lastInputSequenceNumber: number = 0;
   private _roundTripTimeS: number = 0;
   private _roundTripTimeMaxS: number = 0;
+  private _defaultBlockEditPredictionConfig: DefaultBlockEditPredictionConfig = createDefaultBlockEditPredictionConfig();
   private _serverFeatures: NegotiatedConnectionFeatures = connectionFeatureFlagsToFeatures(undefined);
   private _serverHostname: string | undefined;
   private _serverLobbyId: string | undefined;
@@ -75,6 +79,7 @@ export default class NetworkManager {
     this._game = game;
     this._networkConditionSimulator = new NetworkConditionSimulator(new URLSearchParams(window.location.search));
     this._inboundPacketRouterDependencies = {
+      onBlockEditPredictionConfigPacket: this._onBlockEditPredictionConfigPacket,
       onConnectionPacket: this._onConnectionPacket,
       onFirstWorldPacket: this._onFirstWorldPacket,
       onHeartbeatPacket: this._onHeartbeatPacket,
@@ -92,6 +97,7 @@ export default class NetworkManager {
   }
 
   public get game(): Game { return this._game; }
+  public get defaultBlockEditPredictionConfig(): DefaultBlockEditPredictionConfig { return this._defaultBlockEditPredictionConfig; }
   public get roundTripTimeS(): number { return this._roundTripTimeS; }
   public get roundTripTimeMaxS(): number { return this._roundTripTimeMaxS; }
   public get serverFeatures(): NegotiatedConnectionFeatures { return this._serverFeatures; }
@@ -242,6 +248,16 @@ export default class NetworkManager {
       })),
     }));
   }
+
+  private _onBlockEditPredictionConfigPacket = (
+    deserializedBlockEditPredictionConfig: DeserializedBlockEditPredictionConfig,
+  ) => {
+    this._defaultBlockEditPredictionConfig = {
+      maxDistance: deserializedBlockEditPredictionConfig.maxDistance,
+      placeBlockTypeId: deserializedBlockEditPredictionConfig.placeBlockTypeId,
+      placeBlockRotationIndex: deserializedBlockEditPredictionConfig.placeBlockRotationIndex,
+    };
+  };
 
   private async _connectWebTransport(): Promise<void> {
     console.log('NetworkManager._connectWebTransport(): Attempting to connect using WebTransport...');
@@ -469,6 +485,7 @@ export default class NetworkManager {
       this._connectionId = deserializedConnection.id;
     }
 
+    this._defaultBlockEditPredictionConfig = createDefaultBlockEditPredictionConfig();
     this._serverFeatures = connectionFeatureFlagsToFeatures(deserializedConnection.featureFlags);
 
     // If the server tells the client to kill its connection, do so.

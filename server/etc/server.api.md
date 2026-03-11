@@ -242,6 +242,7 @@ export interface BaseEntityControllerEventPayloads {
     [BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT]: {
         entity: PlayerEntity;
         input: PlayerInput;
+        predictedBlockEditBatches: readonly PredictedBlockEditBatch[];
         cameraOrientation: PlayerCameraOrientation;
         deltaTimeMs: number;
     };
@@ -878,6 +879,9 @@ export type ContactManifold = {
 };
 
 // @public
+export const createDefaultBlockEditPredictionConfig: () => DefaultBlockEditPredictionConfig;
+
+// @public
 export interface CylinderColliderOptions extends BaseColliderOptions {
     halfHeight?: number;
     radius?: number;
@@ -899,6 +903,13 @@ export const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
 
 // @public
 export const DEFAULT_ENTITY_RIGID_BODY_OPTIONS: RigidBodyOptions;
+
+// @public
+export type DefaultBlockEditPredictionConfig = {
+    maxDistance: number;
+    placeBlockTypeId: number;
+    placeBlockRotationIndex?: number;
+};
 
 // @public
 export class DefaultPlayerEntity extends PlayerEntity {
@@ -2296,12 +2307,15 @@ export class Player extends EventRouter implements protocol.Serializable {
     // @internal (undocumented)
     applyQueuedInputForSimulation(): void;
     readonly camera: PlayerCamera;
+    // @internal (undocumented)
+    clearPredictedBlockEditBatchesForSimulation(): void;
     confirmPredictedBlockEdit(predictionId: string): void;
     // Warning: (ae-forgotten-export) The symbol "Connection" needs to be exported by the entry point index.d.ts
     //
     // @internal (undocumented)
     readonly connection: Connection;
     readonly cosmetics: Promise<PlayerCosmetics | void>;
+    get defaultBlockEditPredictionConfig(): DefaultBlockEditPredictionConfig;
     // @internal (undocumented)
     discardInputForSimulation(): void;
     disconnect(): void;
@@ -2321,6 +2335,7 @@ export class Player extends EventRouter implements protocol.Serializable {
     // @internal (undocumented)
     markInputAppliedForSimulation(): void;
     get maxInteractDistance(): number;
+    get predictedBlockEditBatches(): readonly PredictedBlockEditBatch[];
     readonly profilePictureUrl: string | undefined;
     // @internal (undocumented)
     reconnected(): void;
@@ -2329,6 +2344,7 @@ export class Player extends EventRouter implements protocol.Serializable {
     scheduleNotification(type: string, scheduledFor: number): Promise<string | void>;
     // @internal (undocumented)
     serialize(): protocol.PlayerSchema;
+    setDefaultBlockEditPredictionConfig(config: Partial<DefaultBlockEditPredictionConfig>): void;
     setInteractEnabled(enabled: boolean): void;
     setMaxInteractDistance(distance: number): void;
     setPersistedData(data: Record<string, unknown>): void;
@@ -2632,6 +2648,8 @@ export enum PlayerEvent {
     // (undocumented)
     CONFIRM_BLOCK_EDIT_PREDICTION = "PLAYER.CONFIRM_BLOCK_EDIT_PREDICTION",
     // (undocumented)
+    DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE = "PLAYER.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE",
+    // (undocumented)
     INTERACT = "PLAYER.INTERACT",
     // (undocumented)
     JOINED_WORLD = "PLAYER.JOINED_WORLD",
@@ -2661,6 +2679,10 @@ export interface PlayerEventPayloads {
     [PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION]: {
         player: Player;
         predictionId: string;
+    };
+    [PlayerEvent.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE]: {
+        player: Player;
+        config: DefaultBlockEditPredictionConfig;
     };
     [PlayerEvent.INTERACT]: {
         player: Player;
@@ -2796,6 +2818,12 @@ export type PredictedBlockEditAttempt = {
     globalCoordinate: Vector3Like;
     blockTypeId: number;
     blockRotationIndex?: number;
+};
+
+// @public
+export type PredictedBlockEditBatch = {
+    predictionId: string;
+    edits: PredictedBlockEditAttempt[];
 };
 
 // @public

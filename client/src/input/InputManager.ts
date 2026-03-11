@@ -2,10 +2,6 @@ import Game from '../Game';
 import EventRouter from '../events/EventRouter';
 import MobileManager from '../mobile/MobileManager';
 import { DISCRETE_MOVEMENT_INPUT_SET } from '@gameplay-shared/InputContract';
-import {
-  DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE,
-  DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID,
-} from '@engine-shared/network/ConnectionFeatureFlags';
 import { CameraEventType } from '../core/Camera';
 import type { CameraEventPayload } from '../core/Camera';
 import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
@@ -691,24 +687,47 @@ export default class InputManager {
       return false;
     }
 
+    const predictionConfig = this._game.networkManager.defaultBlockEditPredictionConfig;
     const hit = this._game.chunkManager.raycastBlockFromCamera(
       screenX,
       screenY,
-      DEFAULT_BLOCK_EDIT_PREDICTION_MAX_DISTANCE,
+      predictionConfig.maxDistance,
     );
 
     if (!hit) {
       return false;
     }
 
+    const hitBlockType = this._game.blockTypeManager.getBlockType(hit.blockId);
+
     if (input === 'ml') {
-      return this._game.chunkManager.predictBlock(hit.globalCoordinate, 0);
+      if (hitBlockType?.isLiquid) {
+        return false;
+      }
+
+      return this._game.chunkManager.submitPredictedBlocks([
+        {
+          globalCoordinate: hit.globalCoordinate,
+          blockId: 0,
+        },
+      ]) !== undefined;
     }
 
-    return this._game.chunkManager.predictBlock(
-      hit.neighborGlobalCoordinate,
-      DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID,
-    );
+    if (predictionConfig.placeBlockTypeId <= 0) {
+      return false;
+    }
+
+    const placementCoordinate = hitBlockType?.isLiquid
+      ? hit.globalCoordinate
+      : hit.neighborGlobalCoordinate;
+
+    return this._game.chunkManager.submitPredictedBlocks([
+      {
+        globalCoordinate: placementCoordinate,
+        blockId: predictionConfig.placeBlockTypeId,
+        blockRotationIndex: predictionConfig.placeBlockRotationIndex,
+      },
+    ]) !== undefined;
   }
 
   private _clearInputSource(source: InputSource): void {

@@ -15,8 +15,10 @@ import type { DeserializedBlock } from '../network/Deserializer';
 import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
 import { NetworkManagerEventType } from '../network/NetworkEvents';
 import {
+  type ChunkWorkerBatchPromotionUpdateMessage,
   type ChunkWorkerChunkBatchBuildMessage,
   type ChunkWorkerBlocksUpdateMessage,
+  type ChunkWorkerChunkBuildMessage,
   type ChunkWorkerChunkRemoveMessage,
   type ChunkWorkerChunksUpdateMessage,
   type ChunkWorkerChunkUpdateMessage,
@@ -87,6 +89,8 @@ export default class ChunkManager {
   private _registry: ChunkRegistry = new ChunkRegistry();
   private _chunkBatchBuildRequestVersions: Map<BatchId, number> = new Map();
   private _firstChunkBatchBuilt: boolean = false;
+  private _promotedBatchIds: Set<BatchId> = new Set();
+  private _promotingBatchPendingChunkIds: Map<BatchId, Set<ChunkId>> = new Map();
   private _predictedBlocks: Map<string, PredictedBlockEntry> = new Map();
   private _predictionCoordinateKeysById: Map<string, Set<string>> = new Map();
   private _nextPredictionId: number = 1;
@@ -130,6 +134,11 @@ export default class ChunkManager {
     EventRouter.instance.on(
       WorkerEventType.ChunkBatchBuilt,
       this._onChunkBatchBuilt,
+    );
+
+    EventRouter.instance.on(
+      WorkerEventType.ChunkBuilt,
+      this._onChunkBuilt,
     );
   }
 
@@ -237,6 +246,7 @@ export default class ChunkManager {
   private _onChunksPacket = (payload: NetworkManagerEventPayload.IChunksPacket) => {
     const { deserializedChunks } = payload;
     const affectedBatches: Set<BatchId> = new Set();
+    const promotedAffectedBatches: Set<BatchId> = new Set();
     const workerChunkUpdates: ChunkWorkerChunksUpdateMessage['updates'] = [];
 
     for (let i = 0; i < deserializedChunks.length; i++) {
@@ -257,6 +267,8 @@ export default class ChunkManager {
 
       if (removed && chunk) {
         this._registry.deleteChunk(chunkId);
+        this._game.chunkMeshManager.removePromotedChunkMeshes(chunkId);
+        this._promotingBatchPendingChunkIds.get(batchId)?.delete(chunkId);
 
         const message: ChunkWorkerChunkRemoveMessage = {
           type: 'chunk_remove',
@@ -264,7 +276,11 @@ export default class ChunkManager {
         };
         this._game.chunkWorkerClient.postMessage(message);
 
-        affectedBatches.add(batchId);
+        if (this._promotedBatchIds.has(batchId)) {
+          promotedAffectedBatches.add(batchId);
+        } else {
+          affectedBatches.add(batchId);
+        }
       }
 
       if (!removed && blocks) {
@@ -280,7 +296,11 @@ export default class ChunkManager {
           this._applyBlockUpdates(predictedChunkUpdates);
         }
 
-        affectedBatches.add(batchId);
+        if (this._promotedBatchIds.has(batchId)) {
+          promotedAffectedBatches.add(batchId);
+        } else {
+          affectedBatches.add(batchId);
+        }
       }
     }
 
@@ -303,10 +323,22 @@ export default class ChunkManager {
       this._game.chunkWorkerClient.postMessage(message);
     }
 
-    if (affectedBatches.size > 0) {
+    if (affectedBatches.size > 0 || promotedAffectedBatches.size > 0) {
       // World streaming is where cached visibility state is most likely to drift.
       // Schedule a one-shot full refresh on the next frame as a safety net.
       this._forceFullVisibilityRefresh = true;
+    }
+
+    for (const batchId of promotedAffectedBatches) {
+      const chunkIds = this._registry.getBatchChunkIds(batchId);
+
+      if (chunkIds.length === 0) {
+        this._game.chunkMeshManager.removeAllBatchMeshes(batchId);
+        this._cleanupPromotedBatch(batchId);
+        continue;
+      }
+
+      this._queuePromotedBatchChunkBuilds(batchId);
     }
 
     // Build affected batches in order of proximity to the player
@@ -344,6 +376,70 @@ export default class ChunkManager {
     }
   }
 
+  private _sendBatchPromotionUpdate(batchId: BatchId, promoted: boolean): void {
+    const message: ChunkWorkerBatchPromotionUpdateMessage = {
+      type: 'batch_promotion_update',
+      batchId,
+      promoted,
+    };
+    this._game.chunkWorkerClient.postMessage(message);
+  }
+
+  private _startBatchPromotion(batchId: BatchId): void {
+    if (this._promotedBatchIds.has(batchId)) {
+      return;
+    }
+
+    const chunkIds = this._registry.getBatchChunkIds(batchId);
+    if (chunkIds.length === 0) {
+      return;
+    }
+
+    this._promotedBatchIds.add(batchId);
+    this._promotingBatchPendingChunkIds.set(batchId, new Set(chunkIds));
+    this._sendBatchPromotionUpdate(batchId, true);
+  }
+
+  private _queueChunkBuild(chunkId: ChunkId): void {
+    const message: ChunkWorkerChunkBuildMessage = {
+      type: 'chunk_build',
+      chunkId,
+    };
+    this._game.chunkWorkerClient.postMessage(message);
+  }
+
+  private _queuePromotedBatchChunkBuilds(batchId: BatchId, skipChunkIds?: ReadonlySet<ChunkId>): void {
+    const chunkIds = this._registry.getBatchChunkIds(batchId);
+    if (chunkIds.length === 0) {
+      return;
+    }
+
+    const pendingChunkIds = this._promotingBatchPendingChunkIds.get(batchId);
+    if (pendingChunkIds) {
+      pendingChunkIds.clear();
+      for (let i = 0; i < chunkIds.length; i++) {
+        pendingChunkIds.add(chunkIds[i]);
+      }
+    }
+
+    for (let i = 0; i < chunkIds.length; i++) {
+      const chunkId = chunkIds[i];
+
+      if (skipChunkIds?.has(chunkId)) {
+        continue;
+      }
+
+      this._queueChunkBuild(chunkId);
+    }
+  }
+
+  private _cleanupPromotedBatch(batchId: BatchId): void {
+    this._promotedBatchIds.delete(batchId);
+    this._promotingBatchPendingChunkIds.delete(batchId);
+    this._sendBatchPromotionUpdate(batchId, false);
+    this._visibleBatchIds.delete(batchId);
+  }
+
   private _onChunkBatchBuilt = (payload: WorkerEventPayload.IChunkBatchBuilt): void => {
     const {
       batchId,
@@ -357,6 +453,11 @@ export default class ChunkManager {
     } = payload;
 
     if ((this._chunkBatchBuildRequestVersions.get(batchId) ?? 0) !== requestVersion) {
+      this._game.performanceBaselineManager.markChunkBatchBuildCompleted(true);
+      return;
+    }
+
+    if (this._promotedBatchIds.has(batchId)) {
       this._game.performanceBaselineManager.markChunkBatchBuildCompleted(true);
       return;
     }
@@ -418,6 +519,46 @@ export default class ChunkManager {
       transparentFaceCount: ((transparentSolidGeometry?.indices.length || 0) + (foliageGeometry?.indices.length || 0)) / 3,
       liquidFaceCount: (liquidGeometry?.indices.length || 0) / 3,
     });
+  };
+
+  private _onChunkBuilt = (payload: WorkerEventPayload.IChunkBuilt): void => {
+    const {
+      batchId,
+      chunkId,
+      foliageGeometry,
+      liquidGeometry,
+      opaqueSolidGeometry,
+      transparentSolidGeometry,
+    } = payload;
+
+    if (!this._promotedBatchIds.has(batchId)) {
+      return;
+    }
+
+    if (!this._registry.getChunk(chunkId)) {
+      this._game.chunkMeshManager.removePromotedChunkMeshes(chunkId);
+      this._promotingBatchPendingChunkIds.get(batchId)?.delete(chunkId);
+      return;
+    }
+
+    this._game.chunkMeshManager.applyPromotedChunkBuild(chunkId, {
+      foliageGeometry,
+      liquidGeometry,
+      opaqueSolidGeometry,
+      transparentSolidGeometry,
+    });
+
+    const pendingChunkIds = this._promotingBatchPendingChunkIds.get(batchId);
+    if (pendingChunkIds) {
+      pendingChunkIds.delete(chunkId);
+      this._game.chunkMeshManager.removeAllBatchMeshes(batchId);
+
+      if (pendingChunkIds.size === 0) {
+        this._promotingBatchPendingChunkIds.delete(batchId);
+      }
+    }
+
+    this._syncBatchVisibility(batchId);
   };
 
   public getChunk(chunkId: ChunkId): Chunk | undefined {
@@ -518,6 +659,31 @@ export default class ChunkManager {
     }
 
     this._applyBlockUpdates(updatesToApply);
+    return predictionId;
+  }
+
+  public submitPredictedBlocks(
+    updates: ChunkBlockUpdate[],
+    timeoutMs: number = BLOCK_PREDICTION_TIMEOUT_MS,
+  ): string | undefined {
+    const predictionId = this.predictBlocks(updates, timeoutMs);
+    if (!predictionId) {
+      return undefined;
+    }
+
+    this._game.networkManager.sendPredictedBlockEditsPacket(
+      predictionId,
+      updates.map(update => ({
+        globalCoordinate: {
+          x: update.globalCoordinate.x,
+          y: update.globalCoordinate.y,
+          z: update.globalCoordinate.z,
+        },
+        blockTypeId: update.blockId,
+        blockRotationIndex: update.blockRotationIndex,
+      })),
+    );
+
     return predictionId;
   }
 
@@ -641,8 +807,8 @@ export default class ChunkManager {
     raycaster.set(rayOriginVec3, rayDirectionVec3);
 
     blockRaycastIntersections.length = 0;
-    const nearbySolidMeshes = this._game.chunkMeshManager.getSolidMeshesNear(rayOriginVec3, maxDistance);
-    raycaster.intersectObjects(nearbySolidMeshes, false, blockRaycastIntersections);
+    const nearbyBlockMeshes = this._game.chunkMeshManager.getBlockRaycastMeshesNear(rayOriginVec3, maxDistance);
+    raycaster.intersectObjects(nearbyBlockMeshes, false, blockRaycastIntersections);
     const intersection = blockRaycastIntersections[0];
 
     if (!intersection?.face) {
@@ -731,6 +897,8 @@ export default class ChunkManager {
   }
   private _applyBlockUpdates(updates: ChunkBlockUpdate[]): boolean {
     const workerUpdate: Record<ChunkId, { localCoordinate: Vector3Like, blockId: BlockId, blockRotationIndex?: number }[]> = {};
+    const newlyPromotedBatches: Set<BatchId> = new Set();
+    const updatedChunkIdsByBatch: Map<BatchId, Set<ChunkId>> = new Map();
 
     for (const { globalCoordinate, blockId, blockRotationIndex } of updates) {
       const chunkId = Chunk.globalCoordinateToChunkId(globalCoordinate);
@@ -750,6 +918,21 @@ export default class ChunkManager {
       }
 
       this._registry.updateBlock(chunkId, localCoordinate, blockId, nextBlockRotationIndex);
+
+      const batchId = Chunk.chunkIdToBatchId(chunkId);
+      if (!this._promotedBatchIds.has(batchId)) {
+        this._startBatchPromotion(batchId);
+        if (this._promotedBatchIds.has(batchId)) {
+          newlyPromotedBatches.add(batchId);
+        }
+      }
+
+      let updatedChunkIds = updatedChunkIdsByBatch.get(batchId);
+      if (!updatedChunkIds) {
+        updatedChunkIds = new Set();
+        updatedChunkIdsByBatch.set(batchId, updatedChunkIds);
+      }
+      updatedChunkIds.add(chunkId);
 
       if (workerUpdate[chunkId] === undefined) {
         workerUpdate[chunkId] = [];
@@ -775,6 +958,10 @@ export default class ChunkManager {
       update: workerUpdate,
     };
     this._game.chunkWorkerClient.postMessage(message);
+
+    for (const batchId of newlyPromotedBatches) {
+      this._queuePromotedBatchChunkBuilds(batchId, updatedChunkIdsByBatch.get(batchId));
+    }
 
     return true;
   }

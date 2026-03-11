@@ -15,6 +15,7 @@ export enum WorkerEventType {
   BlockTextureAtlasUpdated = 'WORKER.TEXTURE_ATLAS_UPDATED',
   BlockTextureAtlasMetadata = 'WORKER.TEXTURE_ATLAS_METADATA',
   ChunkBatchBuilt = 'WORKER.CHUNK_BATCH_BUILT',
+  ChunkBuilt = 'WORKER.CHUNK_BUILT',
   LightLevelVolumeBuilt = 'WORKER.LIGHT_LEVEL_VOLUME_BUILT',
   SkyDistanceVolumeBuilt = 'WORKER.SKY_DISTANCE_VOLUME_BUILT',
 }
@@ -48,6 +49,16 @@ export namespace WorkerEventPayload {
     blockCount: number;
   }
 
+  export interface IChunkBuilt {
+    batchId: BatchId;
+    chunkId: ChunkId;
+    foliageGeometry?: BlocksBufferGeometryData;
+    liquidGeometry?: BlocksBufferGeometryData;
+    opaqueSolidGeometry?: BlocksBufferGeometryData;
+    transparentSolidGeometry?: BlocksBufferGeometryData;
+    blockCount: number;
+  }
+
   export interface ILightLevelVolumeBuilt {
     chunkId: ChunkId;
     lightLevelVolume?: Uint8Array;
@@ -64,7 +75,9 @@ export type ToChunkWorkerMessageCore = {
     'block_entity_build' |
     'block_type' |
     'block_type_update' |
+    'batch_promotion_update' |
     'blocks_update' |
+    'chunk_build' |
     'chunk_batch_build' |
     'chunks_update' |
     'chunk_update' |
@@ -85,6 +98,12 @@ export type ChunkWorkerBlockTypeUpdateMessage = ToChunkWorkerMessageCore & {
   textureUris?: Record<BlockFace, BlockTextureUri>;
 };
 
+export type ChunkWorkerBatchPromotionUpdateMessage = ToChunkWorkerMessageCore & {
+  type: 'batch_promotion_update';
+  batchId: BatchId;
+  promoted: boolean;
+};
+
 export type ChunkWorkerBlocksUpdateMessage = ToChunkWorkerMessageCore & {
   type: 'blocks_update';
   update: Record<ChunkId, {
@@ -92,6 +111,11 @@ export type ChunkWorkerBlocksUpdateMessage = ToChunkWorkerMessageCore & {
     blockId: BlockId;
     blockRotationIndex?: number;
   }[]>;
+};
+
+export type ChunkWorkerChunkBuildMessage = ToChunkWorkerMessageCore & {
+  type: 'chunk_build';
+  chunkId: ChunkId;
 };
 
 export type ChunkWorkerChunkBatchBuildMessage = ToChunkWorkerMessageCore & {
@@ -138,7 +162,9 @@ export type ChunkWorkerInitMessage = ToChunkWorkerMessageCore & {
 export type ToChunkWorkerMessage =
   ChunkWorkerBlockTypeMessage |
   ChunkWorkerBlockTypeUpdateMessage |
+  ChunkWorkerBatchPromotionUpdateMessage |
   ChunkWorkerBlocksUpdateMessage |
+  ChunkWorkerChunkBuildMessage |
   ChunkWorkerChunkBatchBuildMessage |
   ChunkWorkerChunksUpdateMessage |
   ChunkWorkerChunkUpdateMessage |
@@ -152,6 +178,7 @@ export type FromChunkWorkerMessageCore = {
   'block_texture_atlas_updated' |
   'block_texture_atlas_metadata' |
   'chunk_batch_built' |
+  'chunk_built' |
   'light_level_volume_built' |
   'sky_distance_volume_built';
 };
@@ -164,6 +191,17 @@ export type ChunkWorkerChunkBatchBuiltMessage = FromChunkWorkerMessageCore & {
   liquidGeometry?: BlocksBufferGeometryData;
   opaqueSolidGeometry?: BlocksBufferGeometryData;
   requestVersion: number;
+  transparentSolidGeometry?: BlocksBufferGeometryData;
+  blockCount: number;
+};
+
+export type ChunkWorkerChunkBuiltMessage = FromChunkWorkerMessageCore & {
+  type: 'chunk_built';
+  batchId: BatchId;
+  chunkId: ChunkId;
+  foliageGeometry?: BlocksBufferGeometryData;
+  liquidGeometry?: BlocksBufferGeometryData;
+  opaqueSolidGeometry?: BlocksBufferGeometryData;
   transparentSolidGeometry?: BlocksBufferGeometryData;
   blockCount: number;
 };
@@ -202,6 +240,7 @@ export type ChunkWorkerBlockTextureAtlasMetadataMessage = FromChunkWorkerMessage
 
 export type FromChunkWorkerMessage =
   ChunkWorkerChunkBatchBuiltMessage |
+  ChunkWorkerChunkBuiltMessage |
   ChunkWorkerBlockEntityBuiltMessage |
   ChunkWorkerBlockTextureAtlasUpdatedMessage |
   ChunkWorkerBlockTextureAtlasMetadataMessage |

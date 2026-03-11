@@ -98,6 +98,29 @@ The cosmetics for the player.
 </td></tr>
 <tr><td>
 
+[defaultBlockEditPredictionConfig](./server.player.defaultblockeditpredictionconfig.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+[DefaultBlockEditPredictionConfig](./server.defaultblockeditpredictionconfig.md)
+
+
+</td><td>
+
+The owner-only stock block edit prediction settings used by the fixed client helpers.
+
+\*\*Category:\*\* Players
+
+
+</td></tr>
+<tr><td>
+
 [id](./server.player.id.md)
 
 
@@ -181,6 +204,29 @@ number
 </td><td>
 
 The maximum distance a player can interact with entities or blocks.
+
+
+</td></tr>
+<tr><td>
+
+[predictedBlockEditBatches](./server.player.predictedblockeditbatches.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+readonly [PredictedBlockEditBatch](./server.predictedblockeditbatch.md)<!-- -->\[\]
+
+
+</td><td>
+
+The owner player's speculative block edit batches available for the current simulation tick.
+
+\*\*Category:\*\* Players
 
 
 </td></tr>
@@ -413,6 +459,22 @@ Rejects and rolls back a speculative client block edit batch by prediction id.
 Schedules a notification for the player at a future time.
 
 Use for: re-engagement or timed reminders. Do NOT use for: immediate in-game messaging; use chat or UI instead.
+
+
+</td></tr>
+<tr><td>
+
+[setDefaultBlockEditPredictionConfig(config)](./server.player.setdefaultblockeditpredictionconfig.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Updates the stock owner-only block edit prediction settings for this player.
+
+\*\*Category:\*\* Players
 
 
 </td></tr>

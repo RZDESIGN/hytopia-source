@@ -1673,13 +1673,12 @@ export default class Renderer {
       const blockTypeId = chunk.getBlockType(Chunk.globalCoordinateToLocalCoordinate(cameraGlobalCoordinate));
       const blockType = this._game.blockTypeManager.getBlockType(blockTypeId)!;
       const blockRGB = this._game.blockTypeManager.getBlockRGB(blockType);
-      // Since less light reaches underwater, using a slightly darker color than the
-      // Liquid Block's color creates a more realistic effect. However, this adjustment
-      // value is not based on any solid reference and may need further tuning.
+      // Cap underwater overlay brightness so bright liquid textures cannot wash out the
+      // screen while swimming. Keep a slight blue bias so the tint still reads as water.
       (this._underWaterEffectQuad.material as MeshBasicMaterial).color.setRGB(
-        blockRGB[0] * 0.5,
-        blockRGB[1] * 0.5,
-        blockRGB[2] * 0.5,
+        Math.min(blockRGB[0] * 0.22, 0.16),
+        Math.min(blockRGB[1] * 0.22, 0.18),
+        Math.min(blockRGB[2] * 0.22, 0.20),
       );
       this._underWaterEffectQuad.matrixWorld.multiplyMatrices(activeCamera.matrixWorld, this._underWaterEffectQuad.matrix);
       this._underWaterEffectQuad.visible = true;

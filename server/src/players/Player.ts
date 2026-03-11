@@ -15,6 +15,10 @@ import {
 } from '@gameplay-shared/InputContract';
 import type Connection from '@/networking/Connection';
 import { PlayerUIEvent } from '@/players/PlayerUI';
+import {
+  createDefaultBlockEditPredictionConfig,
+  type DefaultBlockEditPredictionConfig,
+} from '@engine-shared/network/ConnectionFeatureFlags';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 import type World from '@/worlds/World';
 import type { InputSchema, PredictedBlockEditsSendSchema } from '@hytopia.com/server-protocol';
@@ -30,6 +34,9 @@ import type { RaycastHit } from '@/worlds/physics/Simulation';
 export const SUPPORTED_INPUTS = SHARED_SUPPORTED_INPUTS;
 
 const MAX_QUEUED_SEQUENCED_MOVEMENT_COMMANDS = 64;
+const MAX_PREDICTED_BLOCK_EDITS_PER_BATCH = 64;
+const MAX_QUEUED_PREDICTED_BLOCK_EDIT_BATCHES = 64;
+const MAX_QUEUED_PREDICTED_BLOCK_EDITS = 256;
 
 type SequencedMovementInputCommand = {
   sequenceNumber: number;
@@ -66,6 +73,17 @@ export type PredictedBlockEditAttempt = {
 };
 
 /**
+ * A speculative block edit batch grouped by a client prediction id.
+ *
+ * **Category:** Players
+ * @public
+ */
+export type PredictedBlockEditBatch = {
+  predictionId: string;
+  edits: PredictedBlockEditAttempt[];
+};
+
+/**
  * Event types a Player can emit.
  *
  * See `PlayerEventPayloads` for the payloads.
@@ -77,6 +95,7 @@ export enum PlayerEvent {
   BLOCK_EDIT_PREDICTION          = 'PLAYER.BLOCK_EDIT_PREDICTION',
   CHAT_MESSAGE_SEND               = 'PLAYER.CHAT_MESSAGE_SEND',
   CONFIRM_BLOCK_EDIT_PREDICTION   = 'PLAYER.CONFIRM_BLOCK_EDIT_PREDICTION',
+  DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE = 'PLAYER.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE',
   INTERACT                        = 'PLAYER.INTERACT',
   JOINED_WORLD                    = 'PLAYER.JOINED_WORLD',
   LEFT_WORLD                      = 'PLAYER.LEFT_WORLD',
@@ -101,6 +120,9 @@ export interface PlayerEventPayloads {
 
   /** Emitted when server gameplay confirms a speculative block edit prediction. */
   [PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION]:   { player: Player, predictionId: string }
+
+  /** Emitted when owner-only default block edit prediction settings change. */
+  [PlayerEvent.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE]: { player: Player, config: DefaultBlockEditPredictionConfig }
 
   /** Emitted when a player joins a world. */
   [PlayerEvent.JOINED_WORLD]:                    { player: Player, world: World }
@@ -209,6 +231,18 @@ export default class Player extends EventRouter implements protocol.Serializable
   private _queuedSequencedMovementInputs: SequencedMovementInputCommand[] = [];
 
   /** @internal */
+  private _defaultBlockEditPredictionConfig: DefaultBlockEditPredictionConfig = createDefaultBlockEditPredictionConfig();
+
+  /** @internal */
+  private _predictedBlockEditBatches: PredictedBlockEditBatch[] = [];
+
+  /** @internal */
+  private _queuedPredictedBlockEditBatches: PredictedBlockEditBatch[] = [];
+
+  /** @internal */
+  private _queuedPredictedBlockEditCount: number = 0;
+
+  /** @internal */
   private _maxInteractDistance: number = 20;
 
   /** @internal */
@@ -241,6 +275,22 @@ export default class Player extends EventRouter implements protocol.Serializable
    * **Category:** Players
    */
   public get input(): PlayerInput { return this._input; }
+
+  /**
+   * The owner player's speculative block edit batches available for the current simulation tick.
+   *
+   * **Category:** Players
+   */
+  public get predictedBlockEditBatches(): readonly PredictedBlockEditBatch[] { return this._predictedBlockEditBatches; }
+
+  /**
+   * The owner-only stock block edit prediction settings used by the fixed client helpers.
+   *
+   * **Category:** Players
+   */
+  public get defaultBlockEditPredictionConfig(): DefaultBlockEditPredictionConfig {
+    return this._defaultBlockEditPredictionConfig;
+  }
 
   /**
    * Whether player click/tap input triggers interactions.
@@ -510,6 +560,46 @@ export default class Player extends EventRouter implements protocol.Serializable
   }
 
   /**
+   * Updates the stock owner-only block edit prediction settings for this player.
+   *
+   * **Category:** Players
+   */
+  public setDefaultBlockEditPredictionConfig(
+    config: Partial<DefaultBlockEditPredictionConfig>,
+  ): void {
+    const nextConfig: DefaultBlockEditPredictionConfig = {
+      maxDistance: Number.isFinite(config.maxDistance)
+        ? Math.max(0, config.maxDistance as number)
+        : this._defaultBlockEditPredictionConfig.maxDistance,
+      placeBlockTypeId: typeof config.placeBlockTypeId !== 'number'
+        ? this._defaultBlockEditPredictionConfig.placeBlockTypeId
+        : Math.max(0, Math.floor(config.placeBlockTypeId)),
+      placeBlockRotationIndex: config.placeBlockRotationIndex === undefined || config.placeBlockRotationIndex === null
+        ? undefined
+        : Math.max(0, Math.floor(config.placeBlockRotationIndex)),
+    };
+
+    if (
+      nextConfig.maxDistance === this._defaultBlockEditPredictionConfig.maxDistance &&
+      nextConfig.placeBlockTypeId === this._defaultBlockEditPredictionConfig.placeBlockTypeId &&
+      nextConfig.placeBlockRotationIndex === this._defaultBlockEditPredictionConfig.placeBlockRotationIndex
+    ) {
+      return;
+    }
+
+    this._defaultBlockEditPredictionConfig = nextConfig;
+
+    if (!this._world) {
+      return;
+    }
+
+    this.emitWithWorld(this._world, PlayerEvent.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE, {
+      player: this,
+      config: nextConfig,
+    });
+  }
+
+  /**
    * Merges data into the player's persisted data cache.
    *
    * Use for: saving progress, inventory, or other player-specific state.
@@ -584,6 +674,10 @@ export default class Player extends EventRouter implements protocol.Serializable
   /** @internal */
   public discardInputForSimulation(): void {
     this._input = {};
+    this._rollbackPendingPredictedBlockEditBatches(this._queuedPredictedBlockEditBatches);
+    this._predictedBlockEditBatches = [];
+    this._queuedPredictedBlockEditBatches.length = 0;
+    this._queuedPredictedBlockEditCount = 0;
 
     if (this._queuedSequencedMovementInputs.length > 0) {
       const lastQueuedCommand = this._queuedSequencedMovementInputs[this._queuedSequencedMovementInputs.length - 1];
@@ -604,6 +698,9 @@ export default class Player extends EventRouter implements protocol.Serializable
 
   /** @internal */
   public applyQueuedInputForSimulation(): void {
+    this._predictedBlockEditBatches = this._queuedPredictedBlockEditBatches.splice(0);
+    this._queuedPredictedBlockEditCount = 0;
+
     if (this._queuedSequencedMovementInputs.length === 0) {
       this.markInputAppliedForSimulation();
       return;
@@ -654,6 +751,11 @@ export default class Player extends EventRouter implements protocol.Serializable
     }
 
     this._lastAppliedInputSequenceNumber = command.sequenceNumber;
+  }
+
+  /** @internal */
+  public clearPredictedBlockEditBatchesForSimulation(): void {
+    this._predictedBlockEditBatches = [];
   }
 
   /** @internal */
@@ -750,6 +852,15 @@ export default class Player extends EventRouter implements protocol.Serializable
     }
 
     const data: PredictedBlockEditsSendSchema = packet[1];
+    if (data.e.length === 0) {
+      return;
+    }
+
+    if (data.e.length > MAX_PREDICTED_BLOCK_EDITS_PER_BATCH) {
+      this.rollbackPredictedBlockEdit(data.p);
+      return;
+    }
+
     const edits: PredictedBlockEditAttempt[] = new Array(data.e.length);
 
     for (let i = 0; i < data.e.length; i++) {
@@ -764,6 +875,24 @@ export default class Player extends EventRouter implements protocol.Serializable
         blockRotationIndex: edit.r,
       };
     }
+
+    while (
+      this._queuedPredictedBlockEditBatches.length >= MAX_QUEUED_PREDICTED_BLOCK_EDIT_BATCHES ||
+      this._queuedPredictedBlockEditCount + edits.length > MAX_QUEUED_PREDICTED_BLOCK_EDITS
+    ) {
+      const droppedBatch = this._dequeueQueuedPredictedBlockEditBatch();
+      if (!droppedBatch) {
+        break;
+      }
+
+      this.rollbackPredictedBlockEdit(droppedBatch.predictionId);
+    }
+
+    this._queuedPredictedBlockEditBatches.push({
+      predictionId: data.p,
+      edits,
+    });
+    this._queuedPredictedBlockEditCount += edits.length;
 
     this.emitWithWorld(this._world, PlayerEvent.BLOCK_EDIT_PREDICTION, {
       player: this,
@@ -806,6 +935,44 @@ export default class Player extends EventRouter implements protocol.Serializable
     }
 
     this._queuedSequencedMovementInputs.push(command);
+  }
+
+  /** @internal */
+  private _dequeueQueuedPredictedBlockEditBatch(): PredictedBlockEditBatch | undefined {
+    const batch = this._queuedPredictedBlockEditBatches.shift();
+
+    if (!batch) {
+      return undefined;
+    }
+
+    this._queuedPredictedBlockEditCount = Math.max(
+      0,
+      this._queuedPredictedBlockEditCount - batch.edits.length,
+    );
+
+    return batch;
+  }
+
+  /** @internal */
+  private _rollbackPendingPredictedBlockEditBatches(
+    batches: readonly PredictedBlockEditBatch[],
+  ): void {
+    if (!this._world || batches.length === 0) {
+      return;
+    }
+
+    const predictionIdsToRollback = new Set<string>();
+
+    for (let i = 0; i < batches.length; i++) {
+      const predictionId = batches[i].predictionId;
+
+      if (predictionIdsToRollback.has(predictionId)) {
+        continue;
+      }
+
+      predictionIdsToRollback.add(predictionId);
+      this.rollbackPredictedBlockEdit(predictionId);
+    }
   }
 
   /** @internal */

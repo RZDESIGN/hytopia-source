@@ -810,6 +810,7 @@ export declare interface BaseEntityControllerEventPayloads {
     [BaseEntityControllerEvent.TICK_WITH_PLAYER_INPUT]: {
         entity: PlayerEntity;
         input: PlayerInput;
+        predictedBlockEditBatches: readonly PredictedBlockEditBatch[];
         cameraOrientation: PlayerCameraOrientation;
         deltaTimeMs: number;
     };
@@ -1077,6 +1078,18 @@ export declare interface BlockColliderOptions extends BaseColliderOptions {
      */
     halfExtents?: Vector3Like;
 }
+
+declare type BlockEditPredictionConfigPacket = IPacket<typeof PacketId.BLOCK_EDIT_PREDICTION_CONFIG, BlockEditPredictionConfigSchema> & [WorldTick];
+
+declare const blockEditPredictionConfigPacketDefinition: IPacketDefinition<PacketId.BLOCK_EDIT_PREDICTION_CONFIG, BlockEditPredictionConfigSchema>;
+
+declare type BlockEditPredictionConfigSchema = {
+    m: number;
+    i: number;
+    r?: number;
+};
+
+declare const blockEditPredictionConfigSchema: JSONSchemaType<BlockEditPredictionConfigSchema>;
 
 declare type BlockEditPredictionResultSchema = {
     p: string;
@@ -2834,6 +2847,13 @@ export declare type ContactManifold = {
     normal: Vector3Like;
 };
 
+/**
+ * Creates the default client block edit prediction config used by stock helpers.
+ *
+ * @public
+ */
+export declare const createDefaultBlockEditPredictionConfig: () => DefaultBlockEditPredictionConfig;
+
 declare function createPacket<TId extends PacketId, TSchema>(packetDef: IPacketDefinition<TId, TSchema>, data: TSchema, worldTick?: WorldTick): IPacket<TId, TSchema>;
 
 declare function createPacketBufferUnframer(onMessage: (message: Uint8Array) => void): (chunk: Uint8Array) => void;
@@ -2904,6 +2924,17 @@ export declare const DEFAULT_BLOCK_EDIT_PREDICTION_PLACE_BLOCK_ID = 3;
  * @public
  */
 export declare const DEFAULT_ENTITY_RIGID_BODY_OPTIONS: RigidBodyOptions;
+
+/**
+ * Owner-only client prediction settings for stock block break/place helpers.
+ *
+ * @public
+ */
+export declare type DefaultBlockEditPredictionConfig = {
+    maxDistance: number;
+    placeBlockTypeId: number;
+    placeBlockRotationIndex?: number;
+};
 
 /**
  * Represents the default player model entity.
@@ -6747,6 +6778,8 @@ declare namespace outboundPackets {
     export {
         AudiosPacket,
         audiosPacketDefinition,
+        BlockEditPredictionConfigPacket,
+        blockEditPredictionConfigPacketDefinition,
         BlockEditPredictionResultsPacket,
         blockEditPredictionResultsPacketDefinition,
         BlocksPacket,
@@ -6839,6 +6872,7 @@ declare enum PacketId {
     PARTICLE_EMITTERS = 46,
     NOTIFICATION_PERMISSION_REQUEST = 47,
     BLOCK_EDIT_PREDICTION_RESULTS = 48,
+    BLOCK_EDIT_PREDICTION_CONFIG = 49,
     CONNECTION = 116,
     HEARTBEAT = 117,
     DEBUG_CONFIG = 128,
@@ -8041,12 +8075,28 @@ export declare class Player extends EventRouter implements protocol.Serializable
 
 
 
+
+
+
+
     /**
      * The current `PlayerInput` of the player.
      *
      * **Category:** Players
      */
     get input(): PlayerInput;
+    /**
+     * The owner player's speculative block edit batches available for the current simulation tick.
+     *
+     * **Category:** Players
+     */
+    get predictedBlockEditBatches(): readonly PredictedBlockEditBatch[];
+    /**
+     * The owner-only stock block edit prediction settings used by the fixed client helpers.
+     *
+     * **Category:** Players
+     */
+    get defaultBlockEditPredictionConfig(): DefaultBlockEditPredictionConfig;
     /**
      * Whether player click/tap input triggers interactions.
      *
@@ -8189,6 +8239,12 @@ export declare class Player extends EventRouter implements protocol.Serializable
      */
     rollbackPredictedBlockEdit(predictionId: string): void;
     /**
+     * Updates the stock owner-only block edit prediction settings for this player.
+     *
+     * **Category:** Players
+     */
+    setDefaultBlockEditPredictionConfig(config: Partial<DefaultBlockEditPredictionConfig>): void;
+    /**
      * Merges data into the player's persisted data cache.
      *
      * Use for: saving progress, inventory, or other player-specific state.
@@ -8206,6 +8262,9 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     setPersistedData(data: Record<string, unknown>): void;
+
+
+
 
 
 
@@ -9082,7 +9141,8 @@ export declare class PlayerEntity extends Entity {
      * Enables or disables `tickWithPlayerInput()` during the entity's tick.
      *
      * Use for: temporarily disabling player control (cutscenes, menus, stuns).
-     * When disabled, queued input is discarded and active control state is cleared.
+     * When disabled, queued input is discarded, speculative block edits are rolled back,
+     * and active control state is cleared.
      *
      * @param enabled - Whether `tickWithPlayerInput()` should be called.
      *
@@ -9119,6 +9179,7 @@ export declare enum PlayerEvent {
     BLOCK_EDIT_PREDICTION = "PLAYER.BLOCK_EDIT_PREDICTION",
     CHAT_MESSAGE_SEND = "PLAYER.CHAT_MESSAGE_SEND",
     CONFIRM_BLOCK_EDIT_PREDICTION = "PLAYER.CONFIRM_BLOCK_EDIT_PREDICTION",
+    DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE = "PLAYER.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE",
     INTERACT = "PLAYER.INTERACT",
     JOINED_WORLD = "PLAYER.JOINED_WORLD",
     LEFT_WORLD = "PLAYER.LEFT_WORLD",
@@ -9150,6 +9211,11 @@ export declare interface PlayerEventPayloads {
     [PlayerEvent.CONFIRM_BLOCK_EDIT_PREDICTION]: {
         player: Player;
         predictionId: string;
+    };
+    /** Emitted when owner-only default block edit prediction settings change. */
+    [PlayerEvent.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE]: {
+        player: Player;
+        config: DefaultBlockEditPredictionConfig;
     };
     /** Emitted when a player joins a world. */
     [PlayerEvent.JOINED_WORLD]: {
@@ -9520,6 +9586,17 @@ export declare type PredictedBlockEditAttempt = {
     blockRotationIndex?: number;
 };
 
+/**
+ * A speculative block edit batch grouped by a client prediction id.
+ *
+ * **Category:** Players
+ * @public
+ */
+export declare type PredictedBlockEditBatch = {
+    predictionId: string;
+    edits: PredictedBlockEditAttempt[];
+};
+
 declare type PredictedBlockEditSchema = {
     c: VectorSchema;
     i: number;
@@ -9561,6 +9638,8 @@ declare namespace protocol {
         uiDataSendPacketDefinition,
         AudiosPacket,
         audiosPacketDefinition,
+        BlockEditPredictionConfigPacket,
+        blockEditPredictionConfigPacketDefinition,
         BlockEditPredictionResultsPacket,
         blockEditPredictionResultsPacketDefinition,
         BlocksPacket,
@@ -9622,6 +9701,8 @@ declare namespace protocol {
         blockEditPredictionResultSchema,
         BlockEditPredictionResultsSchema,
         blockEditPredictionResultsSchema,
+        BlockEditPredictionConfigSchema,
+        blockEditPredictionConfigSchema,
         BlockSchema,
         blockSchema,
         BlocksSchema,

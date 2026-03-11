@@ -232,21 +232,22 @@ class MeshLiquidMaterial extends ShaderMaterial {
                 float fresnel = pow(1.0 - clamp(dot(surfaceNormal, viewDir), 0.0, 1.0), 3.6);
                 vec4 reflectionUv = ${UNIFORM_REFLECTION_TEXTURE_MATRIX} * vec4(vWorldPos, 1.0);
                 vec2 projectedReflectionUv = reflectionUv.xy / max(reflectionUv.w, 0.0001);
-                vec2 projectedReflectionOffset = rippleNormal * mix(0.010, 0.018, fresnel);
-                vec2 reflectionSampleUv = projectedReflectionUv + projectedReflectionOffset;
-                float edgeDistance = min(
-                  min(reflectionSampleUv.x, reflectionSampleUv.y),
-                  min(1.0 - reflectionSampleUv.x, 1.0 - reflectionSampleUv.y)
+                float projectedEdgeDistance = min(
+                  min(projectedReflectionUv.x, projectedReflectionUv.y),
+                  min(1.0 - projectedReflectionUv.x, 1.0 - projectedReflectionUv.y)
                 );
-                float reflectionEdgeFade = smoothstep(0.004, 0.085, edgeDistance);
-                float inBounds = step(0.0, reflectionSampleUv.x) * step(reflectionSampleUv.x, 1.0)
-                  * step(0.0, reflectionSampleUv.y) * step(reflectionSampleUv.y, 1.0)
+                float reflectionOffsetFade = smoothstep(0.0, 0.10, projectedEdgeDistance);
+                vec2 projectedReflectionOffset = rippleNormal * mix(0.010, 0.018, fresnel) * reflectionOffsetFade;
+                vec2 reflectionSampleUv = clamp(projectedReflectionUv + projectedReflectionOffset, 0.0, 1.0);
+                float inBounds = step(0.0, projectedReflectionUv.x) * step(projectedReflectionUv.x, 1.0)
+                  * step(0.0, projectedReflectionUv.y) * step(projectedReflectionUv.y, 1.0)
                   * step(0.0, reflectionUv.w);
-                float reflectionSampleBlend = inBounds * reflectionEdgeFade;
+                float reflectionEdgeFade = smoothstep(0.015, 0.10, projectedEdgeDistance);
                 vec3 sceneReflection = texture2D(${UNIFORM_REFLECTION_TEXTURE}, clamp(reflectionSampleUv, 0.0, 1.0)).rgb;
-                float reflectionStrength = clamp(0.34 + fresnel * 0.62, 0.0, 0.96) * reflectionSampleBlend;
+                vec3 reflectionTinted = mix(color, sceneReflection, 0.45 + fresnel * 0.15);
+                float reflectionStrength = clamp(0.16 + fresnel * 0.32, 0.0, 0.52) * inBounds * reflectionEdgeFade;
 
-                color = mix(color, sceneReflection, reflectionStrength);
+                color = mix(color, reflectionTinted, reflectionStrength);
               }
 
               vec2 blockPos = fract(vWorldPos.xz);

@@ -4,11 +4,13 @@ import EventRouter from '../events/EventRouter';
 import { NetworkManagerEventType } from './NetworkEvents';
 
 import type {
+  DeserializedBlockEditPredictionConfig,
   DeserializedConnection,
   DeserializedSyncResponse,
 } from './Deserializer';
 
 export type InboundPacketRouterDependencies = {
+  onBlockEditPredictionConfigPacket: (deserializedBlockEditPredictionConfig: DeserializedBlockEditPredictionConfig) => void;
   onConnectionPacket: (deserializedConnection: DeserializedConnection) => void | Promise<void>;
   onFirstWorldPacket: () => void;
   onHeartbeatPacket: () => void;
@@ -37,6 +39,14 @@ inboundPacketHandlers[protocol.PacketId.BLOCK_EDIT_PREDICTION_RESULTS] = (data, 
     ),
     serverTick: serverTick as number,
   });
+};
+
+inboundPacketHandlers[protocol.PacketId.BLOCK_EDIT_PREDICTION_CONFIG] = (data, _serverTick, dependencies) => {
+  dependencies.onBlockEditPredictionConfigPacket(
+    Deserializer.deserializeBlockEditPredictionConfig(
+      data as protocol.BlockEditPredictionConfigSchema,
+    ),
+  );
 };
 
 inboundPacketHandlers[protocol.PacketId.CHUNKS] = (data, serverTick) => {

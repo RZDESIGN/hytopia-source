@@ -78,6 +78,20 @@ CONFIRM\_BLOCK\_EDIT\_PREDICTION
 </td></tr>
 <tr><td>
 
+DEFAULT\_BLOCK\_EDIT\_PREDICTION\_CONFIG\_UPDATE
+
+
+</td><td>
+
+`"PLAYER.DEFAULT_BLOCK_EDIT_PREDICTION_CONFIG_UPDATE"`
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 INTERACT
 
 

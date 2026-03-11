@@ -8,13 +8,16 @@ import {
   BlockTextureAtlasManagerLegacy,
 } from './BlockTextureAtlasManager';
 import type {
+  ChunkWorkerBatchPromotionUpdateMessage,
   ChunkWorkerBlocksUpdateMessage,
   ChunkWorkerBlockTypeMessage,
   ChunkWorkerChunksUpdateMessage,
+  ChunkWorkerChunkBuildMessage,
   ChunkWorkerChunkUpdateMessage,
   ChunkWorkerChunkRemoveMessage,
   ChunkWorkerChunkBatchBuildMessage,
   ChunkWorkerChunkBatchBuiltMessage,
+  ChunkWorkerChunkBuiltMessage,
   ChunkWorkerBlockEntityBuildMessage,
   ChunkWorkerBlockEntityBuiltMessage,
   ChunkWorkerBlockTypeUpdateMessage,
@@ -160,6 +163,7 @@ class ChunkWorker {
   private _chunkRegistry = new ChunkRegistry();
   private _blockTypeRegistry = new BlockTypeRegistry();
   private _latestChunkBatchBuildRequestVersion: Map<BatchId, number> = new Map();
+  private _promotedBatches: Set<BatchId> = new Set();
   private _trimeshOcclusionProfiles: Map<BlockId, TrimeshOcclusionProfile> = new Map();
   private _receiveQueue: MessageEvent[] = [];
   private _processing: boolean = false;
@@ -290,15 +294,42 @@ class ChunkWorker {
         this._lastBlocksUpdateMessage.set(chunkId as ChunkId, newEvent);
       }
 
-      this._receiveQueue.push(newEvent);
+      this._enqueueMessage(newEvent, true);
+    } else if (message.type === 'chunk_build' || message.type === 'batch_promotion_update') {
+      this._enqueueMessage(event, true);
     } else {
       // Add other message types to queue normally
-      this._receiveQueue.push(event);
+      this._enqueueMessage(event);
     }
 
     if (!this._processing) {
       this._trigger();
     }
+  }
+
+  private _enqueueMessage(
+    event: MessageEvent,
+    prioritizeBeforeBuilds: boolean = false,
+  ): void {
+    if (!prioritizeBeforeBuilds) {
+      this._receiveQueue.push(event);
+      return;
+    }
+
+    // Keep chunk/chunks updates ahead of interactive block edits so the worker's
+    // chunk registry stays coherent, but let block edits jump ahead of queued
+    // geometry builds to avoid visible ghost blocks during large-world streaming.
+    const insertIndex = this._receiveQueue.findIndex(queuedEvent => {
+      const queuedMessage = queuedEvent.data as ToChunkWorkerMessage;
+      return queuedMessage.type === 'chunk_batch_build' || queuedMessage.type === 'block_entity_build';
+    });
+
+    if (insertIndex < 0) {
+      this._receiveQueue.push(event);
+      return;
+    }
+
+    this._receiveQueue.splice(insertIndex, 0, event);
   }
 
   private async _trigger(): Promise<void> {
@@ -379,8 +410,12 @@ class ChunkWorker {
         return this._onBlockType(message);
       case 'block_type_update':
         return this._onBlockTypeUpdate(message);
+      case 'batch_promotion_update':
+        return this._onBatchPromotionUpdate(message);
       case 'blocks_update':
         return this._onBlocksUpdate(message);
+      case 'chunk_build':
+        return this._onChunkBuild(message);
       case 'chunk_batch_build':
         return this._onChunkBatchBuild(message);
       case 'chunks_update':
@@ -434,6 +469,14 @@ class ChunkWorker {
     }
   };
 
+  private _onBatchPromotionUpdate = (message: ChunkWorkerBatchPromotionUpdateMessage): void => {
+    if (message.promoted) {
+      this._promotedBatches.add(message.batchId);
+    } else {
+      this._promotedBatches.delete(message.batchId);
+    }
+  };
+
   private _onBlocksUpdate = async (message: ChunkWorkerBlocksUpdateMessage): Promise<void> => {
     const affectedChunkIds = this._updateBlocks(message.update);
     
@@ -443,23 +486,40 @@ class ChunkWorker {
     for (const chunkId of affectedChunkIds) {
       const batchId = Chunk.chunkIdToBatchId(chunkId);
       if (!affectedBatches.has(batchId)) {
-        // Get all chunks currently in this batch (not just affected ones)
-        const allBatchChunkIds = Chunk.getChunkIdsInBatch(batchId).filter(
-          cid => this._chunkRegistry.hasChunk(cid)
-        );
-        affectedBatches.set(batchId, allBatchChunkIds);
+        affectedBatches.set(batchId, []);
       }
+
+      affectedBatches.get(batchId)!.push(chunkId);
     }
 
     // Rebuild each affected batch
     for (const [ batchId, chunkIds ] of affectedBatches) {
       if (chunkIds.length > 0) {
-        this._buildChunkBatchGeometries(batchId, chunkIds, this._latestChunkBatchBuildRequestVersion.get(batchId) ?? 0);
+        if (this._promotedBatches.has(batchId)) {
+          for (let i = 0; i < chunkIds.length; i++) {
+            this._buildChunkGeometry(chunkIds[i]);
+          }
+        } else {
+          const allBatchChunkIds = Chunk.getChunkIdsInBatch(batchId).filter(
+            cid => this._chunkRegistry.hasChunk(cid)
+          );
+
+          this._buildChunkBatchGeometries(
+            batchId,
+            allBatchChunkIds,
+            this._latestChunkBatchBuildRequestVersion.get(batchId) ?? 0,
+          );
+        }
       }
     }
 
     // Yield control to process accumulated messages and allow blocks_update merging
     // after potentially long-running geometry build operations
+    return new Promise(resolve => setTimeout(resolve, 0));
+  };
+
+  private _onChunkBuild = (message: ChunkWorkerChunkBuildMessage): Promise<void> => {
+    this._buildChunkGeometry(message.chunkId);
     return new Promise(resolve => setTimeout(resolve, 0));
   };
 
@@ -535,6 +595,61 @@ class ChunkWorker {
       };
       self.postMessage(volumeMessage, skyDistanceVolume ? [skyDistanceVolume.buffer] : []);
     }
+  }
+
+  private _buildChunkGeometry(chunkId: ChunkId): void {
+    const batchId = Chunk.chunkIdToBatchId(chunkId);
+    const {
+      foliageGeometry,
+      liquidGeometry,
+      opaqueSolidGeometry,
+      transparentSolidGeometry,
+      blockCount,
+      lightLevelVolumes,
+      skyDistanceVolumes,
+    } = this._createChunkBatchGeometries(batchId, [ chunkId ]);
+
+    const geometries: BlocksBufferGeometryData[] = [];
+    if (foliageGeometry) {
+      geometries.push(foliageGeometry);
+    }
+    if (liquidGeometry) {
+      geometries.push(liquidGeometry);
+    }
+    if (opaqueSolidGeometry) {
+      geometries.push(opaqueSolidGeometry);
+    }
+    if (transparentSolidGeometry) {
+      geometries.push(transparentSolidGeometry);
+    }
+
+    const sendMessage: ChunkWorkerChunkBuiltMessage = {
+      type: 'chunk_built',
+      batchId,
+      chunkId,
+      foliageGeometry,
+      liquidGeometry,
+      opaqueSolidGeometry,
+      transparentSolidGeometry,
+      blockCount,
+    };
+    self.postMessage(sendMessage, this._collectTransferableObjectsFromGeometryDataArray(geometries));
+
+    const lightLevelVolume = lightLevelVolumes.get(chunkId);
+    const lightLevelMessage: ChunkWorkerLightLevelVolumeBuiltMessage = {
+      type: 'light_level_volume_built',
+      chunkId,
+      lightLevelVolume,
+    };
+    self.postMessage(lightLevelMessage, lightLevelVolume ? [lightLevelVolume.buffer] : []);
+
+    const skyDistanceVolume = skyDistanceVolumes.get(chunkId);
+    const skyDistanceMessage: ChunkWorkerSkyDistanceVolumeBuiltMessage = {
+      type: 'sky_distance_volume_built',
+      chunkId,
+      skyDistanceVolume,
+    };
+    self.postMessage(skyDistanceMessage, skyDistanceVolume ? [skyDistanceVolume.buffer] : []);
   }
 
   private _collectTransferableObjectsFromGeometryDataArray(array: BlocksBufferGeometryData[]): Transferable[] {
