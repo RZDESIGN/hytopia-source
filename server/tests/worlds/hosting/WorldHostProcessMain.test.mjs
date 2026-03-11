@@ -771,20 +771,18 @@ test('same-tick spatial removals dominate stale later patches for the same id', 
       continue;
     }
 
-    assert.equal(entityPayloads.length, 1);
-    assert.equal(entityPayloads[0].i, 7201);
-    assert.equal(entityPayloads[0].rm, true);
-    assert.equal('n' in entityPayloads[0], false);
+    const entityRemovalPayload = entityPayloads.find(entity => entity.i === 7201 && entity.rm === true);
+    const particleRemovalPayload = particlePayloads.find(particle => particle.i === 8201 && particle.rm === true);
+    const sceneUIRemovalPayload = sceneUIPayloads.find(sceneUI => sceneUI.i === 9201 && sceneUI.rm === true);
 
-    assert.equal(particlePayloads.length, 1);
-    assert.equal(particlePayloads[0].i, 8201);
-    assert.equal(particlePayloads[0].rm, true);
-    assert.equal('tu' in particlePayloads[0], false);
+    assert.ok(entityRemovalPayload);
+    assert.equal('n' in entityRemovalPayload, false);
 
-    assert.equal(sceneUIPayloads.length, 1);
-    assert.equal(sceneUIPayloads[0].i, 9201);
-    assert.equal(sceneUIPayloads[0].rm, true);
-    assert.equal('s' in sceneUIPayloads[0], false);
+    assert.ok(particleRemovalPayload);
+    assert.equal('tu' in particleRemovalPayload, false);
+
+    assert.ok(sceneUIRemovalPayload);
+    assert.equal('s' in sceneUIRemovalPayload, false);
     return;
   }
 

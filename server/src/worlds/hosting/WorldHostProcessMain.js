@@ -1,5 +1,6 @@
 import { gzipSync } from 'node:zlib';
 import { Packr, FLOAT32_OPTIONS } from 'msgpackr';
+import { ChunkSpatialInterestIndex } from '../../shared/helpers/ChunkSpatialInterestIndex.js';
 
 const msgpackr = new Packr({ useFloat32: FLOAT32_OPTIONS.ALWAYS });
 const PROCESS_ID = `child-${process.pid}`;
@@ -31,6 +32,7 @@ const CHUNK_SIZE = 1 << CHUNK_SIZE_BITS;
 const CHUNK_STREAM_HORIZONTAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_HORIZONTAL_RADIUS ?? 6)));
 const CHUNK_STREAM_VERTICAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_VERTICAL_RADIUS ?? 3)));
 const CHUNK_STREAM_MAX_LOADS_PER_SYNC = Math.max(1, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_MAX_LOADS_PER_SYNC ?? 48)));
+const SCENE_UI_CHUNK_INTEREST_SAFE_VIEW_DISTANCE = Math.min(CHUNK_STREAM_HORIZONTAL_RADIUS, CHUNK_STREAM_VERTICAL_RADIUS) * CHUNK_SIZE;
 const worlds = new Map();
 
 const serializePackets = packets => {
@@ -350,6 +352,22 @@ class ShadowHostedWorldRuntime {
     this.currentWorldState = toWorldSchema(worldDescriptor, options);
     this.currentSceneUIStateById = new Map();
     this.lastRemovedSceneUIWorldTickById = new Map();
+    this.entitySpatialInterestIndex = new ChunkSpatialInterestIndex({
+      chunkSize: CHUNK_SIZE,
+      horizontalRadius: CHUNK_STREAM_HORIZONTAL_RADIUS,
+      verticalRadius: CHUNK_STREAM_VERTICAL_RADIUS,
+    });
+    this.particleEmitterSpatialInterestIndex = new ChunkSpatialInterestIndex({
+      chunkSize: CHUNK_SIZE,
+      horizontalRadius: CHUNK_STREAM_HORIZONTAL_RADIUS,
+      verticalRadius: CHUNK_STREAM_VERTICAL_RADIUS,
+    });
+    this.sceneUISpatialInterestIndex = new ChunkSpatialInterestIndex({
+      chunkSize: CHUNK_SIZE,
+      horizontalRadius: CHUNK_STREAM_HORIZONTAL_RADIUS,
+      verticalRadius: CHUNK_STREAM_VERTICAL_RADIUS,
+    });
+    this.longRangeSceneUIIds = new Set();
     this.loadedEntityIdsByPlayer = new Map();
     this.loadedChunkKeysByPlayer = new Map();
     this.loadedParticleEmitterIdsByPlayer = new Map();
@@ -358,6 +376,7 @@ class ShadowHostedWorldRuntime {
     this.players = new Map();
     this.pendingPacketsByPlayer = new Map();
     this.flushScheduled = false;
+    this.spatialInterestIndexInitialized = false;
   }
 
   get id() {
@@ -579,6 +598,8 @@ class ShadowHostedWorldRuntime {
       }));
     }
 
+    this.updateSceneUISpatialInterestById(sceneUIId);
+
     for (const playerId of this.players.keys()) {
       const loadedSceneUIIds = this.getOrCreateLoadedSceneUIIds(playerId);
       const shouldSync = !sceneUI.rm && this.shouldSyncSceneUIToPlayer(this.currentSceneUIStateById.get(sceneUIId), playerId);
@@ -775,6 +796,12 @@ class ShadowHostedWorldRuntime {
       this.currentEntityStateById.set(entityId, mergeEntitySchema(existingEntity, entity));
     }
 
+    if (entity.rm) {
+      this.removeEntitySpatialInterest(entityId);
+    } else {
+      this.updateEntitySpatialInterestById(entityId);
+    }
+
     for (const playerId of this.players.keys()) {
       const loadedEntityIds = this.getOrCreateLoadedEntityIds(playerId);
       const shouldSync = !entity.rm && this.shouldSyncEntityToPlayer(this.currentEntityStateById.get(entityId), playerId);
@@ -837,15 +864,13 @@ class ShadowHostedWorldRuntime {
       this.syncPlayerSpatialInterest(playerId, resolvedWorldTick);
     }
 
-    const hasAttachedParticleEmitters = Array.from(this.currentParticleEmitterStateById.values()).some(particleEmitter => particleEmitter?.e === entityId);
-    if (hasAttachedParticleEmitters) {
+    if (this.particleEmitterSpatialInterestIndex.hasAttachedIds(entityId)) {
       for (const playerId of this.players.keys()) {
         this.syncPlayerParticleEmitterInterest(playerId, resolvedWorldTick);
       }
     }
 
-    const hasAttachedSceneUIs = Array.from(this.currentSceneUIStateById.values()).some(sceneUI => sceneUI?.e === entityId);
-    if (hasAttachedSceneUIs) {
+    if (this.sceneUISpatialInterestIndex.hasAttachedIds(entityId)) {
       for (const playerId of this.players.keys()) {
         this.syncPlayerSceneUIInterest(playerId, resolvedWorldTick);
       }
@@ -876,6 +901,12 @@ class ShadowHostedWorldRuntime {
         ...existingParticleEmitter,
         ...particleEmitter,
       }));
+    }
+
+    if (particleEmitter.rm) {
+      this.removeParticleEmitterSpatialInterest(particleEmitterId);
+    } else {
+      this.updateParticleEmitterSpatialInterestById(particleEmitterId);
     }
 
     for (const playerId of this.players.keys()) {
@@ -1076,6 +1107,134 @@ class ShadowHostedWorldRuntime {
     return !!chunkKey && this.isChunkKeyInRange(chunkKey, centerChunkOrigin);
   }
 
+  ensureSpatialInterestIndex() {
+    if (this.spatialInterestIndexInitialized) {
+      return;
+    }
+
+    this.rebuildSpatialInterestIndex();
+    this.spatialInterestIndexInitialized = true;
+  }
+
+  rebuildSpatialInterestIndex() {
+    this.entitySpatialInterestIndex.clear();
+    this.particleEmitterSpatialInterestIndex.clear();
+    this.sceneUISpatialInterestIndex.clear();
+    this.longRangeSceneUIIds.clear();
+
+    for (const [entityId, entity] of this.currentEntityStateById.entries()) {
+      this.entitySpatialInterestIndex.update(entityId, entity?.p);
+    }
+
+    for (const [particleEmitterId, particleEmitter] of this.currentParticleEmitterStateById.entries()) {
+      this.particleEmitterSpatialInterestIndex.update(
+        particleEmitterId,
+        Number.isFinite(particleEmitter?.e)
+          ? this.currentEntityStateById.get(particleEmitter.e)?.p
+          : particleEmitter?.p,
+        Number.isFinite(particleEmitter?.e) ? particleEmitter.e : undefined,
+      );
+    }
+
+    for (const [sceneUIId, sceneUI] of this.currentSceneUIStateById.entries()) {
+      this.sceneUISpatialInterestIndex.update(
+        sceneUIId,
+        Number.isFinite(sceneUI?.e)
+          ? this.currentEntityStateById.get(sceneUI.e)?.p
+          : sceneUI?.p,
+        Number.isFinite(sceneUI?.e) ? sceneUI.e : undefined,
+      );
+      if (this.isLongRangeSceneUI(sceneUI)) {
+        this.longRangeSceneUIIds.add(sceneUIId);
+      }
+    }
+  }
+
+  updateEntitySpatialInterestById(entityId) {
+    this.ensureSpatialInterestIndex();
+    this.entitySpatialInterestIndex.update(entityId, this.currentEntityStateById.get(entityId)?.p);
+    this.refreshAttachedSpatialInterestForEntity(entityId);
+  }
+
+  removeEntitySpatialInterest(entityId) {
+    this.ensureSpatialInterestIndex();
+    this.entitySpatialInterestIndex.remove(entityId);
+    this.refreshAttachedSpatialInterestForEntity(entityId);
+  }
+
+  updateParticleEmitterSpatialInterestById(particleEmitterId) {
+    this.ensureSpatialInterestIndex();
+
+    const particleEmitter = this.currentParticleEmitterStateById.get(particleEmitterId);
+    const attachedEntityId = Number.isFinite(particleEmitter?.e) ? particleEmitter.e : undefined;
+    this.particleEmitterSpatialInterestIndex.update(
+      particleEmitterId,
+      attachedEntityId !== undefined
+        ? this.currentEntityStateById.get(attachedEntityId)?.p
+        : particleEmitter?.p,
+      attachedEntityId,
+    );
+  }
+
+  removeParticleEmitterSpatialInterest(particleEmitterId) {
+    this.ensureSpatialInterestIndex();
+    this.particleEmitterSpatialInterestIndex.remove(particleEmitterId);
+  }
+
+  updateSceneUISpatialInterestById(sceneUIId) {
+    this.ensureSpatialInterestIndex();
+
+    const sceneUI = this.currentSceneUIStateById.get(sceneUIId);
+    const attachedEntityId = Number.isFinite(sceneUI?.e) ? sceneUI.e : undefined;
+    this.sceneUISpatialInterestIndex.update(
+      sceneUIId,
+      attachedEntityId !== undefined
+        ? this.currentEntityStateById.get(attachedEntityId)?.p
+        : sceneUI?.p,
+      attachedEntityId,
+    );
+
+    if (this.isLongRangeSceneUI(sceneUI)) {
+      this.longRangeSceneUIIds.add(sceneUIId);
+    } else {
+      this.longRangeSceneUIIds.delete(sceneUIId);
+    }
+  }
+
+  removeSceneUISpatialInterest(sceneUIId) {
+    this.ensureSpatialInterestIndex();
+    this.sceneUISpatialInterestIndex.remove(sceneUIId);
+    this.longRangeSceneUIIds.delete(sceneUIId);
+  }
+
+  refreshAttachedSpatialInterestForEntity(entityId) {
+    const particleEmitterIds = this.particleEmitterSpatialInterestIndex.getAttachedIds(entityId);
+    if (particleEmitterIds) {
+      for (const particleEmitterId of Array.from(particleEmitterIds)) {
+        if (this.currentParticleEmitterStateById.has(particleEmitterId)) {
+          this.updateParticleEmitterSpatialInterestById(particleEmitterId);
+        } else {
+          this.removeParticleEmitterSpatialInterest(particleEmitterId);
+        }
+      }
+    }
+
+    const sceneUIIds = this.sceneUISpatialInterestIndex.getAttachedIds(entityId);
+    if (sceneUIIds) {
+      for (const sceneUIId of Array.from(sceneUIIds)) {
+        if (this.currentSceneUIStateById.has(sceneUIId)) {
+          this.updateSceneUISpatialInterestById(sceneUIId);
+        } else {
+          this.removeSceneUISpatialInterest(sceneUIId);
+        }
+      }
+    }
+  }
+
+  isLongRangeSceneUI(sceneUI) {
+    return Number.isFinite(sceneUI?.v) && sceneUI.v > SCENE_UI_CHUNK_INTEREST_SAFE_VIEW_DISTANCE;
+  }
+
   collectDesiredChunksForCenter(centerChunkOrigin) {
     const desiredChunks = [];
 
@@ -1106,8 +1265,7 @@ class ShadowHostedWorldRuntime {
     return desiredChunks;
   }
 
-  shouldSyncEntityToPlayer(entity, playerId) {
-    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+  shouldSyncEntityToPlayer(entity, playerId, centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId)) {
     if (!centerChunkOrigin) {
       return false;
     }
@@ -1115,8 +1273,11 @@ class ShadowHostedWorldRuntime {
     return this.isPositionInChunkInterestRange(entity?.p, centerChunkOrigin);
   }
 
-  shouldSyncParticleEmitterToPlayer(particleEmitter, playerId) {
-    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+  shouldSyncParticleEmitterToPlayer(
+    particleEmitter,
+    playerId,
+    centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId),
+  ) {
     if (!centerChunkOrigin) {
       return false;
     }
@@ -1127,8 +1288,13 @@ class ShadowHostedWorldRuntime {
     return this.isPositionInChunkInterestRange(anchor, centerChunkOrigin);
   }
 
-  shouldSyncSceneUIToPlayer(sceneUI, playerId) {
-    const center = this.getPlayerChunkInterestCenter(playerId);
+  shouldSyncSceneUIToPlayer(
+    sceneUI,
+    playerId,
+    center = this.getPlayerChunkInterestCenter(playerId),
+    centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId),
+  ) {
+    const resolvedCenterChunkOrigin = centerChunkOrigin;
     if (!center) {
       return false;
     }
@@ -1147,7 +1313,7 @@ class ShadowHostedWorldRuntime {
       return (dx * dx) + (dy * dy) + (dz * dz) <= sceneUI.v * sceneUI.v;
     }
 
-    return this.isPositionInChunkInterestRange(anchor, this.getPlayerChunkInterestCenterOrigin(playerId));
+    return !!resolvedCenterChunkOrigin && this.isPositionInChunkInterestRange(anchor, resolvedCenterChunkOrigin);
   }
 
   syncPlayerSpatialInterest(playerId, worldTick) {
@@ -1166,12 +1332,16 @@ class ShadowHostedWorldRuntime {
       return;
     }
 
+    this.ensureSpatialInterestIndex();
+
     const loadedEntityIds = this.getOrCreateLoadedEntityIds(playerId);
+    const candidateEntityIds = this.entitySpatialInterestIndex.collectIdsInRange(centerChunkOrigin);
     const desiredEntityIds = new Set();
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
 
-    for (const [entityId, entity] of this.currentEntityStateById.entries()) {
-      if (!this.shouldSyncEntityToPlayer(entity, playerId)) {
+    for (const entityId of candidateEntityIds) {
+      const entity = this.currentEntityStateById.get(entityId);
+      if (!entity || !this.shouldSyncEntityToPlayer(entity, playerId, centerChunkOrigin)) {
         continue;
       }
 
@@ -1208,12 +1378,16 @@ class ShadowHostedWorldRuntime {
       return;
     }
 
+    this.ensureSpatialInterestIndex();
+
     const loadedParticleEmitterIds = this.getOrCreateLoadedParticleEmitterIds(playerId);
+    const candidateParticleEmitterIds = this.particleEmitterSpatialInterestIndex.collectIdsInRange(centerChunkOrigin);
     const desiredParticleEmitterIds = new Set();
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
 
-    for (const [particleEmitterId, particleEmitter] of this.currentParticleEmitterStateById.entries()) {
-      if (!this.shouldSyncParticleEmitterToPlayer(particleEmitter, playerId)) {
+    for (const particleEmitterId of candidateParticleEmitterIds) {
+      const particleEmitter = this.currentParticleEmitterStateById.get(particleEmitterId);
+      if (!particleEmitter || !this.shouldSyncParticleEmitterToPlayer(particleEmitter, playerId, centerChunkOrigin)) {
         continue;
       }
 
@@ -1250,12 +1424,44 @@ class ShadowHostedWorldRuntime {
       return;
     }
 
+    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+    if (!centerChunkOrigin) {
+      return;
+    }
+
+    this.ensureSpatialInterestIndex();
+
     const loadedSceneUIIds = this.getOrCreateLoadedSceneUIIds(playerId);
+    const candidateSceneUIIds = this.sceneUISpatialInterestIndex.collectIdsInRange(centerChunkOrigin);
     const desiredSceneUIIds = new Set();
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
 
-    for (const [sceneUIId, sceneUI] of this.currentSceneUIStateById.entries()) {
-      if (!this.shouldSyncSceneUIToPlayer(sceneUI, playerId)) {
+    for (const sceneUIId of candidateSceneUIIds) {
+      const sceneUI = this.currentSceneUIStateById.get(sceneUIId);
+      if (!sceneUI || !this.shouldSyncSceneUIToPlayer(sceneUI, playerId, center, centerChunkOrigin)) {
+        continue;
+      }
+
+      desiredSceneUIIds.add(sceneUIId);
+      if (loadedSceneUIIds.has(sceneUIId)) {
+        continue;
+      }
+
+      loadedSceneUIIds.add(sceneUIId);
+      this.queuePacket(playerId, [
+        SCENE_UIS_PACKET_ID,
+        [ cloneSceneUISchema(sceneUI) ],
+        resolvedWorldTick,
+      ]);
+    }
+
+    for (const sceneUIId of this.longRangeSceneUIIds) {
+      if (desiredSceneUIIds.has(sceneUIId)) {
+        continue;
+      }
+
+      const sceneUI = this.currentSceneUIStateById.get(sceneUIId);
+      if (!sceneUI || !this.shouldSyncSceneUIToPlayer(sceneUI, playerId, center, centerChunkOrigin)) {
         continue;
       }
 

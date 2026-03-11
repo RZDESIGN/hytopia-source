@@ -53,6 +53,7 @@ const LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY = 10;
 const LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED = 5;
 const LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED = 3;
 const LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY = 2;
+const LOCAL_PREDICTION_DEFAULT_GRAVITY_Y = -32;
 const LOCAL_PREDICTION_MIN_SPEED = 0.2;
 const LOCAL_PREDICTION_MAX_SPEED = 20;
 const LOCAL_PREDICTION_SPEED_REJECT_THRESHOLD = 30;
@@ -96,6 +97,7 @@ const LOCAL_PREDICTION_MAX_FOOT_OFFSET = 0.8;
 const LOCAL_PREDICTION_GROUND_SNAP_DISTANCE = 0.18;
 const LOCAL_PREDICTION_GROUND_HOLD_DISTANCE = 0.32;
 const LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE = 0.4;
+const LOCAL_PREDICTION_GROUNDED_GRACE_S = 0.05;
 const LOCAL_PREDICTION_GROUNDED_UPWARD_RELEASE_VELOCITY = 1.25;
 const LOCAL_PREDICTION_COLLISION_EPSILON = 0.001;
 const LOCAL_PREDICTION_SAMPLE_INSET = LOCAL_PREDICTION_COLLIDER_RADIUS * 0.8;
@@ -152,6 +154,7 @@ type LocalPredictionControllerState = {
   predictedSwimming: boolean;
   authoritativeGroundFootOffset: number;
   predictedGroundFootOffset: number;
+  predictedGroundGraceRemainingS: number;
   authoritativeJustSubmergedRemainingS: number;
   predictedJustSubmergedRemainingS: number;
   authoritativeSwimUpwardCooldownRemainingS: number;
@@ -246,6 +249,7 @@ export default class EntityManager {
       predictedSwimming: false,
       authoritativeGroundFootOffset: LOCAL_PREDICTION_FOOT_OFFSET,
       predictedGroundFootOffset: LOCAL_PREDICTION_FOOT_OFFSET,
+      predictedGroundGraceRemainingS: 0,
       authoritativeJustSubmergedRemainingS: 0,
       predictedJustSubmergedRemainingS: 0,
       authoritativeSwimUpwardCooldownRemainingS: 0,
@@ -943,6 +947,7 @@ export default class EntityManager {
     this._localPredictionState.controllerState.predictedSwimming = false;
     this._localPredictionState.controllerState.authoritativeGroundFootOffset = LOCAL_PREDICTION_FOOT_OFFSET;
     this._localPredictionState.controllerState.predictedGroundFootOffset = LOCAL_PREDICTION_FOOT_OFFSET;
+    this._localPredictionState.controllerState.predictedGroundGraceRemainingS = 0;
     this._localPredictionState.controllerState.authoritativeJustSubmergedRemainingS = 0;
     this._localPredictionState.controllerState.predictedJustSubmergedRemainingS = 0;
     this._localPredictionState.controllerState.authoritativeSwimUpwardCooldownRemainingS = 0;
@@ -1394,6 +1399,10 @@ export default class EntityManager {
       0,
       controllerState.predictedJustSubmergedRemainingS - deltaTimeS,
     );
+    controllerState.predictedGroundGraceRemainingS = Math.max(
+      0,
+      controllerState.predictedGroundGraceRemainingS - deltaTimeS,
+    );
     controllerState.predictedSwimUpwardCooldownRemainingS = Math.max(
       0,
       controllerState.predictedSwimUpwardCooldownRemainingS - deltaTimeS,
@@ -1444,13 +1453,20 @@ export default class EntityManager {
       (movementVelocityZ + motionBasisVelocity.z) * deltaTimeS,
     );
 
-    let predictedVerticalVelocity = this._localPredictionState.estimatedVerticalVelocity + motionBasisVelocity.y;
+    let intrinsicVerticalVelocity = this._localPredictionState.estimatedVerticalVelocity;
+
+    if (!controllerState.predictedSwimming && !controllerState.predictedGrounded) {
+      intrinsicVerticalVelocity += LOCAL_PREDICTION_DEFAULT_GRAVITY_Y * deltaTimeS;
+    }
+
+    let predictedVerticalVelocity = intrinsicVerticalVelocity + motionBasisVelocity.y;
 
     if (
       controllerState.predictedGrounded &&
       !controllerState.predictedSwimming &&
       !sp
     ) {
+      intrinsicVerticalVelocity = 0;
       predictedVerticalVelocity = motionBasisVelocity.y;
     }
 
@@ -1463,9 +1479,11 @@ export default class EntityManager {
           motionBasisVelocity.y;
       } else if (!sp) {
         predictedVerticalVelocity =
-          (-this._localPredictionState.estimatedVerticalVelocity * LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR) +
+          (-intrinsicVerticalVelocity * LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR) +
           motionBasisVelocity.y;
       }
+
+      intrinsicVerticalVelocity = predictedVerticalVelocity - motionBasisVelocity.y;
     }
 
     if (sp) {
@@ -1476,12 +1494,14 @@ export default class EntityManager {
         this._localPredictionState.estimatedVerticalVelocity <= 3
       ) {
         predictedVerticalVelocity = jumpVelocity + motionBasisVelocity.y;
+        intrinsicVerticalVelocity = jumpVelocity;
         this._setPredictedGrounded(false);
       } else if (
         controllerState.predictedSwimming &&
         controllerState.predictedSwimUpwardCooldownRemainingS <= 0
       ) {
         predictedVerticalVelocity = swimUpwardVelocity + motionBasisVelocity.y;
+        intrinsicVerticalVelocity = swimUpwardVelocity;
         controllerState.predictedSwimUpwardCooldownRemainingS = 0.6;
       }
     }
@@ -1490,12 +1510,18 @@ export default class EntityManager {
     if (!this._intersectsLocalPredictionWorldAt(predictedPosition.x, predictedPosition.y + verticalDelta, predictedPosition.z)) {
       predictedPosition.y += verticalDelta;
     } else if (verticalDelta > 0) {
+      intrinsicVerticalVelocity = 0;
       predictedVerticalVelocity = motionBasisVelocity.y;
     }
 
     if (!controllerState.predictedSwimming) {
       this._resolvePredictedGroundContact(predictedVerticalVelocity, motionBasisVelocity.y);
     }
+
+    this._localPredictionState.estimatedVerticalVelocity =
+      controllerState.predictedGrounded && !controllerState.predictedSwimming
+        ? 0
+        : intrinsicVerticalVelocity;
 
     if (isActivelyMoving) {
       const movementYaw = resolveDeterministicMovementYaw(movementDirection.x, movementDirection.z);
@@ -1544,6 +1570,10 @@ export default class EntityManager {
         controllerState.predictedGrounded &&
         Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON
       ) {
+        if (controllerState.predictedGroundGraceRemainingS > 0) {
+          return;
+        }
+
         this._setPredictedGrounded(false);
       }
 
@@ -1563,6 +1593,7 @@ export default class EntityManager {
       (movingDownOrStable && distanceToGround <= LOCAL_PREDICTION_GROUND_SNAP_DISTANCE)
     ) {
       predictedPosition.y = groundY + footOffset;
+      controllerState.predictedGroundGraceRemainingS = LOCAL_PREDICTION_GROUNDED_GRACE_S;
       this._setPredictedGrounded(true);
       return;
     }
@@ -1572,6 +1603,7 @@ export default class EntityManager {
       distanceToGround <= LOCAL_PREDICTION_GROUND_HOLD_DISTANCE
     ) {
       predictedPosition.y = groundY + footOffset;
+      controllerState.predictedGroundGraceRemainingS = LOCAL_PREDICTION_GROUNDED_GRACE_S;
       this._setPredictedGrounded(true);
       return;
     }
@@ -1580,6 +1612,10 @@ export default class EntityManager {
       distanceToGround > LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE &&
       Math.abs(motionBasisVelocityY) <= LOCAL_PREDICTION_COLLISION_EPSILON
     ) {
+      if (controllerState.predictedGroundGraceRemainingS > 0) {
+        return;
+      }
+
       this._setPredictedGrounded(false);
     }
   }
@@ -1701,6 +1737,9 @@ export default class EntityManager {
     controllerState.predictedMovementReferenceYaw = controllerState.authoritativeMovementReferenceYaw;
     controllerState.predictedSwimming = controllerState.authoritativeSwimming;
     controllerState.predictedGroundFootOffset = controllerState.authoritativeGroundFootOffset;
+    controllerState.predictedGroundGraceRemainingS = controllerState.authoritativeGrounded
+      ? LOCAL_PREDICTION_GROUNDED_GRACE_S
+      : 0;
     controllerState.predictedJustSubmergedRemainingS = controllerState.authoritativeJustSubmergedRemainingS;
     controllerState.predictedSwimUpwardCooldownRemainingS = controllerState.authoritativeSwimUpwardCooldownRemainingS;
   }
@@ -1724,6 +1763,9 @@ export default class EntityManager {
     }
 
     controllerState.predictedGrounded = nextGrounded;
+    controllerState.predictedGroundGraceRemainingS = nextGrounded
+      ? LOCAL_PREDICTION_GROUNDED_GRACE_S
+      : 0;
     this._localPredictionDebug.predictedGroundedTransitionCount++;
   }
 

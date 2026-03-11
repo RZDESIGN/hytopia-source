@@ -39550,6 +39550,59 @@
               "name": "getAllParticleEmitters"
             },
             {
+              "kind": "Method",
+              "canonicalReference": "server!ParticleEmitterManager#getParticleEmitterById:member(1)",
+              "docComment": "/**\n * Retrieves a spawned ParticleEmitter instance by its unique identifier (id).\n *\n * @param id - The unique identifier (id) of the ParticleEmitter to retrieve.\n *\n * @returns The ParticleEmitter instance if found, otherwise undefined.\n *\n * **Category:** Particles\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "getParticleEmitterById(id: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "ParticleEmitter",
+                  "canonicalReference": "server!ParticleEmitter:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": " | undefined"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 5
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "id",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "getParticleEmitterById"
+            },
+            {
               "kind": "Property",
               "canonicalReference": "server!ParticleEmitterManager#world:member",
               "docComment": "/**\n * The world the ParticleEmitterManager is for.\n *\n * **Category:** Particles\n */\n",

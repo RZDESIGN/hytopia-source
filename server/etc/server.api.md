@@ -2194,6 +2194,7 @@ export class ParticleEmitterManager {
     despawnEntityAttachedParticleEmitters(entity: Entity): void;
     getAllEntityAttachedParticleEmitters(entity: Entity): ParticleEmitter[];
     getAllParticleEmitters(): ParticleEmitter[];
+    getParticleEmitterById(id: number): ParticleEmitter | undefined;
     // @internal (undocumented)
     registerParticleEmitter(particleEmitter: ParticleEmitter): number;
     // @internal (undocumented)

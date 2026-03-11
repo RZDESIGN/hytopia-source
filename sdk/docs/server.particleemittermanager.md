@@ -118,5 +118,19 @@ Retrieves all spawned ParticleEmitter instances for the world.
 
 
 </td></tr>
+<tr><td>
+
+[getParticleEmitterById(id)](./server.particleemittermanager.getparticleemitterbyid.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Retrieves a spawned ParticleEmitter instance by its unique identifier (id).
+
+
+</td></tr>
 </tbody></table>
 

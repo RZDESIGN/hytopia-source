@@ -2,9 +2,11 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "@/*": ["./src/*"],
+      "@/*": ["./build/*"],
       "@hytopia.com/server-protocol": ["../protocol/dist/index.d.ts"],
       "@hytopia.com/server-protocol/*": ["../protocol/dist/*"]
     }
-  }
+  },
+  "include": ["build/**/*.d.ts"],
+  "exclude": ["src/**/*"]
 }

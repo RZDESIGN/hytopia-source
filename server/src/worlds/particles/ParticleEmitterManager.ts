@@ -56,6 +56,18 @@ export default class ParticleEmitterManager {
   }
 
   /**
+   * Retrieves a spawned ParticleEmitter instance by its unique identifier (id).
+   *
+   * @param id - The unique identifier (id) of the ParticleEmitter to retrieve.
+   * @returns The ParticleEmitter instance if found, otherwise undefined.
+   *
+   * **Category:** Particles
+   */
+  public getParticleEmitterById(id: number): ParticleEmitter | undefined {
+    return this._particleEmitters.get(id);
+  }
+
+  /**
    * Retrieves all spawned ParticleEmitter instances attached to a specific entity.
    *
    * Use for: cleanup or inspection of entity-bound emitters.
