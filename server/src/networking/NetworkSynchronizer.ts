@@ -3784,11 +3784,14 @@ export default class NetworkSynchronizer {
       wv?: number;
     };
 
+    // Owner prediction metadata needs to stay paired with every authoritative
+    // owner transform/ack update. Omitting it on active movement syncs leaves
+    // the client replaying from stale grounded/reference-yaw/motion-basis state.
+    this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
+
     if (includeTransform) {
       entitySync.p ??= Serializer.serializeVector(playerEntity.position);
       entitySync.r ??= Serializer.serializeQuaternion(playerEntity.rotation);
-    } else {
-      this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
     }
 
     const acknowledgedInputSequence = playerEntity.player.lastAppliedInputSequenceNumber;
@@ -3823,6 +3826,7 @@ export default class NetworkSynchronizer {
       const entitySync = this._createOrGetQueuedEntitySync(playerEntity, playerEntity.player) as protocol.EntitySchema & {
         aq?: number;
       };
+      this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
       entitySync.aq = acknowledgedInputSequence;
       entitySync.p ??= Serializer.serializeVector(playerEntity.position);
       entitySync.r ??= Serializer.serializeQuaternion(playerEntity.rotation);
