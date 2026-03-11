@@ -10,6 +10,9 @@ const WORLD_HOST_PROCESS_MAIN_PATH = fileURLToPath(
   new URL('../../../src/worlds/hosting/WorldHostProcessMain.js', import.meta.url),
 );
 const WORLD_PACKET_ID = 39;
+const BLOCKS_PACKET_ID = 34;
+const CAMERA_PACKET_ID = 40;
+const CHUNKS_PACKET_ID = 37;
 const ENTITIES_PACKET_ID = 38;
 const PLAYERS_PACKET_ID = 45;
 
@@ -295,4 +298,88 @@ test('routes targeted entity batches only to the addressed player', async t => {
   assert.deepEqual(packets.map(packet => packet[0]), [ ENTITIES_PACKET_ID ]);
   assert.equal(packets[0][1][0].i, 7001);
   await harness.expectNoMessage(message => message.type === 'player_packet_batch' && message.playerId === 'player-d');
+});
+
+test('streams nearby chunks and block deltas only after player camera interest is known', async t => {
+  const harness = await createChildHarness(t);
+  const worldId = 104;
+  const nearChunkBlocks = new Array(16 ** 3).fill(1);
+  const farChunkBlocks = new Array(16 ** 3).fill(2);
+
+  harness.send({
+    options: createWorldBootOptions(worldId),
+    processId: 'shadow-test',
+    type: 'world_boot',
+    world: createWorldDescriptor(worldId),
+  });
+  await harness.waitForMessage(message => message.type === 'world_ready' && message.world?.id === worldId);
+
+  harness.send({
+    chunk: { b: nearChunkBlocks, c: [0, 0, 0] },
+    type: 'chunk_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    chunk: { b: farChunkBlocks, c: [160, 0, 0] },
+    type: 'chunk_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    entity: {
+      i: 7001,
+      p: [1, 2, 3],
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    player: createPlayerDescriptor('player-e'),
+    type: 'player_attach',
+    worldId,
+  });
+
+  const bootstrapMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-e';
+  });
+  const bootstrapPackets = decodeWirePackets(bootstrapMessage.wireBytes);
+  assert.equal(bootstrapPackets.some(packet => packet[0] === CHUNKS_PACKET_ID), false);
+
+  harness.send({
+    camera: { e: 7001 },
+    playerId: 'player-e',
+    type: 'player_camera',
+    worldId,
+    worldTick: 4,
+  });
+
+  const chunkLoadMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-e';
+  });
+  const chunkLoadPackets = decodeWirePackets(chunkLoadMessage.wireBytes);
+  assert.deepEqual(chunkLoadPackets.map(packet => packet[0]), [ CAMERA_PACKET_ID, CHUNKS_PACKET_ID ]);
+  assert.deepEqual(chunkLoadPackets[1][1].map(chunk => chunk.c), [[0, 0, 0]]);
+
+  harness.send({
+    block: { c: [1, 0, 1], i: 3 },
+    type: 'block_state_patch',
+    worldId,
+    worldTick: 5,
+  });
+  harness.send({
+    block: { c: [160, 0, 1], i: 4 },
+    type: 'block_state_patch',
+    worldId,
+    worldTick: 5,
+  });
+
+  const blockDeltaMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-e';
+  });
+  const blockDeltaPackets = decodeWirePackets(blockDeltaMessage.wireBytes);
+  assert.deepEqual(blockDeltaPackets.map(packet => packet[0]), [ BLOCKS_PACKET_ID ]);
+  assert.deepEqual(blockDeltaPackets[0][1], [{ c: [1, 0, 1], i: 3 }]);
 });

@@ -30,7 +30,7 @@ import { WorldEvent } from '@/worlds/World';
 import WorldHostManager from '@/worlds/hosting/WorldHostManager';
 import type Audio from '@/worlds/audios/Audio';
 import type BlockType from '@/worlds/blocks/BlockType';
-import type Chunk from '@/worlds/blocks/Chunk';
+import Chunk, { CHUNK_SIZE } from '@/worlds/blocks/Chunk';
 import type Entity from '@/worlds/entities/Entity';
 import type EntityModelAnimation from '@/worlds/entities/EntityModelAnimation';
 import type EntityModelNodeOverride from '@/worlds/entities/EntityModelNodeOverride';
@@ -50,6 +50,14 @@ const PROTOCOL_ENTITY_PROPERTIES = PROTOCOL_ENTITY_SCHEMA?.properties ?? {};
 const PROTOCOL_ENTITY_KEYS = Object.keys(PROTOCOL_ENTITY_PROPERTIES);
 const ENTITY_LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
+const CHUNK_STREAM_HORIZONTAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_HORIZONTAL_RADIUS ?? 6)));
+const CHUNK_STREAM_VERTICAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_VERTICAL_RADIUS ?? 3)));
+const CHUNK_STREAM_MAX_LOADS_PER_SYNC = Math.max(1, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_MAX_LOADS_PER_SYNC ?? 48)));
+
+type PlayerChunkInterestState = {
+  centerChunkKey?: string;
+  needsRefresh: boolean;
+};
 
 type SyncQueue<TId, TSchema extends object | null> = {
   broadcast: IterationMap<TId, TSchema>;
@@ -110,8 +118,9 @@ export default class NetworkSynchronizer {
   private _queuedUIDatasSyncs: SingletonSyncQueue<protocol.UIDatasSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   private _queuedWorldSyncs: SingletonSyncQueue<protocol.WorldSchema> = { broadcast: undefined, perPlayer: new IterationMap() };
   
+  private _chunkInterestStateByPlayer: Map<Player, PlayerChunkInterestState> = new Map();
+  private _loadedChunkKeysByPlayer: Map<Player, Set<string>> = new Map();
   private _loadedSceneUIs: Set<number> = new Set();
-  private _spawnedChunks: Set<string> = new Set();
   private _spawnedEntities: Set<number> = new Set();
   private _syncAccumulator: number = 0;
 
@@ -184,6 +193,7 @@ export default class NetworkSynchronizer {
 
     const currentTick = this._world.loop.currentTick;
     this._queuePlayerInputAcknowledgements();
+    this._refreshPlayerChunkInterests();
     const packetPlan = Telemetry.startSpan({
       operation: TelemetrySpanOperation.BUILD_PACKETS,
     }, () => this._buildPacketPlan(currentTick));
@@ -196,7 +206,6 @@ export default class NetworkSynchronizer {
      */
     Telemetry.startSpan({ operation: TelemetrySpanOperation.NETWORK_SYNCHRONIZE_CLEANUP }, () => {
       if (this._loadedSceneUIs.size > 0) { this._loadedSceneUIs.clear(); }
-      if (this._spawnedChunks.size > 0) { this._spawnedChunks.clear(); }
       if (this._spawnedEntities.size > 0) { this._spawnedEntities.clear(); }
 
       this._clearSyncQueue(this._queuedAudioSyncs);
@@ -585,11 +594,10 @@ export default class NetworkSynchronizer {
       return;
     }
 
-    const chunkSync = this._createOrGetQueuedChunkSync(payload.chunk);
-    Object.assign(chunkSync, payload.chunk.serialize());
-    chunkSync.rm = undefined;
-
-    this._spawnedChunks.add(chunkSync.c.join(','));
+    for (const player of this._getPlayersInterestedInChunk(payload.chunk)) {
+      this._queueChunkStateForPlayer(payload.chunk, player);
+      this._getOrCreateLoadedChunkKeys(player).add(this._chunkKeyForOriginCoordinate(payload.chunk.originCoordinate));
+    }
   };
 
   private _onChunkLatticeRemoveChunk = (payload: EventPayloads[ChunkLatticeEvent.REMOVE_CHUNK]) => {
@@ -600,14 +608,14 @@ export default class NetworkSynchronizer {
       return;
     }
 
-    const chunkSync = this._createOrGetQueuedChunkSync(payload.chunk);
-    const chunkKey = chunkSync.c.join(',');
+    const chunkKey = this._chunkKeyForOriginCoordinate(payload.chunk.originCoordinate);
+    for (const [player, loadedChunkKeys] of this._loadedChunkKeysByPlayer.entries()) {
+      if (!loadedChunkKeys.has(chunkKey)) {
+        continue;
+      }
 
-    if (this._spawnedChunks.has(chunkKey)) {
-      this._queuedChunkSyncs.broadcast.delete(chunkKey);
-      this._spawnedChunks.delete(chunkKey);
-    } else {
-      chunkSync.rm = true;
+      this._queueChunkRemovalForPlayer(payload.chunk, player);
+      loadedChunkKeys.delete(chunkKey);
     }
   };
 
@@ -620,9 +628,17 @@ export default class NetworkSynchronizer {
       return;
     }
 
-    const blockSync = this._createOrGetQueuedBlockSync(payload.globalCoordinate);
-    blockSync.i = payload.blockTypeId;
-    blockSync.r = payload.blockRotation?.enumIndex;
+    const chunkKey = this._chunkKeyForGlobalCoordinate(payload.globalCoordinate);
+
+    for (const [player, loadedChunkKeys] of this._loadedChunkKeysByPlayer.entries()) {
+      if (!loadedChunkKeys.has(chunkKey)) {
+        continue;
+      }
+
+      const blockSync = this._createOrGetQueuedBlockSync(payload.globalCoordinate, player);
+      blockSync.i = payload.blockTypeId;
+      blockSync.r = payload.blockRotation?.enumIndex;
+    }
   };
 
   private _onEntitySpawn = (payload: EventPayloads[EntityEvent.SPAWN]) => {
@@ -1719,6 +1735,8 @@ export default class NetworkSynchronizer {
     const { player } = payload;
     const hostOwnsDerivedState = WorldHostManager.instance.client.ownsDerivedState(this._world);
     this._lastSentInputAcknowledgementByPlayer.delete(player);
+    this._chunkInterestStateByPlayer.set(player, { needsRefresh: true });
+    this._loadedChunkKeysByPlayer.set(player, new Set());
 
     // Order doesn't matter here - synchronize() handles send order.
     // Use _assignUndefined to avoid overwriting properties already set by other event handlers.
@@ -1748,14 +1766,6 @@ export default class NetworkSynchronizer {
       this._createOrGetQueuedBlockEditPredictionConfigSync(player),
       this._serializeDefaultBlockEditPredictionConfig(player),
     );
-
-    // Sync Chunks
-    if (!hostOwnsDerivedState) {
-      for (const chunk of this._world.chunkLattice.getAllChunks()) {
-        const chunkSync = this._createOrGetQueuedChunkSync(chunk, player);
-        this._assignUndefined(chunkSync, chunk.serialize());
-      }
-    }
 
     // Sync Entities
     for (const entity of this._world.entityManager.getAllEntities()) {
@@ -1812,11 +1822,14 @@ export default class NetworkSynchronizer {
     if (!hostOwnsDerivedState) {
       const playerSync = this._createOrGetQueuedPlayerSync(player);
       this._assignUndefined(playerSync, player.serialize());
+      this._refreshPlayerChunkInterest(player);
     }
   };
 
   private _onPlayerLeftWorld = (payload: EventPayloads[PlayerEvent.LEFT_WORLD]) => {
     this._lastSentInputAcknowledgementByPlayer.delete(payload.player);
+    this._chunkInterestStateByPlayer.delete(payload.player);
+    this._loadedChunkKeysByPlayer.delete(payload.player);
     if (WorldHostManager.instance.client.ownsDerivedState(this._world)) {
       return;
     }
@@ -1827,6 +1840,8 @@ export default class NetworkSynchronizer {
 
   private _onPlayerReconnectedWorld = (payload: EventPayloads[PlayerEvent.RECONNECTED_WORLD]) => {
     this._lastSentInputAcknowledgementByPlayer.delete(payload.player);
+    this._chunkInterestStateByPlayer.delete(payload.player);
+    this._loadedChunkKeysByPlayer.delete(payload.player);
     this._onPlayerJoinedWorld(payload); // resync player state
   };
 
@@ -2334,6 +2349,201 @@ export default class NetworkSynchronizer {
   private _clearSyncQueue(syncQueue: SyncQueue<any, any>) {
     if (syncQueue.broadcast.size > 0) { syncQueue.broadcast.clear(); }
     if (syncQueue.perPlayer.size > 0) { syncQueue.perPlayer.clear(); }
+  }
+
+  private _refreshPlayerChunkInterests(): void {
+    if (WorldHostManager.instance.client.ownsDerivedState(this._world)) {
+      return;
+    }
+
+    for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
+      this._refreshPlayerChunkInterest(player);
+    }
+  }
+
+  private _refreshPlayerChunkInterest(player: Player): void {
+    const center = this._getChunkInterestCenter(player);
+    const state = this._getOrCreatePlayerChunkInterestState(player);
+
+    if (!center) {
+      state.needsRefresh = true;
+      return;
+    }
+
+    const centerChunkOrigin = Chunk.globalCoordinateToOriginCoordinate(center);
+    const centerChunkKey = this._chunkKeyForOriginCoordinate(centerChunkOrigin);
+    if (!state.needsRefresh && state.centerChunkKey === centerChunkKey) {
+      return;
+    }
+
+    const loadedChunkKeys = this._getOrCreateLoadedChunkKeys(player);
+    const desiredChunkInfos = this._collectDesiredChunksForCenter(centerChunkOrigin);
+    const desiredChunkKeys = new Set<string>();
+
+    for (let i = 0; i < desiredChunkInfos.length; i++) {
+      desiredChunkKeys.add(desiredChunkInfos[i].key);
+    }
+
+    for (const loadedChunkKey of Array.from(loadedChunkKeys)) {
+      if (desiredChunkKeys.has(loadedChunkKey)) {
+        continue;
+      }
+
+      const originCoordinate = this._originCoordinateFromChunkKey(loadedChunkKey);
+      if (!originCoordinate) {
+        loadedChunkKeys.delete(loadedChunkKey);
+        continue;
+      }
+
+      const chunk = this._world.chunkLattice.getChunk(originCoordinate);
+      if (chunk) {
+        this._queueChunkRemovalForPlayer(chunk, player);
+      }
+
+      loadedChunkKeys.delete(loadedChunkKey);
+    }
+
+    let remainingChunkLoads = CHUNK_STREAM_MAX_LOADS_PER_SYNC;
+    let hasPendingChunkLoads = false;
+
+    for (let i = 0; i < desiredChunkInfos.length; i++) {
+      const desiredChunkInfo = desiredChunkInfos[i];
+      if (loadedChunkKeys.has(desiredChunkInfo.key)) {
+        continue;
+      }
+
+      if (remainingChunkLoads <= 0) {
+        hasPendingChunkLoads = true;
+        continue;
+      }
+
+      this._queueChunkStateForPlayer(desiredChunkInfo.chunk, player);
+      loadedChunkKeys.add(desiredChunkInfo.key);
+      remainingChunkLoads--;
+    }
+
+    state.centerChunkKey = centerChunkKey;
+    state.needsRefresh = hasPendingChunkLoads;
+  }
+
+  private _collectDesiredChunksForCenter(centerChunkOrigin: Vector3Like): { chunk: Chunk; key: string; distanceSq: number }[] {
+    const desiredChunks: { chunk: Chunk; key: string; distanceSq: number }[] = [];
+
+    for (let dy = -CHUNK_STREAM_VERTICAL_RADIUS; dy <= CHUNK_STREAM_VERTICAL_RADIUS; dy++) {
+      for (let dx = -CHUNK_STREAM_HORIZONTAL_RADIUS; dx <= CHUNK_STREAM_HORIZONTAL_RADIUS; dx++) {
+        for (let dz = -CHUNK_STREAM_HORIZONTAL_RADIUS; dz <= CHUNK_STREAM_HORIZONTAL_RADIUS; dz++) {
+          const horizontalDistanceSq = dx * dx + dz * dz;
+          if (horizontalDistanceSq > CHUNK_STREAM_HORIZONTAL_RADIUS * CHUNK_STREAM_HORIZONTAL_RADIUS) {
+            continue;
+          }
+
+          const originCoordinate = {
+            x: centerChunkOrigin.x + dx * CHUNK_SIZE,
+            y: centerChunkOrigin.y + dy * CHUNK_SIZE,
+            z: centerChunkOrigin.z + dz * CHUNK_SIZE,
+          };
+          const chunk = this._world.chunkLattice.getChunk(originCoordinate);
+          if (!chunk) {
+            continue;
+          }
+
+          desiredChunks.push({
+            chunk,
+            key: this._chunkKeyForOriginCoordinate(chunk.originCoordinate),
+            distanceSq: horizontalDistanceSq + dy * dy,
+          });
+        }
+      }
+    }
+
+    desiredChunks.sort((a, b) => a.distanceSq - b.distanceSq);
+    return desiredChunks;
+  }
+
+  private _getPlayersInterestedInChunk(chunk: Chunk): Player[] {
+    const players: Player[] = [];
+
+    for (const player of PlayerManager.instance.getConnectedPlayersByWorldSet(this._world)) {
+      const center = this._getChunkInterestCenter(player);
+      if (!center) {
+        continue;
+      }
+
+      if (!this._isChunkOriginInRange(chunk.originCoordinate, Chunk.globalCoordinateToOriginCoordinate(center))) {
+        continue;
+      }
+
+      players.push(player);
+    }
+
+    return players;
+  }
+
+  private _getChunkInterestCenter(player: Player): Vector3Like | undefined {
+    return player.camera.attachedToPosition ??
+      player.camera.attachedToEntity?.position ??
+      player.camera.targetPosition ??
+      player.camera.targetEntity?.position ??
+      this._world.entityManager.getPlayerEntitiesByPlayer(player)[0]?.position;
+  }
+
+  private _isChunkOriginInRange(originCoordinate: Vector3Like, centerChunkOrigin: Vector3Like): boolean {
+    const dx = (originCoordinate.x - centerChunkOrigin.x) / CHUNK_SIZE;
+    const dy = Math.abs((originCoordinate.y - centerChunkOrigin.y) / CHUNK_SIZE);
+    const dz = (originCoordinate.z - centerChunkOrigin.z) / CHUNK_SIZE;
+
+    return dy <= CHUNK_STREAM_VERTICAL_RADIUS &&
+      (dx * dx + dz * dz) <= CHUNK_STREAM_HORIZONTAL_RADIUS * CHUNK_STREAM_HORIZONTAL_RADIUS;
+  }
+
+  private _queueChunkStateForPlayer(chunk: Chunk, player: Player): void {
+    const chunkSync = this._createOrGetQueuedChunkSync(chunk, player);
+    Object.assign(chunkSync, chunk.serialize());
+    chunkSync.rm = undefined;
+  }
+
+  private _queueChunkRemovalForPlayer(chunk: Chunk, player: Player): void {
+    const chunkSync = this._createOrGetQueuedChunkSync(chunk, player);
+    chunkSync.rm = true;
+    delete chunkSync.b;
+    delete chunkSync.r;
+  }
+
+  private _getOrCreateLoadedChunkKeys(player: Player): Set<string> {
+    let loadedChunkKeys = this._loadedChunkKeysByPlayer.get(player);
+    if (!loadedChunkKeys) {
+      loadedChunkKeys = new Set();
+      this._loadedChunkKeysByPlayer.set(player, loadedChunkKeys);
+    }
+
+    return loadedChunkKeys;
+  }
+
+  private _getOrCreatePlayerChunkInterestState(player: Player): PlayerChunkInterestState {
+    let state = this._chunkInterestStateByPlayer.get(player);
+    if (!state) {
+      state = { needsRefresh: true };
+      this._chunkInterestStateByPlayer.set(player, state);
+    }
+
+    return state;
+  }
+
+  private _chunkKeyForGlobalCoordinate(globalCoordinate: Vector3Like): string {
+    return this._chunkKeyForOriginCoordinate(Chunk.globalCoordinateToOriginCoordinate(globalCoordinate));
+  }
+
+  private _chunkKeyForOriginCoordinate(originCoordinate: Vector3Like): string {
+    return `${originCoordinate.x},${originCoordinate.y},${originCoordinate.z}`;
+  }
+
+  private _originCoordinateFromChunkKey(chunkKey: string): Vector3Like | undefined {
+    const [x, y, z] = chunkKey.split(',').map(Number);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return undefined;
+    }
+
+    return { x, y, z };
   }
 
   private _clearSingletonSyncQueue(syncQueue: SingletonSyncQueue<any>) {

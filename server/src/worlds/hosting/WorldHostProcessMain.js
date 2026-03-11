@@ -22,6 +22,10 @@ const NOTIFICATION_PERMISSION_REQUEST_PACKET_ID = 47;
 const DEFAULT_TICK_RATE = 20;
 const CHUNK_AXES_RANGE = 15;
 const CHUNK_SIZE_BITS = 4;
+const CHUNK_SIZE = 1 << CHUNK_SIZE_BITS;
+const CHUNK_STREAM_HORIZONTAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_HORIZONTAL_RADIUS ?? 6)));
+const CHUNK_STREAM_VERTICAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_VERTICAL_RADIUS ?? 3)));
+const CHUNK_STREAM_MAX_LOADS_PER_SYNC = Math.max(1, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_MAX_LOADS_PER_SYNC ?? 48)));
 const worlds = new Map();
 
 const serializePackets = packets => {
@@ -88,6 +92,15 @@ const cloneChunkSchema = chunk => ({
   ...chunk,
   b: Array.isArray(chunk?.b) ? [ ...chunk.b ] : chunk?.b,
   r: Array.isArray(chunk?.r) ? [ ...chunk.r ] : chunk?.r,
+});
+const cloneCameraSchema = camera => ({
+  ...camera,
+  h: Array.isArray(camera?.h) ? [ ...camera.h ] : camera?.h,
+  o: Array.isArray(camera?.o) ? [ ...camera.o ] : camera?.o,
+  p: Array.isArray(camera?.p) ? [ ...camera.p ] : camera?.p,
+  pl: Array.isArray(camera?.pl) ? [ ...camera.pl ] : camera?.pl,
+  pt: Array.isArray(camera?.pt) ? [ ...camera.pt ] : camera?.pt,
+  s: Array.isArray(camera?.s) ? [ ...camera.s ] : camera?.s,
 });
 const cloneEntityModelAnimationSchema = entityModelAnimation => ({ ...entityModelAnimation });
 const cloneEntityModelNodeOverrideSchema = entityModelNodeOverride => ({
@@ -198,16 +211,19 @@ const log = (level, message, worldId) => {
 
 class ShadowHostedWorldRuntime {
   constructor(worldDescriptor, options) {
+    this.chunkInterestStateByPlayer = new Map();
     this.descriptor = worldDescriptor;
     this.options = options;
     this.bootedAtMonotonicMs = performance.now();
     this.currentAudioStateById = new Map();
     this.currentBlockTypeStateById = new Map();
+    this.currentCameraStateByPlayerId = new Map();
     this.currentChunkStateByKey = new Map();
     this.currentEntityStateById = new Map();
     this.currentParticleEmitterStateById = new Map();
     this.currentWorldState = toWorldSchema(worldDescriptor, options);
     this.currentSceneUIStateById = new Map();
+    this.loadedChunkKeysByPlayer = new Map();
     this.packetsReceived = 0;
     this.players = new Map();
     this.pendingPacketsByPlayer = new Map();
@@ -221,6 +237,8 @@ class ShadowHostedWorldRuntime {
   attachPlayer(playerDescriptor) {
     const existingPlayers = Array.from(this.players.values());
     this.players.set(playerDescriptor.id, playerDescriptor);
+    this.chunkInterestStateByPlayer.set(playerDescriptor.id, { needsRefresh: true });
+    this.loadedChunkKeysByPlayer.set(playerDescriptor.id, new Set());
 
     this.queuePacket(playerDescriptor.id, [
       WORLD_PACKET_ID,
@@ -238,13 +256,6 @@ class ShadowHostedWorldRuntime {
       this.queuePacket(playerDescriptor.id, [
         BLOCK_TYPES_PACKET_ID,
         Array.from(this.currentBlockTypeStateById.values(), blockType => ({ ...blockType })),
-        this.getTickMetrics().currentTick,
-      ]);
-    }
-    if (this.currentChunkStateByKey.size > 0) {
-      this.queuePacket(playerDescriptor.id, [
-        CHUNKS_PACKET_ID,
-        Array.from(this.currentChunkStateByKey.values(), cloneChunkSchema),
         this.getTickMetrics().currentTick,
       ]);
     }
@@ -283,10 +294,15 @@ class ShadowHostedWorldRuntime {
         this.getTickMetrics().currentTick,
       ]);
     }
+
+    this.syncPlayerChunkInterest(playerDescriptor.id, this.getTickMetrics().currentTick);
   }
 
   detachPlayer(playerId) {
     const existingPlayer = this.players.get(playerId);
+    this.chunkInterestStateByPlayer.delete(playerId);
+    this.currentCameraStateByPlayerId.delete(playerId);
+    this.loadedChunkKeysByPlayer.delete(playerId);
     this.players.delete(playerId);
     this.pendingPacketsByPlayer.delete(playerId);
 
@@ -336,11 +352,19 @@ class ShadowHostedWorldRuntime {
   }
 
   queueCamera(playerId, camera, worldTick) {
+    const existingCamera = this.currentCameraStateByPlayerId.get(playerId);
+    this.currentCameraStateByPlayerId.set(playerId, {
+      ...existingCamera,
+      ...cloneCameraSchema(camera),
+    });
+
     this.queuePacket(playerId, [
       CAMERA_PACKET_ID,
       camera,
       this.resolveWorldTick(worldTick),
     ]);
+
+    this.syncPlayerChunkInterest(playerId, worldTick);
   }
 
   queueEntities(playerId, entities, worldTick) {
@@ -495,12 +519,44 @@ class ShadowHostedWorldRuntime {
     }
 
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
+
     for (const playerId of this.players.keys()) {
+      const loadedChunkKeys = this.loadedChunkKeysByPlayer.get(playerId);
+
+      if (chunk.rm) {
+        if (!loadedChunkKeys?.has(chunkKey)) {
+          continue;
+        }
+
+        loadedChunkKeys.delete(chunkKey);
+        this.queuePacket(playerId, [
+          CHUNKS_PACKET_ID,
+          [ chunk ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      if (loadedChunkKeys?.has(chunkKey)) {
+        this.queuePacket(playerId, [
+          CHUNKS_PACKET_ID,
+          [ chunk ],
+          resolvedWorldTick,
+        ]);
+        continue;
+      }
+
+      const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+      if (!centerChunkOrigin || !this.isChunkKeyInRange(chunkKey, centerChunkOrigin)) {
+        continue;
+      }
+
       this.queuePacket(playerId, [
         CHUNKS_PACKET_ID,
         [ chunk ],
         resolvedWorldTick,
       ]);
+      this.getOrCreateLoadedChunkKeys(playerId).add(chunkKey);
     }
   }
 
@@ -516,6 +572,11 @@ class ShadowHostedWorldRuntime {
 
     const resolvedWorldTick = this.resolveWorldTick(worldTick);
     for (const playerId of this.players.keys()) {
+      const loadedChunkKeys = this.loadedChunkKeysByPlayer.get(playerId);
+      if (!chunkKey || !loadedChunkKeys?.has(chunkKey)) {
+        continue;
+      }
+
       this.queuePacket(playerId, [
         BLOCKS_PACKET_ID,
         [ block ],
@@ -544,6 +605,18 @@ class ShadowHostedWorldRuntime {
         [ cloneEntitySchema(entity) ],
         resolvedWorldTick,
       ]);
+    }
+
+    if (!entity?.p && !entity?.rm) {
+      return;
+    }
+
+    for (const [ playerId, camera ] of this.currentCameraStateByPlayerId.entries()) {
+      if (camera?.e !== entityId) {
+        continue;
+      }
+
+      this.syncPlayerChunkInterest(playerId, resolvedWorldTick);
     }
   }
 
@@ -599,6 +672,180 @@ class ShadowHostedWorldRuntime {
       this.flushScheduled = false;
       this.flushPendingPackets();
     });
+  }
+
+  getOrCreateLoadedChunkKeys(playerId) {
+    let loadedChunkKeys = this.loadedChunkKeysByPlayer.get(playerId);
+    if (!loadedChunkKeys) {
+      loadedChunkKeys = new Set();
+      this.loadedChunkKeysByPlayer.set(playerId, loadedChunkKeys);
+    }
+
+    return loadedChunkKeys;
+  }
+
+  getOrCreateChunkInterestState(playerId) {
+    let state = this.chunkInterestStateByPlayer.get(playerId);
+    if (!state) {
+      state = { needsRefresh: true };
+      this.chunkInterestStateByPlayer.set(playerId, state);
+    }
+
+    return state;
+  }
+
+  getPlayerChunkInterestCenter(playerId) {
+    const camera = this.currentCameraStateByPlayerId.get(playerId);
+    if (!camera) {
+      return undefined;
+    }
+
+    if (Array.isArray(camera.p) && camera.p.length === 3) {
+      return camera.p;
+    }
+
+    if (Number.isFinite(camera.e)) {
+      const entityPosition = this.currentEntityStateById.get(camera.e)?.p;
+      if (Array.isArray(entityPosition) && entityPosition.length === 3) {
+        return entityPosition;
+      }
+    }
+
+    if (Array.isArray(camera.pt) && camera.pt.length === 3) {
+      return camera.pt;
+    }
+
+    if (Number.isFinite(camera.et)) {
+      const entityPosition = this.currentEntityStateById.get(camera.et)?.p;
+      if (Array.isArray(entityPosition) && entityPosition.length === 3) {
+        return entityPosition;
+      }
+    }
+
+    return undefined;
+  }
+
+  getPlayerChunkInterestCenterOrigin(playerId) {
+    const center = this.getPlayerChunkInterestCenter(playerId);
+    if (!center) {
+      return undefined;
+    }
+
+    return [
+      (center[0] | 0) - (center[0] & CHUNK_AXES_RANGE),
+      (center[1] | 0) - (center[1] & CHUNK_AXES_RANGE),
+      (center[2] | 0) - (center[2] & CHUNK_AXES_RANGE),
+    ];
+  }
+
+  isChunkKeyInRange(chunkKey, centerChunkOrigin) {
+    const originCoordinate = chunkKey.split(',').map(Number);
+    if (originCoordinate.length !== 3 || originCoordinate.some(value => !Number.isFinite(value))) {
+      return false;
+    }
+
+    const dx = (originCoordinate[0] - centerChunkOrigin[0]) / CHUNK_SIZE;
+    const dy = Math.abs((originCoordinate[1] - centerChunkOrigin[1]) / CHUNK_SIZE);
+    const dz = (originCoordinate[2] - centerChunkOrigin[2]) / CHUNK_SIZE;
+
+    return dy <= CHUNK_STREAM_VERTICAL_RADIUS &&
+      (dx * dx + dz * dz) <= CHUNK_STREAM_HORIZONTAL_RADIUS * CHUNK_STREAM_HORIZONTAL_RADIUS;
+  }
+
+  collectDesiredChunksForCenter(centerChunkOrigin) {
+    const desiredChunks = [];
+
+    for (let dy = -CHUNK_STREAM_VERTICAL_RADIUS; dy <= CHUNK_STREAM_VERTICAL_RADIUS; dy++) {
+      for (let dx = -CHUNK_STREAM_HORIZONTAL_RADIUS; dx <= CHUNK_STREAM_HORIZONTAL_RADIUS; dx++) {
+        for (let dz = -CHUNK_STREAM_HORIZONTAL_RADIUS; dz <= CHUNK_STREAM_HORIZONTAL_RADIUS; dz++) {
+          const horizontalDistanceSq = dx * dx + dz * dz;
+          if (horizontalDistanceSq > CHUNK_STREAM_HORIZONTAL_RADIUS * CHUNK_STREAM_HORIZONTAL_RADIUS) {
+            continue;
+          }
+
+          const chunkKey = `${centerChunkOrigin[0] + dx * CHUNK_SIZE},${centerChunkOrigin[1] + dy * CHUNK_SIZE},${centerChunkOrigin[2] + dz * CHUNK_SIZE}`;
+          const chunk = this.currentChunkStateByKey.get(chunkKey);
+          if (!chunk) {
+            continue;
+          }
+
+          desiredChunks.push({
+            chunk,
+            key: chunkKey,
+            distanceSq: horizontalDistanceSq + dy * dy,
+          });
+        }
+      }
+    }
+
+    desiredChunks.sort((a, b) => a.distanceSq - b.distanceSq);
+    return desiredChunks;
+  }
+
+  syncPlayerChunkInterest(playerId, worldTick) {
+    if (!this.players.has(playerId)) {
+      return;
+    }
+
+    const centerChunkOrigin = this.getPlayerChunkInterestCenterOrigin(playerId);
+    const state = this.getOrCreateChunkInterestState(playerId);
+
+    if (!centerChunkOrigin) {
+      state.needsRefresh = true;
+      return;
+    }
+
+    const centerChunkKey = packCoordinate(centerChunkOrigin);
+    if (!state.needsRefresh && state.centerChunkKey === centerChunkKey) {
+      return;
+    }
+
+    const loadedChunkKeys = this.getOrCreateLoadedChunkKeys(playerId);
+    const desiredChunks = this.collectDesiredChunksForCenter(centerChunkOrigin);
+    const desiredChunkKeys = new Set(desiredChunks.map(chunkInfo => chunkInfo.key));
+    const resolvedWorldTick = this.resolveWorldTick(worldTick);
+
+    for (const loadedChunkKey of Array.from(loadedChunkKeys)) {
+      if (desiredChunkKeys.has(loadedChunkKey)) {
+        continue;
+      }
+
+      const originCoordinate = loadedChunkKey.split(',').map(Number);
+      if (originCoordinate.length === 3 && originCoordinate.every(value => Number.isFinite(value))) {
+        this.queuePacket(playerId, [
+          CHUNKS_PACKET_ID,
+          [{ c: originCoordinate, rm: true }],
+          resolvedWorldTick,
+        ]);
+      }
+
+      loadedChunkKeys.delete(loadedChunkKey);
+    }
+
+    let remainingChunkLoads = CHUNK_STREAM_MAX_LOADS_PER_SYNC;
+    let hasPendingChunkLoads = false;
+
+    for (const chunkInfo of desiredChunks) {
+      if (loadedChunkKeys.has(chunkInfo.key)) {
+        continue;
+      }
+
+      if (remainingChunkLoads <= 0) {
+        hasPendingChunkLoads = true;
+        continue;
+      }
+
+      this.queuePacket(playerId, [
+        CHUNKS_PACKET_ID,
+        [ cloneChunkSchema(chunkInfo.chunk) ],
+        resolvedWorldTick,
+      ]);
+      loadedChunkKeys.add(chunkInfo.key);
+      remainingChunkLoads--;
+    }
+
+    state.centerChunkKey = centerChunkKey;
+    state.needsRefresh = hasPendingChunkLoads;
   }
 
   flushPendingPackets() {
