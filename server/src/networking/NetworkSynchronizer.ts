@@ -49,6 +49,21 @@ const NETWORK_SYNC_RATE_OVERRIDE = Number(process.env.HYTOPIA_NETWORK_SYNC_RATE)
 const PROTOCOL_ENTITY_SCHEMA = (protocol as unknown as { entitySchema?: { properties?: Record<string, unknown> } }).entitySchema;
 const PROTOCOL_ENTITY_PROPERTIES = PROTOCOL_ENTITY_SCHEMA?.properties ?? {};
 const PROTOCOL_ENTITY_KEYS = Object.keys(PROTOCOL_ENTITY_PROPERTIES);
+const UNRELIABLE_OWNER_PREDICTION_ENTITY_SYNC_KEYS = new Set([
+  'aq',
+  'fd',
+  'ju',
+  'js',
+  'mv',
+  'pf',
+  'py',
+  'rv',
+  'sc',
+  'sf',
+  'sl',
+  'su',
+  'wv',
+]);
 const ENTITY_LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
 const CHUNK_STREAM_HORIZONTAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_HORIZONTAL_RADIUS ?? 6)));
@@ -3691,7 +3706,12 @@ export default class NetworkSynchronizer {
 
   private _isReliableEntitySync(entitySync: protocol.EntitySchema): boolean {
     for (const key in entitySync) {
-      if (key !== 'aq' && key !== 'i' && key !== 'p' && key !== 'r') {
+      if (
+        key !== 'i' &&
+        key !== 'p' &&
+        key !== 'r' &&
+        !UNRELIABLE_OWNER_PREDICTION_ENTITY_SYNC_KEYS.has(key)
+      ) {
         return true;
       }
     }

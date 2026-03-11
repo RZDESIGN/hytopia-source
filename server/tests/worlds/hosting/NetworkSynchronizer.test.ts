@@ -76,3 +76,11 @@ test('input acknowledgement sync also refreshes owner prediction metadata', () =
     r: [ 0, 0, 0, 1 ],
   }));
 });
+
+test('owner prediction transform updates remain eligible for unreliable delivery', () => {
+  const { perPlayerEntitySyncs, playerEntity, synchronizer } = createHarness();
+
+  (synchronizer as any)._queueOwnerPlayerEntityPredictionSync(playerEntity, true);
+
+  expect((synchronizer as any)._isReliableEntitySync(perPlayerEntitySyncs())).toBe(false);
+});
