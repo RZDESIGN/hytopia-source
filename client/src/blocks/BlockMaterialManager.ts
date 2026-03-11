@@ -244,8 +244,8 @@ class MeshLiquidMaterial extends ShaderMaterial {
                   * step(0.0, reflectionUv.w);
                 float reflectionEdgeFade = smoothstep(0.015, 0.10, projectedEdgeDistance);
                 vec3 sceneReflection = texture2D(${UNIFORM_REFLECTION_TEXTURE}, clamp(reflectionSampleUv, 0.0, 1.0)).rgb;
-                vec3 reflectionTinted = mix(color, sceneReflection, 0.45 + fresnel * 0.15);
-                float reflectionStrength = clamp(0.16 + fresnel * 0.32, 0.0, 0.52) * inBounds * reflectionEdgeFade;
+                vec3 reflectionTinted = mix(color, sceneReflection, 0.62 + fresnel * 0.16);
+                float reflectionStrength = clamp(0.24 + fresnel * 0.38, 0.0, 0.60) * inBounds * reflectionEdgeFade;
 
                 color = mix(color, reflectionTinted, reflectionStrength);
               }
