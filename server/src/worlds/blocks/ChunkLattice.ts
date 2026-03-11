@@ -237,6 +237,11 @@ export default class ChunkLattice extends EventRouter {
    * **Category:** Blocks
    */
   public getOrCreateChunk(globalCoordinate: Vector3Like): Chunk {
+    return this._getOrCreateChunk(globalCoordinate, true);
+  }
+
+  /** @internal */
+  private _getOrCreateChunk(globalCoordinate: Vector3Like, emitAddEvent: boolean): Chunk {
     const originCoordinate = Chunk.globalCoordinateToOriginCoordinate(globalCoordinate);
     const chunkKey = this._packCoordinate(originCoordinate);
     let chunk = this._chunks.get(chunkKey);
@@ -249,10 +254,12 @@ export default class ChunkLattice extends EventRouter {
 
     this._chunks.set(chunkKey, chunk);
 
-    this.emitWithWorld(this._world, ChunkLatticeEvent.ADD_CHUNK, {
-      chunkLattice: this,
-      chunk,
-    });
+    if (emitAddEvent) {
+      this.emitWithWorld(this._world, ChunkLatticeEvent.ADD_CHUNK, {
+        chunkLattice: this,
+        chunk,
+      });
+    }
 
     return chunk;
   }
@@ -309,7 +316,8 @@ export default class ChunkLattice extends EventRouter {
    *
    * @param blocks - The blocks to initialize, keyed by block type ID.
    *
-   * **Side effects:** Clears existing data, creates colliders, and emits `ChunkLatticeEvent.SET_BLOCK` per block.
+   * **Side effects:** Clears existing data, creates colliders, and emits `ChunkLatticeEvent.ADD_CHUNK`
+   * for each fully initialized chunk.
    *
    * **Category:** Blocks
    */
@@ -336,6 +344,7 @@ export default class ChunkLattice extends EventRouter {
   /** @internal */
   public initializeBlockEntries(blockEntries: Iterable<BlockPlacementEntry>): void {
     this.clear();
+    const initializedChunks: Chunk[] = [];
 
     if (!this._rigidBody) {
       this._rigidBody = new RigidBody({ type: RigidBodyType.FIXED });
@@ -348,7 +357,17 @@ export default class ChunkLattice extends EventRouter {
       }
 
       const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
-      const chunk = this.getOrCreateChunk(globalCoordinate);
+      let chunk = this.getChunk(globalCoordinate);
+
+      if (!chunk) {
+        if (blockTypeId === 0) {
+          continue;
+        }
+
+        chunk = this._getOrCreateChunk(globalCoordinate, false);
+        initializedChunks.push(chunk);
+      }
+
       const previousBlockTypeId = chunk.getBlockId(localCoordinate);
       const previousBlockRotation = chunk.getBlockRotation(localCoordinate);
 
@@ -365,15 +384,6 @@ export default class ChunkLattice extends EventRouter {
       if (blockTypeId !== 0) {
         this._addBlockTypePlacement(blockTypeId, { globalCoordinate, blockRotation });
       }
-
-      this.emitWithWorld(this._world, ChunkLatticeEvent.SET_BLOCK, {
-        chunkLattice: this,
-        chunk,
-        globalCoordinate,
-        localCoordinate,
-        blockTypeId,
-        blockRotation,
-      });
     }
 
     for (let blockTypeId = 1; blockTypeId <= MAX_BLOCK_TYPE_ID; blockTypeId++) {
@@ -392,6 +402,13 @@ export default class ChunkLattice extends EventRouter {
       if (collider.isVoxel) {
         this._combineVoxelStates(collider);
       }
+    }
+
+    for (let i = 0; i < initializedChunks.length; i++) {
+      this.emitWithWorld(this._world, ChunkLatticeEvent.ADD_CHUNK, {
+        chunkLattice: this,
+        chunk: initializedChunks[i],
+      });
     }
   }
 

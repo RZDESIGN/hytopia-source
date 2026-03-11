@@ -170,8 +170,9 @@ export default class Connection extends EventRouter {
 
     if (VALIDATE_OUTBOUND_PACKETS) {
       for (const packet of packets) {
-        if (!protocol.isValidPacket(packet)) {
-          return ErrorHandler.error(`Connection.serializePackets(): Invalid packet payload: ${JSON.stringify(packet)}`);
+        const packetForValidation = this._normalizePacketForValidation(packet) as AnyPacket;
+        if (!protocol.isValidPacket(packetForValidation)) {
+          return ErrorHandler.error(`Connection.serializePackets(): Invalid packet payload: ${JSON.stringify(packetForValidation)}`);
         }
       }
     }
@@ -211,6 +212,28 @@ export default class Connection extends EventRouter {
 
       return serialized;
     });
+  }
+
+  private static _normalizePacketForValidation<T>(value: T): T {
+    if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+      return Array.from(value as ArrayLike<number>) as T;
+    }
+
+    if (Array.isArray(value)) {
+      return value.map(item => this._normalizePacketForValidation(item)) as T;
+    }
+
+    if (value && typeof value === 'object') {
+      const normalized: Record<string, unknown> = {};
+
+      for (const [ key, nestedValue ] of Object.entries(value)) {
+        normalized[key] = this._normalizePacketForValidation(nestedValue);
+      }
+
+      return normalized as T;
+    }
+
+    return value;
   }
 
   /**

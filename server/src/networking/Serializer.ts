@@ -144,11 +144,6 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializeChunk(chunk: Chunk): protocol.ChunkSchema {
-    const blocks = new Array<number>(chunk.blocks.length);
-    for (let i = 0; i < chunk.blocks.length; i++) {
-      blocks[i] = chunk.blocks[i];
-    }
-
     const blockRotations = new Array<number>(chunk.blockRotations.size * 2);
     let blockRotationIndex = 0;
     for (const [ index, rotation ] of chunk.blockRotations) {
@@ -158,7 +153,7 @@ export default class Serializer {
 
     return {
       c: this.serializeVector(chunk.originCoordinate),
-      b: blocks,
+      b: chunk.blocks.slice(),
       r: blockRotations,
     };
   }

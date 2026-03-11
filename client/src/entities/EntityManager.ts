@@ -191,6 +191,7 @@ type LocalPredictionState = {
   lastAuthoritativeRotationServerTick: number;
   controllerState: LocalPredictionControllerState;
   commandBuffer: LocalPredictionCommand[];
+  liveCommandBuffer: LocalPredictionCommand[];
   commandBufferHead: number;
   commandBufferCount: number;
   lastAcknowledgedInputSequenceNumber: number;
@@ -283,6 +284,7 @@ export default class EntityManager {
       sh: false,
       c: false,
     })),
+    liveCommandBuffer: [],
     commandBufferHead: 0,
     commandBufferCount: 0,
     lastAcknowledgedInputSequenceNumber: -1,
@@ -952,6 +954,7 @@ export default class EntityManager {
     this._localPredictionState.controllerState.predictedJustSubmergedRemainingS = 0;
     this._localPredictionState.controllerState.authoritativeSwimUpwardCooldownRemainingS = 0;
     this._localPredictionState.controllerState.predictedSwimUpwardCooldownRemainingS = 0;
+    this._localPredictionState.liveCommandBuffer = [];
     this._localPredictionState.commandBufferHead = 0;
     this._localPredictionState.commandBufferCount = 0;
     this._localPredictionState.lastAcknowledgedInputSequenceNumber = -1;
@@ -1234,6 +1237,11 @@ export default class EntityManager {
       replayedCommandCount++;
     }
 
+    for (const command of this._localPredictionState.liveCommandBuffer) {
+      replayedSubstepCount += this._replayPredictedCommand(command);
+      replayedCommandCount++;
+    }
+
     this._syncLocalPredictionStats(replayedCommandCount, replayedSubstepCount);
   }
 
@@ -1296,6 +1304,7 @@ export default class EntityManager {
     command.c = payload.c;
 
     this._localPredictionState.commandBufferCount++;
+    this._localPredictionState.liveCommandBuffer = [];
   }
 
   private _applyLocalPrediction(entity: Entity, deltaTimeS: number): void {
@@ -1345,6 +1354,22 @@ export default class EntityManager {
 
       remainingDeltaS -= stepDeltaS;
       substeps++;
+    }
+
+    if (hasLocalMovementIntent) {
+      this._localPredictionState.liveCommandBuffer.push({
+        sequenceNumber: -1,
+        deltaTimeS: clampedDeltaS,
+        yaw: this._game.camera.gameCameraYaw,
+        joystickDirection: this._game.inputManager.joystickDirection,
+        w: !!inputState.w,
+        a: !!inputState.a,
+        s: !!inputState.s,
+        d: !!inputState.d,
+        sp: !!inputState.sp,
+        sh: !!inputState.sh,
+        c: !!inputState.c,
+      });
     }
 
     // True CSP depends on input acknowledgements, so keep authoritative
