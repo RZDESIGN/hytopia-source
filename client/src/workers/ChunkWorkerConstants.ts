@@ -70,6 +70,8 @@ export namespace WorkerEventPayload {
   }
 }
 
+export type TerrainMeshingMode = 'full' | 'fast';
+
 export type ToChunkWorkerMessageCore = {
   type:
     'block_entity_build' |
@@ -82,6 +84,7 @@ export type ToChunkWorkerMessageCore = {
     'chunks_update' |
     'chunk_update' |
     'chunk_remove' |
+    'terrain_meshing_update' |
     'init'
 };
 
@@ -154,6 +157,11 @@ export type ChunkWorkerBlockEntityBuildMessage = ToChunkWorkerMessageCore & {
   textureUris: Record<BlockFace, BlockTextureUri>;
 };
 
+export type ChunkWorkerTerrainMeshingUpdateMessage = ToChunkWorkerMessageCore & {
+  type: 'terrain_meshing_update';
+  mode: TerrainMeshingMode;
+};
+
 export type ChunkWorkerInitMessage = ToChunkWorkerMessageCore & {
   type: 'init';
   metadataUrl: string; // empty strings implies legacy mode
@@ -170,6 +178,7 @@ export type ToChunkWorkerMessage =
   ChunkWorkerChunkUpdateMessage |
   ChunkWorkerChunkRemoveMessage |
   ChunkWorkerBlockEntityBuildMessage |
+  ChunkWorkerTerrainMeshingUpdateMessage |
   ChunkWorkerInitMessage;
 
 export type FromChunkWorkerMessageCore = {

@@ -20,6 +20,7 @@ import type { WebTransportReceiveStream } from '@fails-components/webtransport';
 
 const RECONNECT_WINDOW_MS = 30 * 1000; // 30 seconds
 const VALIDATE_OUTBOUND_PACKETS = process.env.NODE_ENV !== 'production' || process.env.HYTOPIA_VALIDATE_OUTBOUND_PACKETS === 'true';
+type NumericArrayView = ArrayBufferView<ArrayBufferLike> & ArrayLike<number>;
 
 registerConnectionFeaturePacketDefinition();
 
@@ -215,8 +216,8 @@ export default class Connection extends EventRouter {
   }
 
   private static _normalizePacketForValidation<T>(value: T): T {
-    if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
-      return Array.from(value as ArrayLike<number>) as T;
+    if (this._isNumericArrayView(value)) {
+      return Array.from(value) as T;
     }
 
     if (Array.isArray(value)) {
@@ -234,6 +235,10 @@ export default class Connection extends EventRouter {
     }
 
     return value;
+  }
+
+  private static _isNumericArrayView(value: unknown): value is NumericArrayView {
+    return ArrayBuffer.isView(value) && !(value instanceof DataView) && 'length' in value;
   }
 
   /**

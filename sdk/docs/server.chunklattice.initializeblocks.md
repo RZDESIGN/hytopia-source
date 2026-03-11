@@ -48,7 +48,7 @@ blocks
 
 The blocks to initialize, keyed by block type ID.
 
-\*\*Side effects:\*\* Clears existing data, creates colliders, and emits `ChunkLatticeEvent.SET_BLOCK` per block.
+\*\*Side effects:\*\* Clears existing data, creates colliders, and emits `ChunkLatticeEvent.ADD_CHUNK` for each fully initialized chunk.
 
 \*\*Category:\*\* Blocks
 

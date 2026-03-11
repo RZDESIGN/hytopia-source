@@ -1,6 +1,7 @@
 import EventRouter from '../events/EventRouter';
 import Game from "../Game";
 import MobileManager from "../mobile/MobileManager";
+import type { TerrainMeshingMode } from '../workers/ChunkWorkerConstants';
 
 export enum ClientSettingsEventType {
   Update = 'CLIENT_SETTINGS.UPDATE',
@@ -19,6 +20,9 @@ type QualityPerfTradeoff = {
   antialias: boolean,
   blobShadows?: {
     enabled: boolean;
+  },
+  terrainMeshing: {
+    mode: TerrainMeshingMode;
   },
   shadows?: {
     enabled: boolean;
@@ -82,6 +86,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     blobShadows: {
       enabled: false,
     },
+    terrainMeshing: {
+      mode: 'full',
+    },
     shadows: {
       enabled: true,
       type: 'vsm',
@@ -116,6 +123,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     blobShadows: {
       enabled: false,
     },
+    terrainMeshing: {
+      mode: 'full',
+    },
     shadows: {
       enabled: true,
       type: 'vsm',
@@ -145,10 +155,14 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       },
     },
   },
+  // Medium and below favor faster terrain meshing to keep large worlds responsive.
   MEDIUM: {
     antialias: true,
     blobShadows: {
       enabled: false,
+    },
+    terrainMeshing: {
+      mode: 'fast',
     },
     shadows: {
       enabled: true,
@@ -193,6 +207,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     blobShadows: {
       enabled: false,
     },
+    terrainMeshing: {
+      mode: 'fast',
+    },
     shadows: {
       enabled: false,
       type: 'pcf',
@@ -227,6 +244,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     antialias: true,
     blobShadows: {
       enabled: false,
+    },
+    terrainMeshing: {
+      mode: 'fast',
     },
     shadows: {
       enabled: false,
@@ -365,6 +385,7 @@ export default class SettingsManager {
   public get clientSettings(): ClientSettings { return this._clientSettings; }
   public get qualityPerfTradeoff(): QualityPerfTradeoff { return this._clientSettings.qualityPerfTradeoff; }
   public get qualityPresetLevel(): keyof typeof QUALITY_PRESETS { return this._currentPresetLevel; }
+  public get terrainMeshingMode(): TerrainMeshingMode { return this._clientSettings.qualityPerfTradeoff.terrainMeshing.mode; }
 
   public setDistantBlockViewMode(mode: DistantBlockViewMode): void {
     this._clientSettings.distantBlockViewMode = mode;

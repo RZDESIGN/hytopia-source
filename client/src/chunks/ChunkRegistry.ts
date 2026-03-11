@@ -94,6 +94,10 @@ export default class ChunkRegistry {
     return batch ? Array.from(batch.chunkIds) : [];
   }
 
+  public getBatchIds(): BatchId[] {
+    return Array.from(this._batches.keys());
+  }
+
   public updateBatchMetadata(batchId: BatchId, meta: BatchMetadata): void {
     const batch = this._batches.get(batchId);
 

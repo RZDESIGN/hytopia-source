@@ -1,18 +1,24 @@
 import { expect, test } from 'bun:test';
+import protocol from '@hytopia.com/server-protocol';
 import Serializer from '@/networking/Serializer';
 import Chunk from '@/worlds/blocks/Chunk';
 import ChunkLattice from '@/worlds/blocks/ChunkLattice';
 import { ChunkLatticeEvent } from '@/worlds/blocks/ChunkLattice';
 
-test('serializeChunk snapshots blocks as a Uint8Array', () => {
+test('serializeChunk snapshots blocks as a packet-valid array', () => {
   const chunk = new Chunk({ x: 0, y: 0, z: 0 });
 
   chunk.setBlock({ x: 0, y: 0, z: 0 }, 7);
 
   const serialized = Serializer.serializeChunk(chunk);
 
-  expect(serialized.b).toBeInstanceOf(Uint8Array);
+  expect(Array.isArray(serialized.b)).toBe(true);
   expect(serialized.b?.[0]).toBe(7);
+  expect(protocol.createPacket(protocol.outboundPackets.chunksPacketDefinition, [ serialized ], 1)).toEqual([
+    protocol.PacketId.CHUNKS,
+    [ serialized ],
+    1,
+  ]);
 
   chunk.setBlock({ x: 0, y: 0, z: 0 }, 3);
 

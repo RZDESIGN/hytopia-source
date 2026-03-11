@@ -25,6 +25,7 @@ import type {
   ChunkWorkerBlockTextureAtlasMetadataMessage,
   ChunkWorkerLightLevelVolumeBuiltMessage,
   ChunkWorkerSkyDistanceVolumeBuiltMessage,
+  TerrainMeshingMode,
   ToChunkWorkerMessage,
 } from './ChunkWorkerConstants';
 import {
@@ -165,6 +166,7 @@ class ChunkWorker {
   private _latestChunkBatchBuildRequestVersion: Map<BatchId, number> = new Map();
   private _promotedBatches: Set<BatchId> = new Set();
   private _trimeshOcclusionProfiles: Map<BlockId, TrimeshOcclusionProfile> = new Map();
+  private _terrainMeshingMode: TerrainMeshingMode = 'full';
   private _receiveQueue: MessageEvent[] = [];
   private _processing: boolean = false;
   private _consecutiveProcessingCount: number = 0;
@@ -295,7 +297,11 @@ class ChunkWorker {
       }
 
       this._enqueueMessage(newEvent, true);
-    } else if (message.type === 'chunk_build' || message.type === 'batch_promotion_update') {
+    } else if (
+      message.type === 'chunk_build' ||
+      message.type === 'batch_promotion_update' ||
+      message.type === 'terrain_meshing_update'
+    ) {
       this._enqueueMessage(event, true);
     } else {
       // Add other message types to queue normally
@@ -316,12 +322,17 @@ class ChunkWorker {
       return;
     }
 
+    const incomingMessage = event.data as ToChunkWorkerMessage;
+    const prioritizeBeforeChunkBuilds = incomingMessage.type === 'terrain_meshing_update';
+
     // Keep chunk/chunks updates ahead of interactive block edits so the worker's
     // chunk registry stays coherent, but let block edits jump ahead of queued
     // geometry builds to avoid visible ghost blocks during large-world streaming.
     const insertIndex = this._receiveQueue.findIndex(queuedEvent => {
       const queuedMessage = queuedEvent.data as ToChunkWorkerMessage;
-      return queuedMessage.type === 'chunk_batch_build' || queuedMessage.type === 'block_entity_build';
+      return queuedMessage.type === 'chunk_batch_build' ||
+        queuedMessage.type === 'block_entity_build' ||
+        (prioritizeBeforeChunkBuilds && queuedMessage.type === 'chunk_build');
     });
 
     if (insertIndex < 0) {
@@ -424,6 +435,9 @@ class ChunkWorker {
         return this._onChunkUpdate(message);
       case 'chunk_remove':
         return this._onChunkRemove(message);
+      case 'terrain_meshing_update':
+        this._terrainMeshingMode = message.mode;
+        return;
       case 'block_entity_build':
         return this._onBlockEntityBuild(message);
       default:
@@ -870,32 +884,35 @@ class ChunkWorker {
     opaqueSolidGeometry?: BlocksBufferGeometryData,
     transparentSolidGeometry?: BlocksBufferGeometryData,
     lightLevelVolumes: Map<ChunkId, Uint8Array | undefined>,
-    skyDistanceVolumes: Map<ChunkId, Uint8Array>,
+    skyDistanceVolumes: Map<ChunkId, Uint8Array | undefined>,
     blockCount: number,
   } {
     const batchOrigin = Chunk.batchIdToBatchOrigin(batchId);
     const { x: batchOriginX, y: batchOriginY, z: batchOriginZ } = batchOrigin;
+    const fastTerrainMeshingEnabled = this._terrainMeshingMode === 'fast';
 
-    // Clear working array before populating
-    nearbyLightSources.length = 0;
+    if (!fastTerrainMeshingEnabled) {
+      // Clear working array before populating
+      nearbyLightSources.length = 0;
 
-    // Collect all light sources for the batch's chunks, plus neighboring chunks for proper lighting.
-    // Search range is in chunk offsets relative to batch origin, extending SEARCH_RADIUS chunks
-    // beyond the batch's chunk indices [0, BATCH_SIZE-1] in each dimension.
-    const searchExtent = SEARCH_RADIUS + BATCH_SIZE - 1;
-    for (let dx = -SEARCH_RADIUS; dx <= searchExtent; dx++) {
-      for (let dy = -SEARCH_RADIUS; dy <= searchExtent; dy++) {
-        for (let dz = -SEARCH_RADIUS; dz <= searchExtent; dz++) {
-          const neighborOrigin = {
-            x: batchOriginX + dx * CHUNK_SIZE,
-            y: batchOriginY + dy * CHUNK_SIZE,
-            z: batchOriginZ + dz * CHUNK_SIZE,
-          };
+      // Collect all light sources for the batch's chunks, plus neighboring chunks for proper lighting.
+      // Search range is in chunk offsets relative to batch origin, extending SEARCH_RADIUS chunks
+      // beyond the batch's chunk indices [0, BATCH_SIZE-1] in each dimension.
+      const searchExtent = SEARCH_RADIUS + BATCH_SIZE - 1;
+      for (let dx = -SEARCH_RADIUS; dx <= searchExtent; dx++) {
+        for (let dy = -SEARCH_RADIUS; dy <= searchExtent; dy++) {
+          for (let dz = -SEARCH_RADIUS; dz <= searchExtent; dz++) {
+            const neighborOrigin = {
+              x: batchOriginX + dx * CHUNK_SIZE,
+              y: batchOriginY + dy * CHUNK_SIZE,
+              z: batchOriginZ + dz * CHUNK_SIZE,
+            };
 
-          const neighborChunk = this._chunkRegistry.getChunk(Chunk.originCoordinateToChunkId(neighborOrigin));
+            const neighborChunk = this._chunkRegistry.getChunk(Chunk.originCoordinateToChunkId(neighborOrigin));
 
-          if (neighborChunk) {
-            nearbyLightSources.push(...neighborChunk.getLightSources(this._blockTypeRegistry));
+            if (neighborChunk) {
+              nearbyLightSources.push(...neighborChunk.getLightSources(this._blockTypeRegistry));
+            }
           }
         }
       }
@@ -903,7 +920,7 @@ class ChunkWorker {
 
     let totalBlockCount = 0;
     const lightLevelVolumes: Map<ChunkId, Uint8Array | undefined> = new Map();
-    const skyDistanceVolumes: Map<ChunkId, Uint8Array> = new Map();
+    const skyDistanceVolumes: Map<ChunkId, Uint8Array | undefined> = new Map();
 
     // Batch mesh arrays (combined for all chunks in batch)
     const foliageMeshColors: number[] = [];
@@ -945,14 +962,18 @@ class ChunkWorker {
 
       if (!chunk) {
         lightLevelVolumes.set(chunkId, undefined);
+        skyDistanceVolumes.set(chunkId, undefined);
         continue;
       }
 
       const { x: originX, y: originY, z: originZ } = chunk.originCoordinate;
       let lightLevelVolume: Uint8Array | undefined = undefined;
+      let skyDistanceVolume: Uint8Array | undefined = undefined;
+      let skyBoundaryVolume: BoundaryVolume | undefined = undefined;
 
-      // Build SkyDistanceVolume for this chunk
-      const { skyDistanceVolume, skyBoundaryVolume } = this._buildSkyDistanceVolume(chunk);
+      if (!fastTerrainMeshingEnabled) {
+        ({ skyDistanceVolume, skyBoundaryVolume } = this._buildSkyDistanceVolume(chunk));
+      }
 
       for (let y = 0; y < CHUNK_SIZE; y++) {
         const globalY = originY + y;
@@ -961,12 +982,14 @@ class ChunkWorker {
           for (let x = 0; x < CHUNK_SIZE; x++) {
             const globalX = originX + x;
 
-            const lightLevel = this._calculateLightLevel(globalX, globalY, globalZ, nearbyLightSources) & 0xF;
+            const lightLevel = fastTerrainMeshingEnabled
+              ? 0
+              : this._calculateLightLevel(globalX, globalY, globalZ, nearbyLightSources) & 0xF;
 
             const blockIndex = x + CHUNK_SIZE * (y + CHUNK_SIZE * z);
             const packedIndex = Math.floor(blockIndex / 2);
 
-            if (lightLevel > 0) {
+            if (!fastTerrainMeshingEnabled && lightLevel > 0) {
               if (lightLevelVolume === undefined) {
                 lightLevelVolume = new Uint8Array((CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) / 2);
               }
@@ -1067,92 +1090,119 @@ class ChunkWorker {
                   nx = rotatedNormal[0]; ny = rotatedNormal[1]; nz = rotatedNormal[2];
                 }
 
-                let aoFaceVertices: typeof DEFAULT_BLOCK_FACE_GEOMETRIES[BlockFace]['vertices'] | undefined;
-                let faceContactAOOpacity = 0;
-                aoCacheX.length = 0;
-                aoCacheY.length = 0;
-                aoCacheZ.length = 0;
-                aoCacheOpacity.length = 0;
-                this._setDominantAxisNormal(nx, ny, nz, rotatedNormal);
-                const aoFace = this._normalToBlockFace(rotatedNormal[0], rotatedNormal[1], rotatedNormal[2]);
-                aoFaceVertices = DEFAULT_BLOCK_FACE_GEOMETRIES[aoFace].vertices;
-                faceContactAOOpacity = this._getFaceContactAOOpacity(globalX, globalY, globalZ, rotatedNormal);
+                if (!fastTerrainMeshingEnabled) {
+                  let aoFaceVertices: typeof DEFAULT_BLOCK_FACE_GEOMETRIES[BlockFace]['vertices'] | undefined;
+                  let faceContactAOOpacity = 0;
+                  aoCacheX.length = 0;
+                  aoCacheY.length = 0;
+                  aoCacheZ.length = 0;
+                  aoCacheOpacity.length = 0;
+                  this._setDominantAxisNormal(nx, ny, nz, rotatedNormal);
+                  const aoFace = this._normalToBlockFace(rotatedNormal[0], rotatedNormal[1], rotatedNormal[2]);
+                  aoFaceVertices = DEFAULT_BLOCK_FACE_GEOMETRIES[aoFace].vertices;
+                  faceContactAOOpacity = this._getFaceContactAOOpacity(globalX, globalY, globalZ, rotatedNormal);
 
-                meshPositions.push(v0x + globalX, v0y + globalY, v0z + globalZ);
-                meshNormals.push(nx, ny, nz);
-                let uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v0u, tri.v0v]);
-                meshUvs.push(uv[0], uv[1]);
-                let aoTemplate = this._pickClosestFaceVertexAO(v0x, v0y, v0z, aoFaceVertices!);
-                vertexCoord.x = v0x + globalX;
-                vertexCoord.y = v0y + globalY;
-                vertexCoord.z = v0z + globalZ;
-                let color = this._calculateVertexColor(
-                  vertexCoord,
-                  globalX,
-                  globalY,
-                  globalZ,
-                  blockType,
-                  aoTemplate,
-                  rotatedNormal,
-                  chunk,
-                  skyDistanceVolume,
-                  skyBoundaryVolume,
-                  faceContactAOOpacity,
-                );
-                meshColors.push(color[0], color[1], color[2], color[3]);
-                meshLightLevels.push(normalizedLight);
+                  meshPositions.push(v0x + globalX, v0y + globalY, v0z + globalZ);
+                  meshNormals.push(nx, ny, nz);
+                  let uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v0u, tri.v0v]);
+                  meshUvs.push(uv[0], uv[1]);
+                  let aoTemplate = this._pickClosestFaceVertexAO(v0x, v0y, v0z, aoFaceVertices!);
+                  vertexCoord.x = v0x + globalX;
+                  vertexCoord.y = v0y + globalY;
+                  vertexCoord.z = v0z + globalZ;
+                  let color = this._calculateVertexColor(
+                    vertexCoord,
+                    globalX,
+                    globalY,
+                    globalZ,
+                    blockType,
+                    aoTemplate,
+                    rotatedNormal,
+                    chunk,
+                    skyDistanceVolume!,
+                    skyBoundaryVolume!,
+                    faceContactAOOpacity,
+                  );
+                  meshColors.push(color[0], color[1], color[2], color[3]);
+                  meshLightLevels.push(normalizedLight);
 
-                meshPositions.push(v1x + globalX, v1y + globalY, v1z + globalZ);
-                meshNormals.push(nx, ny, nz);
-                uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v1u, tri.v1v]);
-                meshUvs.push(uv[0], uv[1]);
-                aoTemplate = this._pickClosestFaceVertexAO(v1x, v1y, v1z, aoFaceVertices!);
-                vertexCoord.x = v1x + globalX;
-                vertexCoord.y = v1y + globalY;
-                vertexCoord.z = v1z + globalZ;
-                color = this._calculateVertexColor(
-                  vertexCoord,
-                  globalX,
-                  globalY,
-                  globalZ,
-                  blockType,
-                  aoTemplate,
-                  rotatedNormal,
-                  chunk,
-                  skyDistanceVolume,
-                  skyBoundaryVolume,
-                  faceContactAOOpacity,
-                );
-                meshColors.push(color[0], color[1], color[2], color[3]);
-                meshLightLevels.push(normalizedLight);
+                  meshPositions.push(v1x + globalX, v1y + globalY, v1z + globalZ);
+                  meshNormals.push(nx, ny, nz);
+                  uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v1u, tri.v1v]);
+                  meshUvs.push(uv[0], uv[1]);
+                  aoTemplate = this._pickClosestFaceVertexAO(v1x, v1y, v1z, aoFaceVertices!);
+                  vertexCoord.x = v1x + globalX;
+                  vertexCoord.y = v1y + globalY;
+                  vertexCoord.z = v1z + globalZ;
+                  color = this._calculateVertexColor(
+                    vertexCoord,
+                    globalX,
+                    globalY,
+                    globalZ,
+                    blockType,
+                    aoTemplate,
+                    rotatedNormal,
+                    chunk,
+                    skyDistanceVolume!,
+                    skyBoundaryVolume!,
+                    faceContactAOOpacity,
+                  );
+                  meshColors.push(color[0], color[1], color[2], color[3]);
+                  meshLightLevels.push(normalizedLight);
 
-                meshPositions.push(v2x + globalX, v2y + globalY, v2z + globalZ);
-                meshNormals.push(nx, ny, nz);
-                uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v2u, tri.v2v]);
-                meshUvs.push(uv[0], uv[1]);
-                aoTemplate = this._pickClosestFaceVertexAO(v2x, v2y, v2z, aoFaceVertices!);
-                vertexCoord.x = v2x + globalX;
-                vertexCoord.y = v2y + globalY;
-                vertexCoord.z = v2z + globalZ;
-                color = this._calculateVertexColor(
-                  vertexCoord,
-                  globalX,
-                  globalY,
-                  globalZ,
-                  blockType,
-                  aoTemplate,
-                  rotatedNormal,
-                  chunk,
-                  skyDistanceVolume,
-                  skyBoundaryVolume,
-                  faceContactAOOpacity,
-                );
-                meshColors.push(color[0], color[1], color[2], color[3]);
-                meshLightLevels.push(normalizedLight);
+                  meshPositions.push(v2x + globalX, v2y + globalY, v2z + globalZ);
+                  meshNormals.push(nx, ny, nz);
+                  uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v2u, tri.v2v]);
+                  meshUvs.push(uv[0], uv[1]);
+                  aoTemplate = this._pickClosestFaceVertexAO(v2x, v2y, v2z, aoFaceVertices!);
+                  vertexCoord.x = v2x + globalX;
+                  vertexCoord.y = v2y + globalY;
+                  vertexCoord.z = v2z + globalZ;
+                  color = this._calculateVertexColor(
+                    vertexCoord,
+                    globalX,
+                    globalY,
+                    globalZ,
+                    blockType,
+                    aoTemplate,
+                    rotatedNormal,
+                    chunk,
+                    skyDistanceVolume!,
+                    skyBoundaryVolume!,
+                    faceContactAOOpacity,
+                  );
+                  meshColors.push(color[0], color[1], color[2], color[3]);
+                  meshLightLevels.push(normalizedLight);
+                } else {
+                  const faceShade = this._getFaceShadeFromNormalY(ny);
+                  const baseColor = blockType.color;
+                  const colorR = baseColor[0] * faceShade;
+                  const colorG = baseColor[1] * faceShade;
+                  const colorB = baseColor[2] * faceShade;
+                  const colorA = baseColor[3];
+
+                  meshPositions.push(v0x + globalX, v0y + globalY, v0z + globalZ);
+                  meshNormals.push(nx, ny, nz);
+                  let uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v0u, tri.v0v]);
+                  meshUvs.push(uv[0], uv[1]);
+                  meshColors.push(colorR, colorG, colorB, colorA);
+
+                  meshPositions.push(v1x + globalX, v1y + globalY, v1z + globalZ);
+                  meshNormals.push(nx, ny, nz);
+                  uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v1u, tri.v1v]);
+                  meshUvs.push(uv[0], uv[1]);
+                  meshColors.push(colorR, colorG, colorB, colorA);
+
+                  meshPositions.push(v2x + globalX, v2y + globalY, v2z + globalZ);
+                  meshNormals.push(nx, ny, nz);
+                  uv = this._textureAtlasManager.getTextureUVCoordinate(textureUri, [tri.v2u, tri.v2v]);
+                  meshUvs.push(uv[0], uv[1]);
+                  meshColors.push(colorR, colorG, colorB, colorA);
+                }
 
                 meshIndices.push(ndx, ndx + 1, ndx + 2);
 
-                if (lightLevel > 0) {
+                if (!fastTerrainMeshingEnabled && lightLevel > 0) {
                   if (isTransparent) transparentSolidMeshHasLightLevel = true;
                   else opaqueSolidMeshHasLightLevel = true;
                 }
@@ -1204,15 +1254,18 @@ class ChunkWorker {
                 }
               }
 
-              const faceContactAOOpacity =
-                neighborBlockType && !neighborBlockType.isLiquid && neighborBlockType.isTrimesh
+              const faceContactAOOpacity = fastTerrainMeshingEnabled
+                ? 0
+                : neighborBlockType && !neighborBlockType.isLiquid && neighborBlockType.isTrimesh
                   ? this._getBlockAOOpacity(neighborBlockType)
                   : 0;
 
-              aoCacheX.length = 0;
-              aoCacheY.length = 0;
-              aoCacheZ.length = 0;
-              aoCacheOpacity.length = 0;
+              if (!fastTerrainMeshingEnabled) {
+                aoCacheX.length = 0;
+                aoCacheY.length = 0;
+                aoCacheZ.length = 0;
+                aoCacheOpacity.length = 0;
+              }
 
               const isTransparentTexture = this._textureAtlasManager.isTextureTransparent(blockType.getTextureUri(blockFace));
 
@@ -1335,6 +1388,12 @@ class ChunkWorker {
               const ndx = meshPositions.length / 3;
               const textureUri = blockType.textureUris[blockFace];
               const normalizedLightLevel = lightLevel / MAX_LIGHT_LEVEL;
+              const faceShade = this._getFaceShadeFromNormalY(normalY);
+              const baseColor = blockType.color;
+              const colorR = baseColor[0] * faceShade;
+              const colorG = baseColor[1] * faceShade;
+              const colorB = baseColor[2] * faceShade;
+              const colorA = baseColor[3];
 
               // Reuse for face normal tuple
               rotatedNormal[0] = normalX;
@@ -1367,13 +1426,28 @@ class ChunkWorker {
                 const uvCoord = this._textureAtlasManager.getTextureUVCoordinate(textureUri, uv);
                 meshUvs.push(uvCoord[0], uvCoord[1]);
 
-                vertexCoord.x = vertexX;
-                vertexCoord.y = vertexY;
-                vertexCoord.z = vertexZ;
-                const color = this._calculateVertexColor(vertexCoord, globalX, globalY, globalZ, blockType, vertexAO, rotatedNormal, chunk, skyDistanceVolume, skyBoundaryVolume, faceContactAOOpacity);
-                meshColors.push(color[0], color[1], color[2], color[3]);
-
-                meshLightLevels.push(normalizedLightLevel);
+                if (!fastTerrainMeshingEnabled) {
+                  vertexCoord.x = vertexX;
+                  vertexCoord.y = vertexY;
+                  vertexCoord.z = vertexZ;
+                  const color = this._calculateVertexColor(
+                    vertexCoord,
+                    globalX,
+                    globalY,
+                    globalZ,
+                    blockType,
+                    vertexAO,
+                    rotatedNormal,
+                    chunk,
+                    skyDistanceVolume!,
+                    skyBoundaryVolume!,
+                    faceContactAOOpacity,
+                  );
+                  meshColors.push(color[0], color[1], color[2], color[3]);
+                  meshLightLevels.push(normalizedLightLevel);
+                } else {
+                  meshColors.push(colorR, colorG, colorB, colorA);
+                }
 
                 // Push foam levels for liquid meshes
                 if (blockType.isLiquid) {
@@ -1390,7 +1464,7 @@ class ChunkWorker {
                 }
               }
 
-              if (lightLevel > 0) {
+              if (!fastTerrainMeshingEnabled && lightLevel > 0) {
                 if (blockType.isLiquid) {
                   liquidMeshHasLightLevel = true;
                 } else if (isTransparentTexture) {
@@ -1697,6 +1771,10 @@ class ChunkWorker {
     return totalWeightedBrightness;
   }
 
+  private _getFaceShadeFromNormalY(normalY: number): number {
+    return normalY > 0 ? FACE_SHADE_TOP : normalY < 0 ? FACE_SHADE_BOTTOM : FACE_SHADE_SIDE;
+  }
+
   private _calculateVertexColor(
     vertexCoordinate: Vector3Like,
     blockX: number,
@@ -1715,8 +1793,7 @@ class ChunkWorker {
     const vz = vertexCoordinate.z;
     const baseColor = blockType.color;
 
-    const ny = faceNormal[1];
-    const faceShade = ny > 0 ? FACE_SHADE_TOP : ny < 0 ? FACE_SHADE_BOTTOM : FACE_SHADE_SIDE;
+    const faceShade = this._getFaceShadeFromNormalY(faceNormal[1]);
     const skyLight = this._calculateSkyLight(vx, vy, vz, blockX, blockY, blockZ, faceNormal, chunk, skyDistanceVolume, skyBoundaryVolume);
 
     let aoIntensityLevel = faceContactAOOpacity;

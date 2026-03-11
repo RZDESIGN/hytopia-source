@@ -2022,6 +2022,7 @@ export declare class ChunkLattice extends EventRouter {
      * **Category:** Blocks
      */
     getOrCreateChunk(globalCoordinate: Vector3Like): Chunk;
+
     /**
      * Gets all chunks in the lattice.
      *
@@ -2062,7 +2063,8 @@ export declare class ChunkLattice extends EventRouter {
      *
      * @param blocks - The blocks to initialize, keyed by block type ID.
      *
-     * **Side effects:** Clears existing data, creates colliders, and emits `ChunkLatticeEvent.SET_BLOCK` per block.
+     * **Side effects:** Clears existing data, creates colliders, and emits `ChunkLatticeEvent.ADD_CHUNK`
+     * for each fully initialized chunk.
      *
      * **Category:** Blocks
      */

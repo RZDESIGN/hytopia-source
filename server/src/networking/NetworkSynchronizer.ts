@@ -55,10 +55,16 @@ const CHUNK_STREAM_HORIZONTAL_RADIUS = Math.max(0, Math.floor(Number(process.env
 const CHUNK_STREAM_VERTICAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_VERTICAL_RADIUS ?? 3)));
 const CHUNK_STREAM_MAX_LOADS_PER_SYNC = Math.max(1, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_MAX_LOADS_PER_SYNC ?? 48)));
 const SCENE_UI_CHUNK_INTEREST_SAFE_VIEW_DISTANCE = Math.min(CHUNK_STREAM_HORIZONTAL_RADIUS, CHUNK_STREAM_VERTICAL_RADIUS) * CHUNK_SIZE;
+const INPUT_ACK_UNRELIABLE_RESEND_SYNCS = 3;
 
 type PlayerChunkInterestState = {
   centerChunkKey?: string;
   needsRefresh: boolean;
+};
+
+type InputAcknowledgementSendState = {
+  resendSyncsRemaining: number;
+  sequenceNumber: number;
 };
 
 type SyncQueue<TId, TSchema extends object | null> = {
@@ -100,7 +106,7 @@ type PacketPlan = {
  * @internal
  */
 export default class NetworkSynchronizer {
-  private _lastSentInputAcknowledgementByPlayer: WeakMap<Player, number> = new WeakMap();
+  private _lastSentInputAcknowledgementByPlayer: WeakMap<Player, InputAcknowledgementSendState> = new WeakMap();
 
   private _queuedAudioSyncs: SyncQueue<number, protocol.AudioSchema> = { broadcast: new IterationMap(), perPlayer: new IterationMap() };
   private _queuedBlockSyncs: SyncQueue<string, protocol.BlockSchema> = { broadcast: new IterationMap(), perPlayer: new IterationMap() };
@@ -3685,7 +3691,7 @@ export default class NetworkSynchronizer {
 
   private _isReliableEntitySync(entitySync: protocol.EntitySchema): boolean {
     for (const key in entitySync) {
-      if (key !== 'i' && key !== 'p' && key !== 'r') {
+      if (key !== 'aq' && key !== 'i' && key !== 'p' && key !== 'r') {
         return true;
       }
     }
@@ -3781,9 +3787,9 @@ export default class NetworkSynchronizer {
     if (includeTransform) {
       entitySync.p ??= Serializer.serializeVector(playerEntity.position);
       entitySync.r ??= Serializer.serializeQuaternion(playerEntity.rotation);
+    } else {
+      this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
     }
-
-    this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
 
     const acknowledgedInputSequence = playerEntity.player.lastAppliedInputSequenceNumber;
     if (acknowledgedInputSequence !== undefined) {
@@ -3806,8 +3812,11 @@ export default class NetworkSynchronizer {
         continue;
       }
 
-      const lastSentAcknowledgedInputSequence = this._lastSentInputAcknowledgementByPlayer.get(playerEntity.player);
-      if (lastSentAcknowledgedInputSequence === acknowledgedInputSequence) {
+      const lastSentAcknowledgement = this._lastSentInputAcknowledgementByPlayer.get(playerEntity.player);
+      const acknowledgementSequenceChanged =
+        lastSentAcknowledgement?.sequenceNumber !== acknowledgedInputSequence;
+      const resendSyncsRemaining = lastSentAcknowledgement?.resendSyncsRemaining ?? 0;
+      if (!acknowledgementSequenceChanged && resendSyncsRemaining <= 0) {
         continue;
       }
 
@@ -3817,8 +3826,12 @@ export default class NetworkSynchronizer {
       entitySync.aq = acknowledgedInputSequence;
       entitySync.p ??= Serializer.serializeVector(playerEntity.position);
       entitySync.r ??= Serializer.serializeQuaternion(playerEntity.rotation);
-      this._queuePlayerEntityOwnerPredictionState(entitySync, playerEntity);
-      this._lastSentInputAcknowledgementByPlayer.set(playerEntity.player, acknowledgedInputSequence);
+      this._lastSentInputAcknowledgementByPlayer.set(playerEntity.player, {
+        resendSyncsRemaining: acknowledgementSequenceChanged
+          ? INPUT_ACK_UNRELIABLE_RESEND_SYNCS
+          : Math.max(0, resendSyncsRemaining - 1),
+        sequenceNumber: acknowledgedInputSequence,
+      });
     }
   }
 

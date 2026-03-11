@@ -14,14 +14,17 @@ import Game from '../Game';
 import type { DeserializedBlock } from '../network/Deserializer';
 import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
 import { NetworkManagerEventType } from '../network/NetworkEvents';
+import { ClientSettingsEventType } from '../settings/SettingsManager';
 import {
   type ChunkWorkerBatchPromotionUpdateMessage,
   type ChunkWorkerChunkBatchBuildMessage,
   type ChunkWorkerBlocksUpdateMessage,
   type ChunkWorkerChunkBuildMessage,
   type ChunkWorkerChunkRemoveMessage,
+  type ChunkWorkerTerrainMeshingUpdateMessage,
   type ChunkWorkerChunksUpdateMessage,
   type ChunkWorkerChunkUpdateMessage,
+  type TerrainMeshingMode,
   type WorkerEventPayload,
   WorkerEventType,
 } from '../workers/ChunkWorkerConstants';
@@ -100,10 +103,12 @@ export default class ChunkManager {
   private _lastViewDistanceSquared: number = -1;
   private _wasViewDistanceEnabled: boolean | null = null;
   private _forceFullVisibilityRefresh: boolean = false;
+  private _workerTerrainMeshingMode: TerrainMeshingMode | null = null;
 
   public constructor(game: Game) {
     this._game = game;
     this._setupEventListeners();
+    this._syncChunkWorkerTerrainMeshingMode(false);
   }
 
   public get game(): Game {
@@ -139,6 +144,11 @@ export default class ChunkManager {
     EventRouter.instance.on(
       WorkerEventType.ChunkBuilt,
       this._onChunkBuilt,
+    );
+
+    EventRouter.instance.on(
+      ClientSettingsEventType.Update,
+      this._onClientSettingsUpdate,
     );
   }
 
@@ -363,16 +373,7 @@ export default class ChunkManager {
         continue;
       }
 
-      const requestVersion = (this._chunkBatchBuildRequestVersions.get(batchId) ?? 0) + 1;
-      this._chunkBatchBuildRequestVersions.set(batchId, requestVersion);
-      const message: ChunkWorkerChunkBatchBuildMessage = {
-        type: 'chunk_batch_build',
-        batchId,
-        chunkIds,
-        requestVersion,
-      };
-      this._game.performanceBaselineManager.markChunkBatchBuildRequested();
-      this._game.chunkWorkerClient.postMessage(message);
+      this._queueBatchBuild(batchId, chunkIds, true);
     }
   }
 
@@ -382,6 +383,24 @@ export default class ChunkManager {
       batchId,
       promoted,
     };
+    this._game.chunkWorkerClient.postMessage(message);
+  }
+
+  private _queueBatchBuild(batchId: BatchId, chunkIds: ChunkId[], markPerformanceBaseline: boolean): void {
+    const requestVersion = (this._chunkBatchBuildRequestVersions.get(batchId) ?? 0) + 1;
+    this._chunkBatchBuildRequestVersions.set(batchId, requestVersion);
+
+    const message: ChunkWorkerChunkBatchBuildMessage = {
+      type: 'chunk_batch_build',
+      batchId,
+      chunkIds,
+      requestVersion,
+    };
+
+    if (markPerformanceBaseline) {
+      this._game.performanceBaselineManager.markChunkBatchBuildRequested();
+    }
+
     this._game.chunkWorkerClient.postMessage(message);
   }
 
@@ -560,6 +579,52 @@ export default class ChunkManager {
 
     this._syncBatchVisibility(batchId);
   };
+
+  private _onClientSettingsUpdate = (): void => {
+    this._syncChunkWorkerTerrainMeshingMode(true);
+  };
+
+  private _syncChunkWorkerTerrainMeshingMode(remeshVisibleBatches: boolean): void {
+    const nextMode = this._game.settingsManager.terrainMeshingMode;
+
+    if (this._workerTerrainMeshingMode === nextMode) {
+      return;
+    }
+
+    this._workerTerrainMeshingMode = nextMode;
+
+    const message: ChunkWorkerTerrainMeshingUpdateMessage = {
+      type: 'terrain_meshing_update',
+      mode: nextMode,
+    };
+    this._game.chunkWorkerClient.postMessage(message);
+
+    if (remeshVisibleBatches) {
+      this._queueTerrainMeshingRemeshes();
+    }
+  }
+
+  private _queueTerrainMeshingRemeshes(): void {
+    const batchIds = this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled
+      ? Array.from(this._visibleBatchIds)
+      : this._registry.getBatchIds();
+
+    for (let i = 0; i < batchIds.length; i++) {
+      const batchId = batchIds[i];
+      const chunkIds = this._registry.getBatchChunkIds(batchId);
+
+      if (chunkIds.length === 0) {
+        continue;
+      }
+
+      if (this._promotedBatchIds.has(batchId)) {
+        this._queuePromotedBatchChunkBuilds(batchId);
+        continue;
+      }
+
+      this._queueBatchBuild(batchId, chunkIds, false);
+    }
+  }
 
   public getChunk(chunkId: ChunkId): Chunk | undefined {
     return this._registry.getChunk(chunkId);
