@@ -100,8 +100,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     resolution: { multiplier: 1.3 },
     viewDistance: {
       enabled: true,
-      distance: 420,
-      fog: { enabled: true, far: 380, near: 330 },
+      distance: 450,
+      fog: { enabled: true, far: 400, near: 340 },
     },
     postProcessing: {
       outline: true,
@@ -110,9 +110,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       depthBlur: {
         enabled: true,
         nearStartRatio: 0.03,
-        focusNearRatio: 0.09,
-        focusFarRatio: 0.28,
-        farEndRatio: 0.58,
+        focusNearRatio: 0.08,
+        focusFarRatio: 0.2,
+        farEndRatio: 0.44,
         maxNearRadiusPx: 1.25,
         maxFarRadiusPx: 6.5,
       },
@@ -137,8 +137,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     resolution: { multiplier: 1.05 },
     viewDistance: {
       enabled: true,
-      distance: 220,
-      fog: { enabled: true, far: 210, near: 175 },
+      distance: 250,
+      fog: { enabled: true, far: 230, near: 185 },
     },
     postProcessing: {
       outline: true,
@@ -147,9 +147,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       depthBlur: {
         enabled: false,
         nearStartRatio: 0.04,
-        focusNearRatio: 0.11,
-        focusFarRatio: 0.3,
-        farEndRatio: 0.62,
+        focusNearRatio: 0.1,
+        focusFarRatio: 0.22,
+        farEndRatio: 0.48,
         maxNearRadiusPx: 0.9,
         maxFarRadiusPx: 4.5,
       },
@@ -175,8 +175,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     resolution: { multiplier: 0.85 },
     viewDistance: {
       enabled: true,
-      distance: 140,
-      fog: { enabled: true, far: 130, near: 108 },
+      distance: 160,
+      fog: { enabled: true, far: 145, near: 112 },
     },
     environmentalAnimations: {
       enabled: false,
@@ -188,9 +188,9 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       depthBlur: {
         enabled: false,
         nearStartRatio: 0.06,
-        focusNearRatio: 0.15,
-        focusFarRatio: 0.4,
-        farEndRatio: 0.8,
+        focusNearRatio: 0.13,
+        focusFarRatio: 0.28,
+        farEndRatio: 0.56,
         maxNearRadiusPx: 0.85,
         maxFarRadiusPx: 4.0,
       },
@@ -221,8 +221,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     resolution: { multiplier: 0.7 },
     viewDistance: {
       enabled: true,
-      distance: 90,
-      fog: { enabled: true, far: 82, near: 64 },
+      distance: 100,
+      fog: { enabled: true, far: 90, near: 68 },
     },
     environmentalAnimations: {
       enabled: false,
@@ -233,8 +233,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         enabled: false,
         nearStartRatio: 0.08,
         focusNearRatio: 0.18,
-        focusFarRatio: 0.45,
-        farEndRatio: 0.85,
+        focusFarRatio: 0.32,
+        farEndRatio: 0.62,
         maxNearRadiusPx: 0.6,
         maxFarRadiusPx: 2.5,
       },
@@ -259,8 +259,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     resolution: { multiplier: 0.5 },
     viewDistance: {
       enabled: true,
-      distance: 50,
-      fog: { enabled: true, far: 50, near: 30 },
+      distance: 56,
+      fog: { enabled: true, far: 54, near: 32 },
     },
     environmentalAnimations: {
       enabled: false,
@@ -271,8 +271,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         enabled: false,
         nearStartRatio: 0.08,
         focusNearRatio: 0.18,
-        focusFarRatio: 0.45,
-        farEndRatio: 0.85,
+        focusFarRatio: 0.32,
+        farEndRatio: 0.62,
         maxNearRadiusPx: 0.6,
         maxFarRadiusPx: 2.5,
       },

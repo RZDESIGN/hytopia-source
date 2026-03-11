@@ -1,7 +1,10 @@
 import Game from '../Game';
 import EventRouter from '../events/EventRouter';
 import MobileManager from '../mobile/MobileManager';
-import { DISCRETE_MOVEMENT_INPUT_SET } from '@gameplay-shared/InputContract';
+import {
+  DEFAULT_ROLLBACK_PREDICTED_INPUT_SET,
+  type RollbackPredictableInput,
+} from '@gameplay-shared/InputContract';
 import { CameraEventType } from '../core/Camera';
 import type { CameraEventPayload } from '../core/Camera';
 import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
@@ -431,6 +434,30 @@ export default class InputManager {
     });
   }
 
+  private _getRollbackPredictedInputSet(): ReadonlySet<RollbackPredictableInput> {
+    return this._game.entityManager?.localRollbackPredictedInputSet ?? DEFAULT_ROLLBACK_PREDICTED_INPUT_SET;
+  }
+
+  private _hasRollbackPredictedInputPressed(
+    rollbackPredictedInputSet: ReadonlySet<RollbackPredictableInput>,
+  ): boolean {
+    for (const input of rollbackPredictedInputSet) {
+      if (input === 'jd') {
+        if (this._joystickDirection !== null) {
+          return true;
+        }
+
+        continue;
+      }
+
+      if (this._inputState[input as keyof InputState]) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private _drainPacketQueue(queueDeltaS: number): void {
     if (!this._networkedInputEnabled) {
       this._continuousInputState = {};
@@ -442,16 +469,11 @@ export default class InputManager {
     const hasCameraOrientationChanges =
       this._continuousInputState.cp !== undefined ||
       this._continuousInputState.cy !== undefined;
+    const rollbackPredictedInputSet = this._getRollbackPredictedInputSet();
 
-    const hasMovementInputPressed =
-      !!this._inputState.w ||
-      !!this._inputState.a ||
-      !!this._inputState.s ||
-      !!this._inputState.d ||
-      !!this._inputState.sp ||
-      !!this._inputState.sh ||
-      !!this._inputState.c ||
-      this._joystickDirection !== null;
+    const hasMovementInputPressed = this._hasRollbackPredictedInputPressed(
+      rollbackPredictedInputSet,
+    );
 
     const shouldResendMovementState = this._movementStateDirtyResendTicks > 0;
     const shouldSendMovementState = hasMovementInputPressed || shouldResendMovementState;
@@ -465,16 +487,16 @@ export default class InputManager {
     const inputPacket: Record<string, any> = {};
 
     if (shouldSendMovementState) {
-      inputPacket.w = !!this._inputState.w;
-      inputPacket.a = !!this._inputState.a;
-      inputPacket.s = !!this._inputState.s;
-      inputPacket.d = !!this._inputState.d;
-      inputPacket.sp = !!this._inputState.sp;
-      inputPacket.sh = !!this._inputState.sh;
-      inputPacket.c = !!this._inputState.c;
+      for (const input of rollbackPredictedInputSet) {
+        if (input === 'jd') {
+          if (this._joystickDirection !== null || shouldResendMovementState) {
+            inputPacket.jd = this._joystickDirection;
+          }
 
-      if (this._joystickDirection !== null || shouldResendMovementState) {
-        inputPacket.jd = this._joystickDirection;
+          continue;
+        }
+
+        inputPacket[input] = !!this._inputState[input as keyof InputState];
       }
     }
 
@@ -647,7 +669,7 @@ export default class InputManager {
     }
 
     if (this._networkedInputEnabled) {
-      if (DISCRETE_MOVEMENT_INPUT_SET.has(input)) {
+      if (this._getRollbackPredictedInputSet().has(input as RollbackPredictableInput)) {
         this._movementStateDirtyResendTicks = MOVEMENT_STATE_DIRTY_RESEND_TICKS;
         if (this._shouldImmediatelyFlushSequencedMovement()) {
           this._scheduleImmediateMovementPacketFlush();

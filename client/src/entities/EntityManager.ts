@@ -16,10 +16,17 @@ import {
   type WorkerEventPayload,
   WorkerEventType,
 } from '../workers/ChunkWorkerConstants';
+import { resolveDeterministicLocomotionStep } from '@gameplay-shared/DeterministicLocomotionCore';
+import { resolveDeterministicMovementDirection } from '@gameplay-shared/DeterministicMovementCore';
 import {
-  resolveDeterministicMovementDirection,
-  resolveDeterministicMovementYaw,
-} from '@gameplay-shared/DeterministicMovementCore';
+  DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS,
+  type LocalPredictionControllerFlags,
+} from '@gameplay-shared/LocalPredictionControllerFlags';
+import {
+  DEFAULT_ROLLBACK_PREDICTED_INPUT_SET,
+  createRollbackPredictedInputSet,
+  type RollbackPredictableInput,
+} from '@gameplay-shared/InputContract';
 
 // Working variables
 const fromVec2 = new Vector2();
@@ -100,17 +107,23 @@ const LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE = 0.4;
 const LOCAL_PREDICTION_GROUNDED_GRACE_S = 0.05;
 const LOCAL_PREDICTION_GROUNDED_UPWARD_RELEASE_VELOCITY = 1.25;
 const LOCAL_PREDICTION_COLLISION_EPSILON = 0.001;
-const LOCAL_PREDICTION_SAMPLE_INSET = LOCAL_PREDICTION_COLLIDER_RADIUS * 0.8;
+// Match the server ground sensor instead of the wider wall collider so
+// moving jump/land prediction samples the same support footprint.
+const LOCAL_PREDICTION_GROUND_SENSOR_RADIUS = 0.23 * (LOCAL_PREDICTION_ENTITY_HEIGHT / 1.5);
+const LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET =
+  LOCAL_PREDICTION_GROUND_SENSOR_RADIUS - LOCAL_PREDICTION_COLLISION_EPSILON;
+const LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET =
+  LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET * Math.SQRT1_2;
 const LOCAL_PREDICTION_FOOTPRINT_SAMPLES = [
   [0, 0],
-  [LOCAL_PREDICTION_SAMPLE_INSET, 0],
-  [-LOCAL_PREDICTION_SAMPLE_INSET, 0],
-  [0, LOCAL_PREDICTION_SAMPLE_INSET],
-  [0, -LOCAL_PREDICTION_SAMPLE_INSET],
-  [LOCAL_PREDICTION_SAMPLE_INSET, LOCAL_PREDICTION_SAMPLE_INSET],
-  [LOCAL_PREDICTION_SAMPLE_INSET, -LOCAL_PREDICTION_SAMPLE_INSET],
-  [-LOCAL_PREDICTION_SAMPLE_INSET, LOCAL_PREDICTION_SAMPLE_INSET],
-  [-LOCAL_PREDICTION_SAMPLE_INSET, -LOCAL_PREDICTION_SAMPLE_INSET],
+  [LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET, 0],
+  [-LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET, 0],
+  [0, LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET],
+  [0, -LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET],
+  [LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
+  [LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
+  [-LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
+  [-LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
 ] as const;
 
 type LocalPredictionCommand = {
@@ -144,10 +157,20 @@ type MovementPacketSentPayload = {
 type LocalPredictionControllerState = {
   authoritativeMotionBasisVelocity: Vector3;
   predictedMotionBasisVelocity: Vector3;
+  authoritativeCanJump: boolean;
+  predictedCanJump: boolean;
+  authoritativeCanRun: boolean;
+  predictedCanRun: boolean;
+  authoritativeCanWalk: boolean;
+  predictedCanWalk: boolean;
   authoritativeFastMovementByDefault: boolean;
   predictedFastMovementByDefault: boolean;
   authoritativeGrounded: boolean;
   predictedGrounded: boolean;
+  authoritativeApplyDirectionalMovementRotations: boolean;
+  predictedApplyDirectionalMovementRotations: boolean;
+  authoritativeFacesCameraWhenIdle: boolean;
+  predictedFacesCameraWhenIdle: boolean;
   authoritativeMovementReferenceYaw?: number;
   predictedMovementReferenceYaw?: number;
   authoritativeSwimming: boolean;
@@ -240,10 +263,22 @@ export default class EntityManager {
     controllerState: {
       authoritativeMotionBasisVelocity: new Vector3(),
       predictedMotionBasisVelocity: new Vector3(),
+      authoritativeCanJump: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canJump,
+      predictedCanJump: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canJump,
+      authoritativeCanRun: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canRun,
+      predictedCanRun: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canRun,
+      authoritativeCanWalk: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canWalk,
+      predictedCanWalk: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canWalk,
       authoritativeFastMovementByDefault: false,
       predictedFastMovementByDefault: false,
       authoritativeGrounded: false,
       predictedGrounded: false,
+      authoritativeApplyDirectionalMovementRotations:
+        DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.applyDirectionalMovementRotations,
+      predictedApplyDirectionalMovementRotations:
+        DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.applyDirectionalMovementRotations,
+      authoritativeFacesCameraWhenIdle: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.facesCameraWhenIdle,
+      predictedFacesCameraWhenIdle: DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.facesCameraWhenIdle,
       authoritativeMovementReferenceYaw: undefined,
       predictedMovementReferenceYaw: undefined,
       authoritativeSwimming: false,
@@ -298,6 +333,8 @@ export default class EntityManager {
     authoritativeGroundedTransitionCount: 0,
     predictedGroundedTransitionCount: 0,
   };
+  private _localRollbackPredictedInputSet: ReadonlySet<RollbackPredictableInput> =
+    DEFAULT_ROLLBACK_PREDICTED_INPUT_SET;
   private _shouldSuppressEnvironmentAnimations: boolean;
 
   public constructor(game: Game) {
@@ -311,6 +348,9 @@ export default class EntityManager {
   public get count(): number { return this._entities.size; }
   public get hasOutlines(): boolean { return this._outlines.size > 0; }
   public get hasLightLevelVolumeUpdatedOnce(): boolean { return this._hasLightLevelVolumeUpdatedOnce; }
+  public get localRollbackPredictedInputSet(): ReadonlySet<RollbackPredictableInput> {
+    return this._localRollbackPredictedInputSet;
+  }
   public get reflectionObjectsInScene(): Object3D[] {
     const reflectionObjects = this._reflectionObjectsInScene;
     reflectionObjects.length = 0;
@@ -817,6 +857,9 @@ export default class EntityManager {
       let acknowledgedLocalPredictionInput = false;
 
       if (shouldUseLocalPrediction && hasLocalPredictionSupport) {
+        this._setLocalRollbackPredictedInputs(
+          deserializedEntity.localPredictionRollbackPredictedInputs,
+        );
         this._setLocalAuthoritativeControllerState(deserializedEntity);
       }
 
@@ -908,6 +951,7 @@ export default class EntityManager {
 
   private _resetLocalPredictionState(nextEntityId?: number): void {
     LocalPredictionStats.reset();
+    this._setLocalRollbackPredictedInputs(undefined);
     this._localPredictionDebug.lastReconcileMode = 'none';
     this._localPredictionDebug.softReconcileCount = 0;
     this._localPredictionDebug.snapReconcileCount = 0;
@@ -939,10 +983,24 @@ export default class EntityManager {
     this._localPredictionState.lastAuthoritativeRotationServerTick = 0;
     this._localPredictionState.controllerState.authoritativeMotionBasisVelocity.set(0, 0, 0);
     this._localPredictionState.controllerState.predictedMotionBasisVelocity.set(0, 0, 0);
+    this._localPredictionState.controllerState.authoritativeCanJump = DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canJump;
+    this._localPredictionState.controllerState.predictedCanJump = DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canJump;
+    this._localPredictionState.controllerState.authoritativeCanRun = DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canRun;
+    this._localPredictionState.controllerState.predictedCanRun = DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canRun;
+    this._localPredictionState.controllerState.authoritativeCanWalk = DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canWalk;
+    this._localPredictionState.controllerState.predictedCanWalk = DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canWalk;
     this._localPredictionState.controllerState.authoritativeFastMovementByDefault = false;
     this._localPredictionState.controllerState.predictedFastMovementByDefault = false;
     this._localPredictionState.controllerState.authoritativeGrounded = false;
     this._localPredictionState.controllerState.predictedGrounded = false;
+    this._localPredictionState.controllerState.authoritativeApplyDirectionalMovementRotations =
+      DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.applyDirectionalMovementRotations;
+    this._localPredictionState.controllerState.predictedApplyDirectionalMovementRotations =
+      DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.applyDirectionalMovementRotations;
+    this._localPredictionState.controllerState.authoritativeFacesCameraWhenIdle =
+      DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.facesCameraWhenIdle;
+    this._localPredictionState.controllerState.predictedFacesCameraWhenIdle =
+      DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.facesCameraWhenIdle;
     this._localPredictionState.controllerState.authoritativeMovementReferenceYaw = undefined;
     this._localPredictionState.controllerState.predictedMovementReferenceYaw = undefined;
     this._localPredictionState.controllerState.authoritativeSwimming = false;
@@ -1001,6 +1059,7 @@ export default class EntityManager {
 
   private _hasLocalPredictionSupport(deserializedEntity: DeserializedEntity): boolean {
     return (
+      deserializedEntity.localPredictionControllerFlags !== undefined ||
       deserializedEntity.localPredictionFastMovementByDefault !== undefined ||
       deserializedEntity.localPredictionFlags !== undefined ||
       deserializedEntity.localPredictionJumpVelocity !== undefined ||
@@ -1016,11 +1075,27 @@ export default class EntityManager {
     );
   }
 
+  private _setLocalRollbackPredictedInputs(
+    inputs: readonly RollbackPredictableInput[] | undefined,
+  ): void {
+    this._localRollbackPredictedInputSet = inputs && inputs.length > 0
+      ? createRollbackPredictedInputSet(inputs)
+      : DEFAULT_ROLLBACK_PREDICTED_INPUT_SET;
+  }
+
   private _setLocalAuthoritativeControllerState(deserializedEntity: DeserializedEntity): void {
     const controllerState = this._localPredictionState.controllerState;
     const predictionFlags = deserializedEntity.localPredictionFlags ?? 0;
+    const controllerFlags: LocalPredictionControllerFlags =
+      deserializedEntity.localPredictionControllerFlags ?? DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS;
+    controllerState.authoritativeCanJump = controllerFlags.canJump;
+    controllerState.authoritativeCanRun = controllerFlags.canRun;
+    controllerState.authoritativeCanWalk = controllerFlags.canWalk;
     controllerState.authoritativeFastMovementByDefault = !!deserializedEntity.localPredictionFastMovementByDefault;
     this._setAuthoritativeGrounded((predictionFlags & LOCAL_PREDICTION_FLAG_GROUNDED) !== 0);
+    controllerState.authoritativeApplyDirectionalMovementRotations =
+      controllerFlags.applyDirectionalMovementRotations;
+    controllerState.authoritativeFacesCameraWhenIdle = controllerFlags.facesCameraWhenIdle;
     controllerState.authoritativeMovementReferenceYaw =
       Number.isFinite(deserializedEntity.localPredictionMovementReferenceYaw)
         ? Number(deserializedEntity.localPredictionMovementReferenceYaw)
@@ -1420,31 +1495,12 @@ export default class EntityManager {
     if (this._localPredictionState.commandBufferCount === 0) {
       this._syncPredictedControllerStateFromAuthoritative();
     }
-    controllerState.predictedJustSubmergedRemainingS = Math.max(
-      0,
-      controllerState.predictedJustSubmergedRemainingS - deltaTimeS,
-    );
     controllerState.predictedGroundGraceRemainingS = Math.max(
       0,
       controllerState.predictedGroundGraceRemainingS - deltaTimeS,
     );
-    controllerState.predictedSwimUpwardCooldownRemainingS = Math.max(
-      0,
-      controllerState.predictedSwimUpwardCooldownRemainingS - deltaTimeS,
-    );
 
-    const effectiveYaw = controllerState.predictedMovementReferenceYaw ?? yaw;
-    const movementDirection = resolveDeterministicMovementDirection({
-      yaw: effectiveYaw,
-      joystickDirection,
-      w,
-      a,
-      s,
-      d,
-    });
-    const isActivelyMoving = movementDirection.lengthSq > 0;
     const motionBasisVelocity = controllerState.predictedMotionBasisVelocity;
-    const isFastMovement = sh || controllerState.predictedFastMovementByDefault;
     const walkSpeed = this._localPredictionState.useAuthoritativeMovementConfig
       ? this._localPredictionState.authoritativeWalkVelocity
       : Math.max(LOCAL_PREDICTION_MIN_SPEED, this._localPredictionState.estimatedWalkSpeed);
@@ -1466,19 +1522,64 @@ export default class EntityManager {
     const swimUpwardVelocity = this._localPredictionState.useAuthoritativeMovementConfig
       ? this._localPredictionState.authoritativeSwimUpwardVelocity
       : LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY;
-    const predictedPosition = this._localPredictionState.predictedPosition;
-    const movementSpeed = controllerState.predictedSwimming
-      ? (isFastMovement ? swimFastSpeed : swimSlowSpeed)
-      : (isFastMovement ? runSpeed : walkSpeed);
-
-    const movementVelocityX = isActivelyMoving ? movementDirection.x * movementSpeed : 0;
-    const movementVelocityZ = isActivelyMoving ? movementDirection.z * movementSpeed : 0;
-    this._applyPredictedHorizontalMovement(
-      (movementVelocityX + motionBasisVelocity.x) * deltaTimeS,
-      (movementVelocityZ + motionBasisVelocity.z) * deltaTimeS,
-    );
-
     let intrinsicVerticalVelocity = this._localPredictionState.estimatedVerticalVelocity;
+    const locomotion = resolveDeterministicLocomotionStep(
+      {
+        yaw,
+        joystickDirection,
+        w,
+        a,
+        s,
+        d,
+        sp,
+        sh,
+        c,
+      },
+      {
+        grounded: controllerState.predictedGrounded,
+        swimming: controllerState.predictedSwimming,
+        fastMovementByDefault: controllerState.predictedFastMovementByDefault,
+        movementReferenceYaw: controllerState.predictedMovementReferenceYaw,
+        justSubmergedRemainingS: controllerState.predictedJustSubmergedRemainingS,
+        swimUpwardCooldownRemainingS: controllerState.predictedSwimUpwardCooldownRemainingS,
+        verticalVelocity: intrinsicVerticalVelocity,
+      },
+      {
+        canWalk: controllerState.predictedCanWalk,
+        canRun: controllerState.predictedCanRun,
+        canGroundJump:
+          controllerState.predictedCanJump &&
+          controllerState.predictedGrounded &&
+          !controllerState.predictedSwimming &&
+          this._localPredictionState.estimatedVerticalVelocity > -0.001 &&
+          this._localPredictionState.estimatedVerticalVelocity <= 3,
+        canSwimUpward:
+          controllerState.predictedCanJump &&
+          controllerState.predictedSwimming &&
+          (controllerState.predictedSwimUpwardCooldownRemainingS - deltaTimeS) <= 0,
+        applyDirectionalMovementRotations:
+          controllerState.predictedApplyDirectionalMovementRotations,
+      },
+      {
+        deltaTimeS,
+        walkVelocity: walkSpeed,
+        runVelocity: runSpeed,
+        swimFastVelocity: swimFastSpeed,
+        swimSlowVelocity: swimSlowSpeed,
+        jumpVelocity,
+        swimUpwardVelocity,
+        swimUpwardCooldownS: 0.6,
+        waterEntrySinkingFactor: LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR,
+        swimmingDragFactor: LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR,
+      },
+    );
+    controllerState.predictedJustSubmergedRemainingS = locomotion.justSubmergedRemainingS;
+    controllerState.predictedSwimUpwardCooldownRemainingS = locomotion.swimUpwardCooldownRemainingS;
+    const predictedPosition = this._localPredictionState.predictedPosition;
+    this._applyPredictedHorizontalMovement(
+      (locomotion.movementVelocityX + motionBasisVelocity.x) * deltaTimeS,
+      (locomotion.movementVelocityZ + motionBasisVelocity.z) * deltaTimeS,
+    );
 
     if (!controllerState.predictedSwimming && !controllerState.predictedGrounded) {
       intrinsicVerticalVelocity += LOCAL_PREDICTION_DEFAULT_GRAVITY_Y * deltaTimeS;
@@ -1486,48 +1587,16 @@ export default class EntityManager {
 
     let predictedVerticalVelocity = intrinsicVerticalVelocity + motionBasisVelocity.y;
 
-    if (
-      controllerState.predictedGrounded &&
-      !controllerState.predictedSwimming &&
-      !sp
-    ) {
+    if (locomotion.shouldResetGroundedVerticalVelocity) {
       intrinsicVerticalVelocity = 0;
       predictedVerticalVelocity = motionBasisVelocity.y;
     }
 
-    if (controllerState.predictedSwimming) {
-      if (c) {
-        predictedVerticalVelocity = -swimUpwardVelocity + motionBasisVelocity.y;
-      } else if (controllerState.predictedJustSubmergedRemainingS > 0) {
-        predictedVerticalVelocity =
-          (-swimUpwardVelocity * LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR) +
-          motionBasisVelocity.y;
-      } else if (!sp) {
-        predictedVerticalVelocity =
-          (-intrinsicVerticalVelocity * LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR) +
-          motionBasisVelocity.y;
-      }
-
-      intrinsicVerticalVelocity = predictedVerticalVelocity - motionBasisVelocity.y;
-    }
-
-    if (sp) {
-      if (
-        controllerState.predictedGrounded &&
-        !controllerState.predictedSwimming &&
-        this._localPredictionState.estimatedVerticalVelocity > -0.001 &&
-        this._localPredictionState.estimatedVerticalVelocity <= 3
-      ) {
-        predictedVerticalVelocity = jumpVelocity + motionBasisVelocity.y;
-        intrinsicVerticalVelocity = jumpVelocity;
+    if (locomotion.verticalAction !== 'none') {
+      predictedVerticalVelocity = locomotion.verticalVelocity + motionBasisVelocity.y;
+      intrinsicVerticalVelocity = locomotion.verticalVelocity;
+      if (locomotion.verticalAction === 'ground_jump') {
         this._setPredictedGrounded(false);
-      } else if (
-        controllerState.predictedSwimming &&
-        controllerState.predictedSwimUpwardCooldownRemainingS <= 0
-      ) {
-        predictedVerticalVelocity = swimUpwardVelocity + motionBasisVelocity.y;
-        intrinsicVerticalVelocity = swimUpwardVelocity;
-        controllerState.predictedSwimUpwardCooldownRemainingS = 0.6;
       }
     }
 
@@ -1548,13 +1617,13 @@ export default class EntityManager {
         ? 0
         : intrinsicVerticalVelocity;
 
-    if (isActivelyMoving) {
-      const movementYaw = resolveDeterministicMovementYaw(movementDirection.x, movementDirection.z);
-      const halfMovementYaw = movementYaw * 0.5;
+    if (locomotion.isActivelyMoving || controllerState.predictedFacesCameraWhenIdle) {
+      const finalYaw = locomotion.facingYaw ?? yaw;
+      const halfMovementYaw = finalYaw * 0.5;
       this._localPredictionState.predictedRotation.set(0, Math.sin(halfMovementYaw), 0, Math.cos(halfMovementYaw));
     }
 
-    return isActivelyMoving || motionBasisVelocity.lengthSq() > 0 || Math.abs(predictedVerticalVelocity) > 0.001;
+    return locomotion.isActivelyMoving || motionBasisVelocity.lengthSq() > 0 || Math.abs(predictedVerticalVelocity) > 0.001;
   }
 
   private _applyPredictedHorizontalMovement(deltaX: number, deltaZ: number): void {
@@ -1757,8 +1826,14 @@ export default class EntityManager {
     controllerState.predictedMotionBasisVelocity.copy(
       controllerState.authoritativeMotionBasisVelocity,
     );
+    controllerState.predictedCanJump = controllerState.authoritativeCanJump;
+    controllerState.predictedCanRun = controllerState.authoritativeCanRun;
+    controllerState.predictedCanWalk = controllerState.authoritativeCanWalk;
     controllerState.predictedFastMovementByDefault = controllerState.authoritativeFastMovementByDefault;
     this._setPredictedGrounded(controllerState.authoritativeGrounded);
+    controllerState.predictedApplyDirectionalMovementRotations =
+      controllerState.authoritativeApplyDirectionalMovementRotations;
+    controllerState.predictedFacesCameraWhenIdle = controllerState.authoritativeFacesCameraWhenIdle;
     controllerState.predictedMovementReferenceYaw = controllerState.authoritativeMovementReferenceYaw;
     controllerState.predictedSwimming = controllerState.authoritativeSwimming;
     controllerState.predictedGroundFootOffset = controllerState.authoritativeGroundFootOffset;

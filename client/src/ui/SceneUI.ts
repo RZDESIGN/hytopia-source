@@ -5,6 +5,10 @@ import Game from '../Game';
 import type { Vector3Like } from 'three';
 import type { TemplateRenderer } from './globals/hytopia';
 
+const MIN_DEFAULT_VIEW_DISTANCE = 25;
+const MAX_DEFAULT_VIEW_DISTANCE = 56;
+const DEFAULT_VIEW_DISTANCE_RATIO = 0.4;
+
 export type OnStateCallback = (data: object) => void;
 
 export interface SceneUIData {
@@ -45,7 +49,10 @@ export default class SceneUI {
     this._position = data.position ? new Vector3(data.position.x, data.position.y, data.position.z) : new Vector3();
     this._state = data.state ?? {};
     this._templateId = data.templateId;
-    this._viewDistance = data.viewDistance ?? 25;
+    this._viewDistance = data.viewDistance ?? Math.max(
+      MIN_DEFAULT_VIEW_DISTANCE,
+      Math.min(MAX_DEFAULT_VIEW_DISTANCE, this._game.renderer.viewDistance * DEFAULT_VIEW_DISTANCE_RATIO),
+    );
 
     this._object = this._createObject(data.templateRenderer);
   }

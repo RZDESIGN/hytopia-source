@@ -131,6 +131,8 @@ const createWorldHarness = () => {
   (controller as any).runByDefault = true;
   (controller as any).movementRelativeToCamera = false;
   (controller as any).movementReferenceYawRad = 1.25;
+  controller.applyDirectionalMovementRotations = false;
+  controller.facesCameraWhenIdle = true;
 
   const playerEntity = {
     controller,
@@ -299,6 +301,7 @@ test('replays cached and recoverable player-local entity state during mirrored w
     i: playerEntity.id,
     m: 'models/view.glb',
     ol: createOutlineSchema(),
+    pc: 23,
     pf: 3,
     py: 1.25,
   }));

@@ -1,4 +1,4 @@
-import Chunk, { CHUNK_VOLUME, MAX_BLOCK_TYPE_ID } from '@/worlds/blocks/Chunk';
+import Chunk, { CHUNK_AXES_RANGE, CHUNK_SIZE_BITS, CHUNK_VOLUME, MAX_BLOCK_TYPE_ID } from '@/worlds/blocks/Chunk';
 import EventRouter from '@/events/EventRouter';
 import RigidBody, { RigidBodyType } from '../physics/RigidBody';
 import { BLOCK_ROTATIONS } from '@/worlds/blocks/Block';
@@ -75,12 +75,18 @@ export interface ChunkLatticeEventPayloads {
 export default class ChunkLattice extends EventRouter {
   /** @internal */
   private _blockTypeColliders: Map<number, Collider> = new Map(); // block type id -> collider
+
+  /** @internal */
+  private _dirtyColliderBlockTypeIds: Set<number> = new Set();
  
   /** @internal */
   private _blockTypeChunkMasks: Map<number, Map<bigint, Uint32Array>> = new Map(); // block type id -> (chunk key -> 4096-bit occupancy mask)
 
   /** @internal */
   private _blockTypeCounts: Map<number, number> = new Map(); // block type id -> total block count
+
+  /** @internal */
+  private _dirtyVoxelChunkMasksByBlockType: Map<number, Map<bigint, Uint32Array>> = new Map();
 
   /** @internal */
   private _chunks: Map<bigint, Chunk> = new Map(); // origin coordinate (packed key) -> chunk
@@ -141,6 +147,8 @@ export default class ChunkLattice extends EventRouter {
     this._blockTypeChunkMasks.clear();
     this._blockTypeCounts.clear();
     this._chunks.clear();
+    this._dirtyColliderBlockTypeIds.clear();
+    this._dirtyVoxelChunkMasksByBlockType.clear();
   }
 
   /**
@@ -164,6 +172,11 @@ export default class ChunkLattice extends EventRouter {
   /** @internal */
   public getBlockTypeCollider(blockTypeId: number): Collider | undefined {
     return this._blockTypeColliders.get(blockTypeId);
+  }
+
+  /** @internal */
+  public get hasPendingColliderUpdates(): boolean {
+    return this._dirtyColliderBlockTypeIds.size > 0;
   }
 
   /**
@@ -345,6 +358,7 @@ export default class ChunkLattice extends EventRouter {
   public initializeBlockEntries(blockEntries: Iterable<BlockPlacementEntry>): void {
     this.clear();
     const initializedChunks: Chunk[] = [];
+    const blockIndexZShift = CHUNK_SIZE_BITS * 2;
 
     if (!this._rigidBody) {
       this._rigidBody = new RigidBody({ type: RigidBodyType.FIXED });
@@ -356,33 +370,44 @@ export default class ChunkLattice extends EventRouter {
         continue;
       }
 
-      const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
-      let chunk = this.getChunk(globalCoordinate);
+      const x = globalCoordinate.x | 0;
+      const y = globalCoordinate.y | 0;
+      const z = globalCoordinate.z | 0;
+      const localX = x & CHUNK_AXES_RANGE;
+      const localY = y & CHUNK_AXES_RANGE;
+      const localZ = z & CHUNK_AXES_RANGE;
+      const originX = x - localX;
+      const originY = y - localY;
+      const originZ = z - localZ;
+      const chunkKey = this._packCoordinateInts(originX, originY, originZ);
+      const blockIndex = localX + (localY << CHUNK_SIZE_BITS) + (localZ << blockIndexZShift);
+      let chunk = this._chunks.get(chunkKey);
 
       if (!chunk) {
         if (blockTypeId === 0) {
           continue;
         }
 
-        chunk = this._getOrCreateChunk(globalCoordinate, false);
+        chunk = new Chunk({ x: originX, y: originY, z: originZ });
+        this._chunks.set(chunkKey, chunk);
         initializedChunks.push(chunk);
       }
 
-      const previousBlockTypeId = chunk.getBlockId(localCoordinate);
-      const previousBlockRotation = chunk.getBlockRotation(localCoordinate);
+      const previousBlockTypeId = chunk.getBlockIdByIndex(blockIndex);
+      const previousBlockRotation = chunk.getBlockRotationByIndex(blockIndex);
 
       if (previousBlockTypeId === blockTypeId && previousBlockRotation === (blockRotation ?? BLOCK_ROTATIONS.Y_0)) {
         continue;
       }
 
       if (previousBlockTypeId !== 0) {
-        this._removeBlockTypePlacement(previousBlockTypeId, globalCoordinate);
+        this._setBlockTypePlacementByIndex(previousBlockTypeId, chunkKey, blockIndex, false);
       }
 
-      chunk.setBlock(localCoordinate, blockTypeId, blockRotation);
+      chunk.setBlockByIndex(blockIndex, blockTypeId, blockRotation);
 
       if (blockTypeId !== 0) {
-        this._addBlockTypePlacement(blockTypeId, { globalCoordinate, blockRotation });
+        this._setBlockTypePlacementByIndex(blockTypeId, chunkKey, blockIndex, true);
       }
     }
 
@@ -421,8 +446,8 @@ export default class ChunkLattice extends EventRouter {
    * @remarks
    * **Air:** Use block type ID `0` to remove a block (set to air).
    *
-   * **Collider updates:** For voxel block types, updates the existing collider.
-   * For trimesh block types, recreates the entire collider.
+   * **Collider updates:** Collider changes are batched and applied before the next
+   * physics step or physics query.
    *
    * **Removes previous:** If replacing an existing block, removes it from its collider first.
    * If the previous block type has no remaining blocks, its collider is removed from simulation.
@@ -431,7 +456,7 @@ export default class ChunkLattice extends EventRouter {
    * @param blockTypeId - The block type ID to set. Use 0 to remove the block and replace with air.
    * @param blockRotation - The rotation of the block.
    *
-   * **Side effects:** Emits `ChunkLatticeEvent.SET_BLOCK` and mutates block colliders.
+   * **Side effects:** Emits `ChunkLatticeEvent.SET_BLOCK` and queues collider updates.
    *
    * **Category:** Blocks
    */
@@ -440,69 +465,41 @@ export default class ChunkLattice extends EventRouter {
       return;
     }
 
-    const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
-    const chunk = this.getOrCreateChunk(globalCoordinate);
-    const previousBlockTypeId = chunk.getBlockId(localCoordinate);
+    const x = globalCoordinate.x | 0;
+    const y = globalCoordinate.y | 0;
+    const z = globalCoordinate.z | 0;
+    const localCoordinate = {
+      x: x & CHUNK_AXES_RANGE,
+      y: y & CHUNK_AXES_RANGE,
+      z: z & CHUNK_AXES_RANGE,
+    };
+    const chunkKey = this._packCoordinateInts(x - localCoordinate.x, y - localCoordinate.y, z - localCoordinate.z);
+    let chunk = this._chunks.get(chunkKey);
+
+    if (!chunk) {
+      chunk = this._getOrCreateChunk({ x, y, z }, true);
+    }
+
+    const blockIndex = Chunk.localCoordinateToBlockIndex(localCoordinate);
+    const previousBlockTypeId = chunk.getBlockIdByIndex(blockIndex);
+    const previousBlockRotation = chunk.getBlockRotationByIndex(blockIndex);
 
     if (previousBlockTypeId === blockTypeId && !blockRotation) return;
 
-    chunk.setBlock(localCoordinate, blockTypeId, blockRotation);
+    chunk.setBlockByIndex(blockIndex, blockTypeId, blockRotation);
 
-    if (!this._rigidBody) {
-      this._rigidBody = new RigidBody({ type: RigidBodyType.FIXED });
-      this._rigidBody.addToSimulation(this._world.simulation);
-    }
-
-    // Remove previous block from colliders
     if (previousBlockTypeId !== 0) {
-      const newCount = Math.max(0, this.getBlockTypeCount(previousBlockTypeId) - 1);
-      const collider = this.getBlockTypeCollider(previousBlockTypeId);
-
-      this._removeBlockTypePlacement(previousBlockTypeId, globalCoordinate);
-
-      if (collider) {
-        if (newCount === 0) {
-          this._world.simulation.colliderMap.removeColliderBlockType(collider);
-          collider.removeFromSimulation();
-          this._blockTypeColliders.delete(previousBlockTypeId);
-        } else {
-          if (collider.isVoxel) {
-            collider.setVoxel(globalCoordinate, false);
-            this._propagateVoxelChange(collider, globalCoordinate);
-          }
-
-          if (collider.isTrimesh) {
-            this._recreateTrimeshCollider(previousBlockTypeId);
-          }
-        }
-      }
+      this._setBlockTypePlacementByIndex(previousBlockTypeId, chunkKey, blockIndex, false);
+      this._queueColliderUpdate(previousBlockTypeId, chunkKey, blockIndex);
     }
 
-    // Add new block to colliders
     if (blockTypeId !== 0) {
-      const newCount = this.getBlockTypeCount(blockTypeId) + 1;
-      const collider = this.getOrCreateBlockTypeCollider(blockTypeId, [ { globalCoordinate, blockRotation } ]);
-     
-      this._addBlockTypePlacement(blockTypeId, { globalCoordinate, blockRotation });
+      this._setBlockTypePlacementByIndex(blockTypeId, chunkKey, blockIndex, true);
+      this._queueColliderUpdate(blockTypeId, chunkKey, blockIndex);
+    }
 
-      if (newCount === 1) {
-        const blockType = this._world.blockTypeRegistry.getBlockType(blockTypeId);
-        collider.addToSimulation(this._world.simulation, this._rigidBody);
-        this._world.simulation.colliderMap.setColliderBlockType(collider, blockType);
-
-        if (collider.isVoxel) {
-          this._combineVoxelStates(collider);
-        }
-      } else {
-        if (collider.isVoxel) {
-          collider.setVoxel(globalCoordinate, true);
-          this._propagateVoxelChange(collider, globalCoordinate);
-        }
-
-        if (collider.isTrimesh) {
-          this._recreateTrimeshCollider(blockTypeId);
-        }
-      }
+    if (previousBlockTypeId === blockTypeId && previousBlockRotation !== (blockRotation ?? BLOCK_ROTATIONS.Y_0)) {
+      this._dirtyColliderBlockTypeIds.add(blockTypeId);
     }
 
     this.emitWithWorld(this._world, ChunkLatticeEvent.SET_BLOCK, {
@@ -516,8 +513,82 @@ export default class ChunkLattice extends EventRouter {
   }
 
   /** @internal */
-  private _addBlockTypePlacement(blockTypeId: number, blockPlacement: BlockPlacement): void {
-    this._setBlockTypePlacement(blockTypeId, blockPlacement.globalCoordinate, true);
+  public flushPendingColliderUpdates(): void {
+    if (!this.hasPendingColliderUpdates) {
+      return;
+    }
+
+    const dirtyBlockTypeIds = Array.from(this._dirtyColliderBlockTypeIds);
+    const dirtyVoxelChunkMasksByBlockType = this._dirtyVoxelChunkMasksByBlockType;
+    const dirtyVoxelPropagations: Array<{ collider: Collider; coordinates: Vector3Like[] }> = [];
+    const newlyCreatedVoxelColliders: Collider[] = [];
+
+    this._dirtyColliderBlockTypeIds = new Set();
+    this._dirtyVoxelChunkMasksByBlockType = new Map();
+
+    for (let index = 0; index < dirtyBlockTypeIds.length; index++) {
+      const blockTypeId = dirtyBlockTypeIds[index];
+      const blockCount = this._blockTypeCounts.get(blockTypeId) ?? 0;
+      const existingCollider = this._blockTypeColliders.get(blockTypeId);
+
+      if (blockCount === 0) {
+        if (existingCollider) {
+          this._world.simulation.colliderMap.removeColliderBlockType(existingCollider);
+          existingCollider.removeFromSimulation();
+          this._blockTypeColliders.delete(blockTypeId);
+        }
+
+        continue;
+      }
+
+      const blockType = this._world.blockTypeRegistry.getBlockType(blockTypeId);
+
+      if (!existingCollider) {
+        const collider = this.getOrCreateBlockTypeCollider(blockTypeId, this._getBlockTypePlacements(blockTypeId));
+        this._ensureRigidBody();
+        collider.addToSimulation(this._world.simulation, this._rigidBody);
+        this._world.simulation.colliderMap.setColliderBlockType(collider, blockType);
+
+        if (collider.isVoxel) {
+          newlyCreatedVoxelColliders.push(collider);
+        }
+
+        continue;
+      }
+
+      if (existingCollider.isTrimesh) {
+        this._recreateTrimeshCollider(blockTypeId);
+        continue;
+      }
+
+      if (!existingCollider.isVoxel) {
+        continue;
+      }
+
+      const dirtyVoxelChunkMasks = dirtyVoxelChunkMasksByBlockType.get(blockTypeId);
+      if (!dirtyVoxelChunkMasks) {
+        continue;
+      }
+
+      const changedCoordinates = this._applyPendingVoxelChanges(blockTypeId, existingCollider, dirtyVoxelChunkMasks);
+      if (changedCoordinates.length > 0) {
+        dirtyVoxelPropagations.push({
+          collider: existingCollider,
+          coordinates: changedCoordinates,
+        });
+      }
+    }
+
+    for (let index = 0; index < newlyCreatedVoxelColliders.length; index++) {
+      this._combineVoxelStates(newlyCreatedVoxelColliders[index]);
+    }
+
+    for (let index = 0; index < dirtyVoxelPropagations.length; index++) {
+      const propagation = dirtyVoxelPropagations[index];
+      for (let coordinateIndex = 0; coordinateIndex < propagation.coordinates.length; coordinateIndex++) {
+        this._propagateVoxelChange(propagation.collider, propagation.coordinates[coordinateIndex]!);
+      }
+    }
   }
 
   /** @internal */
@@ -553,13 +624,9 @@ export default class ChunkLattice extends EventRouter {
     const blockPlacements = this._getBlockTypePlacements(blockTypeId);
     const collider = this.getOrCreateBlockTypeCollider(blockTypeId, blockPlacements);
 
+    this._ensureRigidBody();
     collider.addToSimulation(this._world.simulation, this._rigidBody);
     this._world.simulation.colliderMap.setColliderBlockType(collider, blockType);
-  }
-
-  /** @internal */
-  private _removeBlockTypePlacement(blockTypeId: number, globalCoordinate: Vector3Like): void {
-    this._setBlockTypePlacement(blockTypeId, globalCoordinate, false);
   }
 
   /** @internal */
@@ -630,11 +697,16 @@ export default class ChunkLattice extends EventRouter {
 
   /** @internal */
   private _packCoordinate(coordinate: Vector3Like): bigint {
-    const x = BigInt.asUintN(CHUNK_KEY_COORD_BITS, BigInt(Math.trunc(coordinate.x)));
-    const y = BigInt.asUintN(CHUNK_KEY_COORD_BITS, BigInt(Math.trunc(coordinate.y)));
-    const z = BigInt.asUintN(CHUNK_KEY_COORD_BITS, BigInt(Math.trunc(coordinate.z)));
+    return this._packCoordinateInts(coordinate.x, coordinate.y, coordinate.z);
+  }
 
-    return (x << CHUNK_KEY_X_SHIFT) | (y << CHUNK_KEY_Y_SHIFT) | z;
+  /** @internal */
+  private _packCoordinateInts(x: number, y: number, z: number): bigint {
+    const packedX = BigInt.asUintN(CHUNK_KEY_COORD_BITS, BigInt(Math.trunc(x)));
+    const packedY = BigInt.asUintN(CHUNK_KEY_COORD_BITS, BigInt(Math.trunc(y)));
+    const packedZ = BigInt.asUintN(CHUNK_KEY_COORD_BITS, BigInt(Math.trunc(z)));
+
+    return (packedX << CHUNK_KEY_X_SHIFT) | (packedY << CHUNK_KEY_Y_SHIFT) | packedZ;
   }
 
   /** @internal */
@@ -649,7 +721,7 @@ export default class ChunkLattice extends EventRouter {
   }
 
   /** @internal */
-  private _setBlockTypePlacement(blockTypeId: number, globalCoordinate: Vector3Like, present: boolean): void {
+  private _setBlockTypePlacementByIndex(blockTypeId: number, chunkKey: bigint, blockIndex: number, present: boolean): void {
     let chunkMasks = this._blockTypeChunkMasks.get(blockTypeId);
 
     if (!chunkMasks) {
@@ -661,9 +733,6 @@ export default class ChunkLattice extends EventRouter {
       this._blockTypeChunkMasks.set(blockTypeId, chunkMasks);
     }
 
-    const chunkKey = this._getChunkKey(globalCoordinate);
-    const localCoordinate = Chunk.globalCoordinateToLocalCoordinate(globalCoordinate);
-    const blockIndex = Chunk.localCoordinateToBlockIndex(localCoordinate);
     const wordIndex = blockIndex >>> 5;
     const bitMask = (1 << (blockIndex & 31)) >>> 0;
     let chunkMask = chunkMasks.get(chunkKey);
@@ -706,6 +775,77 @@ export default class ChunkLattice extends EventRouter {
 
     if (this._blockTypeChunkMasks.has(blockTypeId) && this._isChunkMaskEmpty(chunkMask)) {
       chunkMasks.delete(chunkKey);
+    }
+  }
+
+  /** @internal */
+  private _queueColliderUpdate(blockTypeId: number, chunkKey: bigint, blockIndex: number): void {
+    this._dirtyColliderBlockTypeIds.add(blockTypeId);
+
+    let dirtyChunkMasks = this._dirtyVoxelChunkMasksByBlockType.get(blockTypeId);
+    if (!dirtyChunkMasks) {
+      dirtyChunkMasks = new Map();
+      this._dirtyVoxelChunkMasksByBlockType.set(blockTypeId, dirtyChunkMasks);
+    }
+
+    let dirtyChunkMask = dirtyChunkMasks.get(chunkKey);
+    if (!dirtyChunkMask) {
+      dirtyChunkMask = new Uint32Array(CHUNK_MASK_WORD_COUNT);
+      dirtyChunkMasks.set(chunkKey, dirtyChunkMask);
+    }
+
+    dirtyChunkMask[blockIndex >>> 5] |= (1 << (blockIndex & 31)) >>> 0;
+  }
+
+  /** @internal */
+  private _applyPendingVoxelChanges(
+    blockTypeId: number,
+    collider: Collider,
+    dirtyVoxelChunkMasks: Map<bigint, Uint32Array>,
+  ): Vector3Like[] {
+    const changedCoordinates: Vector3Like[] = [];
+    const blockIndexZShift = CHUNK_SIZE_BITS * 2;
+
+    for (const [chunkKey, dirtyChunkMask] of dirtyVoxelChunkMasks.entries()) {
+      const chunk = this._chunks.get(chunkKey);
+      if (!chunk) {
+        continue;
+      }
+
+      const occupancyMask = this._blockTypeChunkMasks.get(blockTypeId)?.get(chunkKey);
+
+      for (let wordIndex = 0; wordIndex < dirtyChunkMask.length; wordIndex++) {
+        let dirtyBits = dirtyChunkMask[wordIndex] >>> 0;
+
+        while (dirtyBits !== 0) {
+          const leastBit = dirtyBits & -dirtyBits;
+          const bitOffset = 31 - Math.clz32(leastBit);
+          const blockIndex = (wordIndex << 5) + bitOffset;
+          const isFilled = occupancyMask ? (occupancyMask[wordIndex] & leastBit) !== 0 : false;
+          const localX = blockIndex & CHUNK_AXES_RANGE;
+          const localY = (blockIndex >> CHUNK_SIZE_BITS) & CHUNK_AXES_RANGE;
+          const localZ = (blockIndex >> blockIndexZShift) & CHUNK_AXES_RANGE;
+          const coordinate = {
+            x: chunk.originCoordinate.x + localX,
+            y: chunk.originCoordinate.y + localY,
+            z: chunk.originCoordinate.z + localZ,
+          };
+
+          collider.setVoxel(coordinate, isFilled);
+          changedCoordinates.push(coordinate);
+          dirtyBits = (dirtyBits & (dirtyBits - 1)) >>> 0;
+        }
+      }
+    }
+
+    return changedCoordinates;
+  }
+
+  /** @internal */
+  private _ensureRigidBody(): void {
+    if (!this._rigidBody) {
+      this._rigidBody = new RigidBody({ type: RigidBodyType.FIXED });
+      this._rigidBody.addToSimulation(this._world.simulation);
     }
   }
 }

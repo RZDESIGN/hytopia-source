@@ -155,6 +155,11 @@ export default class Chunk implements protocol.Serializable {
     return this._blocks[this._getIndex(localCoordinate)];
   }
 
+  /** @internal */
+  public getBlockIdByIndex(blockIndex: number): number {
+    return this._blocks[blockIndex] ?? 0;
+  }
+
   /**
    * Gets the rotation of a block at a specific local coordinate.
    *
@@ -165,6 +170,11 @@ export default class Chunk implements protocol.Serializable {
    */
   public getBlockRotation(localCoordinate: Vector3Like): BlockRotation {
     return this._blockRotations.get(this._getIndex(localCoordinate)) ?? BLOCK_ROTATIONS.Y_0;
+  }
+
+  /** @internal */
+  public getBlockRotationByIndex(blockIndex: number): BlockRotation {
+    return this._blockRotations.get(blockIndex) ?? BLOCK_ROTATIONS.Y_0;
   }
 
   /**
@@ -192,6 +202,25 @@ export default class Chunk implements protocol.Serializable {
     const blockIndex = this._getIndex(localCoordinate);
     this._serialized = undefined;
 
+    this._blocks[blockIndex] = blockTypeId;
+    this._blockRotations.delete(blockIndex);
+
+    if (blockRotation && blockRotation !== BLOCK_ROTATIONS.Y_0) {
+      this._blockRotations.set(blockIndex, blockRotation);
+    }
+  }
+
+  /** @internal */
+  public setBlockByIndex(blockIndex: number, blockTypeId: number, blockRotation?: BlockRotation): void {
+    if (!Number.isInteger(blockIndex) || blockIndex < 0 || blockIndex >= CHUNK_VOLUME) {
+      return ErrorHandler.error(`Chunk.setBlockByIndex(): Block index ${blockIndex} is out of bounds.`);
+    }
+
+    if (!Number.isInteger(blockTypeId) || blockTypeId < 0 || blockTypeId > MAX_BLOCK_TYPE_ID) {
+      return ErrorHandler.error(`Chunk.setBlockByIndex(): Block type id ${blockTypeId} is out of bounds (expected 0-${MAX_BLOCK_TYPE_ID}).`);
+    }
+
+    this._serialized = undefined;
     this._blocks[blockIndex] = blockTypeId;
     this._blockRotations.delete(blockIndex);
 

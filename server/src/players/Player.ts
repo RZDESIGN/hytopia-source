@@ -9,8 +9,12 @@ import PlayerUI from '@/players/PlayerUI';
 import Serializer from '@/networking/Serializer';
 import type { HostedPlayerPacketEnvelope } from '@/worlds/hosting/WorldHostProtocol';
 import {
-  SEQUENCED_MOVEMENT_INPUT_SET,
-  SEQUENCED_MOVEMENT_INPUTS,
+  DEFAULT_ROLLBACK_PREDICTED_INPUTS,
+  createRollbackPredictedInputSet,
+  encodeRollbackPredictedInputMask,
+  isRollbackPredictableInput,
+  normalizeRollbackPredictedInputs,
+  type RollbackPredictableInput,
   SUPPORTED_INPUTS as SHARED_SUPPORTED_INPUTS,
 } from '@gameplay-shared/InputContract';
 import type Connection from '@/networking/Connection';
@@ -40,16 +44,9 @@ const MAX_QUEUED_PREDICTED_BLOCK_EDITS = 256;
 
 type SequencedMovementInputCommand = {
   sequenceNumber: number;
-  w: boolean;
-  a: boolean;
-  s: boolean;
-  d: boolean;
-  sp: boolean;
-  sh: boolean;
-  c: boolean;
-  jd: number | null;
-  cp?: number;
-  cy?: number;
+  input: Omit<Partial<InputSchema>, 'jd'> & {
+    jd?: number | null;
+  };
 };
 
 /**
@@ -231,6 +228,24 @@ export default class Player extends EventRouter implements protocol.Serializable
   private _queuedSequencedMovementInputs: SequencedMovementInputCommand[] = [];
 
   /** @internal */
+  private _rollbackPredictedInputs: RollbackPredictableInput[] = [ ...DEFAULT_ROLLBACK_PREDICTED_INPUTS ];
+
+  /** @internal */
+  private _rollbackPredictedInputSet: ReadonlySet<RollbackPredictableInput> = createRollbackPredictedInputSet(
+    DEFAULT_ROLLBACK_PREDICTED_INPUTS,
+  );
+
+  /** @internal */
+  private _rollbackPredictedInputMaskLow: number = encodeRollbackPredictedInputMask(
+    DEFAULT_ROLLBACK_PREDICTED_INPUTS,
+  )[0];
+
+  /** @internal */
+  private _rollbackPredictedInputMaskHigh: number = encodeRollbackPredictedInputMask(
+    DEFAULT_ROLLBACK_PREDICTED_INPUTS,
+  )[1];
+
+  /** @internal */
   private _defaultBlockEditPredictionConfig: DefaultBlockEditPredictionConfig = createDefaultBlockEditPredictionConfig();
 
   /** @internal */
@@ -293,6 +308,19 @@ export default class Player extends EventRouter implements protocol.Serializable
   }
 
   /**
+   * The raw input keys that should be sequenced with rollback prediction.
+   *
+   * @remarks
+   * Inputs outside this list keep their existing reliable/immediate behavior.
+   * Defaults to the stock locomotion set (`w`, `a`, `s`, `d`, `sp`, `sh`, `c`, `jd`).
+   *
+   * **Category:** Players
+   */
+  public get rollbackPredictedInputs(): readonly RollbackPredictableInput[] {
+    return this._rollbackPredictedInputs;
+  }
+
+  /**
    * Whether player click/tap input triggers interactions.
    *
    * @remarks
@@ -315,6 +343,16 @@ export default class Player extends EventRouter implements protocol.Serializable
   /** @internal */
   public get lastAppliedInputSequenceNumber(): number | undefined {
     return this._lastAppliedInputSequenceNumber >= 0 ? this._lastAppliedInputSequenceNumber : undefined;
+  }
+
+  /** @internal */
+  public get rollbackPredictedInputMaskHigh(): number {
+    return this._rollbackPredictedInputMaskHigh;
+  }
+
+  /** @internal */
+  public get rollbackPredictedInputMaskLow(): number {
+    return this._rollbackPredictedInputMaskLow;
   }
 
   /**
@@ -517,6 +555,33 @@ export default class Player extends EventRouter implements protocol.Serializable
   }
 
   /**
+   * Sets the raw input keys that should be sequenced with rollback prediction.
+   *
+   * @remarks
+   * This preserves the existing game-facing input API. Games can keep reading
+   * `player.input.q`, `player.input.e`, etc. and only opt specific keys into
+   * rollback sequencing when they affect deterministic character state.
+   *
+   * **Category:** Players
+   */
+  public setRollbackPredictedInputs(inputs?: readonly (keyof InputSchema)[]): void {
+    const normalizedInputs = normalizeRollbackPredictedInputs(inputs);
+    const [ lowMask, highMask ] = encodeRollbackPredictedInputMask(normalizedInputs);
+
+    if (
+      lowMask === this._rollbackPredictedInputMaskLow &&
+      highMask === this._rollbackPredictedInputMaskHigh
+    ) {
+      return;
+    }
+
+    this._rollbackPredictedInputs = normalizedInputs;
+    this._rollbackPredictedInputSet = createRollbackPredictedInputSet(normalizedInputs);
+    this._rollbackPredictedInputMaskLow = lowMask;
+    this._rollbackPredictedInputMaskHigh = highMask;
+  }
+
+  /**
    * Sets the maximum distance a player can interact with entities or blocks.
    *
    * @param distance - The maximum distance in blocks used for the interact raycast.
@@ -706,48 +771,37 @@ export default class Player extends EventRouter implements protocol.Serializable
       return;
     }
 
-    let sawJumpPressed = false;
-    let latestPitch: number | undefined;
-    let latestYaw: number | undefined;
-    for (let i = 0; i < this._queuedSequencedMovementInputs.length; i++) {
-      const queuedCommand = this._queuedSequencedMovementInputs[i];
-      if (queuedCommand.sp) {
-        sawJumpPressed = true;
+    // Consume one sequenced movement command per simulation tick so a brief
+    // server hitch does not falsely acknowledge an entire backlog that was
+    // never actually simulated.
+    const command = this._queuedSequencedMovementInputs.shift()!;
+
+    for (const inputKey of this._rollbackPredictedInputs) {
+      if (inputKey === 'jd') {
+        if (command.input.jd === null) {
+          delete this._input.jd;
+        } else if (command.input.jd !== undefined) {
+          this._input.jd = command.input.jd;
+        }
+
+        continue;
       }
 
-      if (queuedCommand.cp !== undefined) {
-        latestPitch = queuedCommand.cp;
-      }
-
-      if (queuedCommand.cy !== undefined) {
-        latestYaw = queuedCommand.cy;
+      if (command.input[inputKey]) {
+        (this._input as Record<string, unknown>)[inputKey] = true;
+      } else {
+        delete (this._input as Record<string, unknown>)[inputKey];
       }
     }
 
-    const command = this._queuedSequencedMovementInputs[this._queuedSequencedMovementInputs.length - 1];
-    this._queuedSequencedMovementInputs.length = 0;
-
-    this._input.w = command.w;
-    this._input.a = command.a;
-    this._input.s = command.s;
-    this._input.d = command.d;
-    this._input.sp = command.sp || sawJumpPressed;
-    this._input.sh = command.sh;
-    this._input.c = command.c;
-    if (command.jd === null) {
-      delete this._input.jd;
-    } else {
-      this._input.jd = command.jd;
+    if (command.input.cp !== undefined) {
+      this._input.cp = command.input.cp;
+      this.camera.setOrientationPitch(command.input.cp);
     }
 
-    if (latestPitch !== undefined) {
-      this._input.cp = latestPitch;
-      this.camera.setOrientationPitch(latestPitch);
-    }
-
-    if (latestYaw !== undefined) {
-      this._input.cy = latestYaw;
-      this.camera.setOrientationYaw(latestYaw);
+    if (command.input.cy !== undefined) {
+      this._input.cy = command.input.cy;
+      this.camera.setOrientationYaw(command.input.cy);
     }
 
     this._lastAppliedInputSequenceNumber = command.sequenceNumber;
@@ -828,7 +882,11 @@ export default class Player extends EventRouter implements protocol.Serializable
       }
 
       // Sequenced movement state is applied on simulation ticks from the command queue.
-      if (hasSequencedMovementInput && SEQUENCED_MOVEMENT_INPUT_SET.has(key as keyof InputSchema)) {
+      if (
+        hasSequencedMovementInput &&
+        isRollbackPredictableInput(key as keyof InputSchema) &&
+        this._rollbackPredictedInputSet.has(key as RollbackPredictableInput)
+      ) {
         continue;
       }
 
@@ -903,8 +961,12 @@ export default class Player extends EventRouter implements protocol.Serializable
 
   /** @internal */
   private _hasSequencedMovementInput(input: InputSchema): boolean {
-    for (const key of SEQUENCED_MOVEMENT_INPUTS) {
-      if (key in input) {
+    for (const key in input) {
+      if (
+        key !== 'sq' &&
+        isRollbackPredictableInput(key as keyof InputSchema) &&
+        this._rollbackPredictedInputSet.has(key as RollbackPredictableInput)
+      ) {
         return true;
       }
     }
@@ -915,19 +977,30 @@ export default class Player extends EventRouter implements protocol.Serializable
   /** @internal */
   private _enqueueSequencedMovementInputCommand(input: InputSchema): void {
     const inputWithNullableJoystick = input as InputSchema & { jd?: number | null };
+    const queuedInput: SequencedMovementInputCommand['input'] = {};
+
+    for (const inputKey of this._rollbackPredictedInputs) {
+      if (inputKey === 'jd') {
+        queuedInput.jd = inputWithNullableJoystick.jd !== undefined
+          ? inputWithNullableJoystick.jd
+          : (this._input.jd ?? null);
+        continue;
+      }
+
+      queuedInput[inputKey] = input[inputKey] ?? !!this._input[inputKey];
+    }
+
+    if (input.cp !== undefined) {
+      queuedInput.cp = input.cp;
+    }
+
+    if (input.cy !== undefined) {
+      queuedInput.cy = input.cy;
+    }
 
     const command: SequencedMovementInputCommand = {
       sequenceNumber: input.sq!,
-      w: input.w ?? !!this._input.w,
-      a: input.a ?? !!this._input.a,
-      s: input.s ?? !!this._input.s,
-      d: input.d ?? !!this._input.d,
-      sp: input.sp ?? !!this._input.sp,
-      sh: input.sh ?? !!this._input.sh,
-      c: input.c ?? !!this._input.c,
-      jd: inputWithNullableJoystick.jd !== undefined ? inputWithNullableJoystick.jd : (this._input.jd ?? null),
-      cp: input.cp,
-      cy: input.cy,
+      input: queuedInput,
     };
 
     if (this._queuedSequencedMovementInputs.length >= MAX_QUEUED_SEQUENCED_MOVEMENT_COMMANDS) {

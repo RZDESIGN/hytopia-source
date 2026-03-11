@@ -7,7 +7,10 @@ import {
   type DefaultBlockEditPredictionConfig,
   type NegotiatedConnectionFeatures,
 } from '@engine-shared/network/ConnectionFeatureFlags';
-import { SEQUENCED_MOVEMENT_INPUT_SET, UNSEQUENCED_UNRELIABLE_INPUT_SET } from '@gameplay-shared/InputContract';
+import {
+  DEFAULT_ROLLBACK_PREDICTED_INPUT_SET,
+  UNSEQUENCED_UNRELIABLE_INPUT_SET,
+} from '@gameplay-shared/InputContract';
 import { RendererEventType } from '../core/Renderer';
 import {
   dispatchInboundPacket,
@@ -33,11 +36,13 @@ const INBOUND_APPLY_MEDIUM_BACKLOG_BUDGET_MS = 4;
 const INBOUND_APPLY_HIGH_BACKLOG_BUDGET_MS = 8;
 const INBOUND_APPLY_MEDIUM_BACKLOG_THRESHOLD = 8;
 const INBOUND_APPLY_HIGH_BACKLOG_THRESHOLD = 24;
+const INBOUND_UNRELIABLE_BURST_LIMIT = 4;
 let heartbeatReported = false;
 
 type QueuedInboundMessage = {
   data: Uint8Array;
   protocolName: 'wt' | 'ws';
+  reliable: boolean;
 };
 
 export { NetworkManagerEventType } from './NetworkEvents';
@@ -68,8 +73,10 @@ export default class NetworkManager {
   private _syncStartTimeS: number = 0;
   private _networkConditionSimulator: NetworkConditionSimulator;
   private _inboundPacketRouterDependencies: InboundPacketRouterDependencies;
-  private _pendingIncomingMessages: QueuedInboundMessage[] = [];
-  private _nextPendingIncomingMessageIndex: number = 0;
+  private _pendingReliableIncomingMessages: QueuedInboundMessage[] = [];
+  private _nextPendingReliableIncomingMessageIndex: number = 0;
+  private _pendingUnreliableIncomingMessages: QueuedInboundMessage[] = [];
+  private _nextPendingUnreliableIncomingMessageIndex: number = 0;
 
   // Whether the World Packet has been received. This is intended to be used, for example,
   // as a reference point to determine whether game initialization has started.
@@ -146,11 +153,13 @@ export default class NetworkManager {
   }
 
   public sendInputPacket(changedInputState: Record<string, any>, reliableOverride?: boolean): number | undefined {
+    const rollbackPredictedInputSet =
+      this._game.entityManager?.localRollbackPredictedInputSet ?? DEFAULT_ROLLBACK_PREDICTED_INPUT_SET;
     let hasSequencedMovementInput = false;
     let hasReliableNonMovementInput = false;
 
     for (const key in changedInputState) {
-      if (SEQUENCED_MOVEMENT_INPUT_SET.has(key as keyof InputSchema)) {
+      if (rollbackPredictedInputSet.has(key as never)) {
         hasSequencedMovementInput = true;
       } else if (!UNSEQUENCED_UNRELIABLE_INPUT_SET.has(key as keyof InputSchema)) {
         hasReliableNonMovementInput = true;
@@ -349,9 +358,10 @@ export default class NetworkManager {
     const ownedData = data.slice();
 
     this._networkConditionSimulator.schedule('incoming', reliable, () => {
-      this._pendingIncomingMessages.push({
+      (reliable ? this._pendingReliableIncomingMessages : this._pendingUnreliableIncomingMessages).push({
         data: ownedData,
         protocolName,
+        reliable,
       });
     });
   }
@@ -363,9 +373,10 @@ export default class NetworkManager {
 
     const deadlineMs = performance.now() + this._getInboundApplyBudgetMs();
     let processedMessageCount = 0;
+    let consecutiveUnreliableMessages = 0;
 
     while (true) {
-      const nextMessage = this._dequeuePendingIncomingMessage();
+      const nextMessage = this._dequeuePendingIncomingMessage(consecutiveUnreliableMessages);
       if (!nextMessage) {
         break;
       }
@@ -373,6 +384,9 @@ export default class NetworkManager {
       this._lastReceiveProtocol = nextMessage.protocolName;
       this._onMessage(nextMessage.data);
       processedMessageCount++;
+      consecutiveUnreliableMessages = nextMessage.reliable
+        ? 0
+        : consecutiveUnreliableMessages + 1;
 
       if (processedMessageCount > 0 && performance.now() >= deadlineMs) {
         break;
@@ -544,21 +558,68 @@ export default class NetworkManager {
     return latestDurationMs;
   }
 
-  private _dequeuePendingIncomingMessage(): QueuedInboundMessage | undefined {
-    if (this._nextPendingIncomingMessageIndex >= this._pendingIncomingMessages.length) {
-      this._pendingIncomingMessages.length = 0;
-      this._nextPendingIncomingMessageIndex = 0;
+  private _dequeuePendingIncomingMessage(
+    consecutiveUnreliableMessages: number,
+  ): QueuedInboundMessage | undefined {
+    if (!this._worldPacketReceived) {
+      return this._dequeuePendingReliableIncomingMessage() ?? this._dequeuePendingUnreliableIncomingMessage();
+    }
+
+    const pendingReliableMessageCount = this._pendingIncomingMessageCountByReliability(true);
+    const pendingUnreliableMessageCount = this._pendingIncomingMessageCountByReliability(false);
+    const shouldPrioritizeUnreliable =
+      pendingUnreliableMessageCount > 0 &&
+      (
+        pendingReliableMessageCount === 0 ||
+        consecutiveUnreliableMessages < INBOUND_UNRELIABLE_BURST_LIMIT
+      );
+
+    if (shouldPrioritizeUnreliable) {
+      return this._dequeuePendingUnreliableIncomingMessage() ?? this._dequeuePendingReliableIncomingMessage();
+    }
+
+    return this._dequeuePendingReliableIncomingMessage() ?? this._dequeuePendingUnreliableIncomingMessage();
+  }
+
+  private _dequeuePendingReliableIncomingMessage(): QueuedInboundMessage | undefined {
+    if (this._nextPendingReliableIncomingMessageIndex >= this._pendingReliableIncomingMessages.length) {
+      this._pendingReliableIncomingMessages.length = 0;
+      this._nextPendingReliableIncomingMessageIndex = 0;
       return undefined;
     }
 
-    const message = this._pendingIncomingMessages[this._nextPendingIncomingMessageIndex++];
+    const message = this._pendingReliableIncomingMessages[this._nextPendingReliableIncomingMessageIndex++];
 
     if (
-      this._nextPendingIncomingMessageIndex >= 32 &&
-      this._nextPendingIncomingMessageIndex * 2 >= this._pendingIncomingMessages.length
+      this._nextPendingReliableIncomingMessageIndex >= 32 &&
+      this._nextPendingReliableIncomingMessageIndex * 2 >= this._pendingReliableIncomingMessages.length
     ) {
-      this._pendingIncomingMessages = this._pendingIncomingMessages.slice(this._nextPendingIncomingMessageIndex);
-      this._nextPendingIncomingMessageIndex = 0;
+      this._pendingReliableIncomingMessages = this._pendingReliableIncomingMessages.slice(
+        this._nextPendingReliableIncomingMessageIndex,
+      );
+      this._nextPendingReliableIncomingMessageIndex = 0;
+    }
+
+    return message;
+  }
+
+  private _dequeuePendingUnreliableIncomingMessage(): QueuedInboundMessage | undefined {
+    if (this._nextPendingUnreliableIncomingMessageIndex >= this._pendingUnreliableIncomingMessages.length) {
+      this._pendingUnreliableIncomingMessages.length = 0;
+      this._nextPendingUnreliableIncomingMessageIndex = 0;
+      return undefined;
+    }
+
+    const message = this._pendingUnreliableIncomingMessages[this._nextPendingUnreliableIncomingMessageIndex++];
+
+    if (
+      this._nextPendingUnreliableIncomingMessageIndex >= 32 &&
+      this._nextPendingUnreliableIncomingMessageIndex * 2 >= this._pendingUnreliableIncomingMessages.length
+    ) {
+      this._pendingUnreliableIncomingMessages = this._pendingUnreliableIncomingMessages.slice(
+        this._nextPendingUnreliableIncomingMessageIndex,
+      );
+      this._nextPendingUnreliableIncomingMessageIndex = 0;
     }
 
     return message;
@@ -578,6 +639,15 @@ export default class NetworkManager {
   }
 
   private _pendingIncomingMessageCount(): number {
-    return this._pendingIncomingMessages.length - this._nextPendingIncomingMessageIndex;
+    return this._pendingIncomingMessageCountByReliability(true) +
+      this._pendingIncomingMessageCountByReliability(false);
+  }
+
+  private _pendingIncomingMessageCountByReliability(reliable: boolean): number {
+    if (reliable) {
+      return this._pendingReliableIncomingMessages.length - this._nextPendingReliableIncomingMessageIndex;
+    }
+
+    return this._pendingUnreliableIncomingMessages.length - this._nextPendingUnreliableIncomingMessageIndex;
   }
 }

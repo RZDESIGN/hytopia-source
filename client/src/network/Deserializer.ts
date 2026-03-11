@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import protocol from '@hytopia.com/server-protocol';
+import {
+  decodeLocalPredictionControllerFlags,
+  type LocalPredictionControllerFlags,
+} from '@gameplay-shared/LocalPredictionControllerFlags';
+import type { RollbackPredictableInput } from '@gameplay-shared/InputContract';
+import { decodeRollbackPredictedInputMask } from '@gameplay-shared/InputContract';
 
 const toUint8Array = (value: Uint8Array | number[]): Uint8Array =>
   value instanceof Uint8Array ? value : new Uint8Array(value);
@@ -127,6 +133,7 @@ export type DeserializedEntity = {
   name?: string;
   opacity?: number;
   outline?: DeserializedOutlineOptions | null;
+  localPredictionControllerFlags?: LocalPredictionControllerFlags;
   localPredictionFastMovementByDefault?: boolean;
   parentEntityId?: number | null;
   parentNodeName?: string | null;
@@ -135,6 +142,7 @@ export type DeserializedEntity = {
   localPredictionJustSubmergedRemainingMs?: number;
   localPredictionMovementReferenceYaw?: number;
   localPredictionMotionBasisVelocity?: THREE.Vector3Like;
+  localPredictionRollbackPredictedInputs?: readonly RollbackPredictableInput[];
   localPredictionRunVelocity?: number;
   localPredictionWalkVelocity?: number;
   localPredictionSwimFastVelocity?: number;
@@ -507,12 +515,15 @@ export default class Deserializer {
   public static deserializeEntity(entity: protocol.EntitySchema): DeserializedEntity {
     const entityWithInputAck = entity as protocol.EntitySchema & {
       aq?: number;
+      pc?: number;
       fd?: boolean;
       ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rh?: number;
+      rl?: number;
       rv?: number;
       sc?: number;
       sf?: number;
@@ -536,6 +547,10 @@ export default class Deserializer {
       name: entity.n,
       opacity: entity.o,
       outline: 'ol' in entity ? (entity.ol ? this.deserializeOutlineOptions(entity.ol) : null) : undefined,
+      localPredictionControllerFlags:
+        'pc' in entityWithInputAck
+          ? decodeLocalPredictionControllerFlags(entityWithInputAck.pc)
+          : undefined,
       localPredictionFastMovementByDefault: entityWithInputAck.fd,
       parentEntityId: 'pe' in entity ? (entity.pe ?? null) : undefined,
       parentNodeName: 'pn' in entity ? (entity.pn ?? null) : undefined,
@@ -544,6 +559,10 @@ export default class Deserializer {
       localPredictionJustSubmergedRemainingMs: entityWithInputAck.js,
       localPredictionMovementReferenceYaw: entityWithInputAck.py,
       localPredictionMotionBasisVelocity: entityWithInputAck.mv ? this.deserializeVector(entityWithInputAck.mv) : undefined,
+      localPredictionRollbackPredictedInputs:
+        entityWithInputAck.rl !== undefined || entityWithInputAck.rh !== undefined
+          ? decodeRollbackPredictedInputMask(entityWithInputAck.rl, entityWithInputAck.rh)
+          : undefined,
       localPredictionRunVelocity: entityWithInputAck.rv,
       localPredictionSwimFastVelocity: entityWithInputAck.sf,
       localPredictionSwimSlowVelocity: entityWithInputAck.sl,

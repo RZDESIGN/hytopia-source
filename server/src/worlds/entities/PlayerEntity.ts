@@ -7,6 +7,7 @@ import type { EntityOptions } from '@/worlds/entities/Entity';
 import type QuaternionLike from '@/shared/types/math/QuaternionLike';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 import type World from '@/worlds/World';
+import type { RollbackPredictableInput } from '@gameplay-shared/InputContract';
 
 /** @internal */
 export const PLAYER_POSITION_UPDATE_THRESHOLD_SQ = 0.1 * 0.1;
@@ -141,6 +142,7 @@ export default class PlayerEntity extends Entity {
   /** @internal */  
   public spawn(world: World, position: Vector3Like, rotation?: QuaternionLike) {
     super.spawn(world, position, rotation);
+    this._syncRollbackPredictedInputsFromController();
 
     this.nametagSceneUI.load(world);
 
@@ -165,6 +167,7 @@ export default class PlayerEntity extends Entity {
       return;
     }
 
+    this._syncRollbackPredictedInputsFromController();
     this.player.applyQueuedInputForSimulation();
 
     const { input, camera } = this.player;
@@ -173,5 +176,17 @@ export default class PlayerEntity extends Entity {
     this.player.clearPredictedBlockEditBatchesForSimulation();
 
     super.tick(tickDeltaMs);
+  }
+
+  private _syncRollbackPredictedInputsFromController(): void {
+    const controllerWithRollbackInputs = this.controller as typeof this.controller & {
+      rollbackPredictedInputs?: readonly RollbackPredictableInput[];
+    };
+
+    if (!controllerWithRollbackInputs?.rollbackPredictedInputs) {
+      return;
+    }
+
+    this.player.setRollbackPredictedInputs(controllerWithRollbackInputs.rollbackPredictedInputs);
   }
 }

@@ -565,6 +565,25 @@ The platform the entity is on, if any.
 </td></tr>
 <tr><td>
 
+[rollbackPredictedInputs](./server.defaultplayerentitycontroller.rollbackpredictedinputs.md)
+
+
+</td><td>
+
+
+</td><td>
+
+RollbackPredictableInput\[\]
+
+
+</td><td>
+
+Raw input keys that should be sequenced with rollback prediction for this controller.
+
+
+</td></tr>
+<tr><td>
+
 [runLoopedAnimations](./server.defaultplayerentitycontroller.runloopedanimations.md)
 
 

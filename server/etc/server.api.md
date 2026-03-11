@@ -569,7 +569,11 @@ export class Chunk implements protocol.Serializable {
     get blockRotations(): Readonly<Map<number, BlockRotation>>;
     get blocks(): Readonly<Uint8Array>;
     getBlockId(localCoordinate: Vector3Like): number;
+    // @internal (undocumented)
+    getBlockIdByIndex(blockIndex: number): number;
     getBlockRotation(localCoordinate: Vector3Like): BlockRotation;
+    // @internal (undocumented)
+    getBlockRotationByIndex(blockIndex: number): BlockRotation;
     static globalCoordinateToLocalCoordinate(globalCoordinate: Vector3Like): Vector3Like;
     static globalCoordinateToOriginCoordinate(globalCoordinate: Vector3Like): Vector3Like;
     hasBlock(localCoordinate: Vector3Like): boolean;
@@ -580,6 +584,8 @@ export class Chunk implements protocol.Serializable {
     serialize(): protocol.ChunkSchema;
     // @internal (undocumented)
     setBlock(localCoordinate: Vector3Like, blockTypeId: number, blockRotation?: BlockRotation): void;
+    // @internal (undocumented)
+    setBlockByIndex(blockIndex: number, blockTypeId: number, blockRotation?: BlockRotation): void;
 }
 
 // @public
@@ -587,6 +593,8 @@ export class ChunkLattice extends EventRouter {
     constructor(world: World);
     get chunkCount(): number;
     clear(): void;
+    // @internal (undocumented)
+    flushPendingColliderUpdates(): void;
     getAllChunks(): Chunk[];
     getBlockId(globalCoordinate: Vector3Like): number;
     getBlockType(globalCoordinate: Vector3Like): BlockType | null;
@@ -599,6 +607,8 @@ export class ChunkLattice extends EventRouter {
     getOrCreateChunk(globalCoordinate: Vector3Like): Chunk;
     hasBlock(globalCoordinate: Vector3Like): boolean;
     hasChunk(globalCoordinate: Vector3Like): boolean;
+    // @internal (undocumented)
+    get hasPendingColliderUpdates(): boolean;
     // Warning: (ae-forgotten-export) The symbol "BlockPlacementEntry" needs to be exported by the entry point index.d.ts
     //
     // @internal (undocumented)
@@ -946,6 +956,8 @@ export class DefaultPlayerEntityController extends BaseEntityController {
     get localPredictionMovementReferenceYaw(): number | undefined;
     get localPredictionSwimUpwardCooldownRemainingMs(): number;
     get platform(): Entity | undefined;
+    // Warning: (ae-forgotten-export) The symbol "RollbackPredictableInput" needs to be exported by the entry point index.d.ts
+    rollbackPredictedInputs: RollbackPredictableInput[];
     runLoopedAnimations: string[];
     runVelocity: number;
     spawn(entity: Entity): void;
@@ -977,6 +989,7 @@ export interface DefaultPlayerEntityControllerOptions {
     jumpLandLightOneshotAnimations?: string[];
     jumpOneshotAnimations?: string[];
     jumpVelocity?: number;
+    rollbackPredictedInputs?: readonly RollbackPredictableInput[];
     runLoopedAnimations?: string[];
     runVelocity?: number;
     sticksToPlatforms?: boolean;
@@ -2342,6 +2355,11 @@ export class Player extends EventRouter implements protocol.Serializable {
     reconnected(): void;
     resetInputs(): void;
     rollbackPredictedBlockEdit(predictionId: string): void;
+    // @internal (undocumented)
+    get rollbackPredictedInputMaskHigh(): number;
+    // @internal (undocumented)
+    get rollbackPredictedInputMaskLow(): number;
+    get rollbackPredictedInputs(): readonly RollbackPredictableInput[];
     scheduleNotification(type: string, scheduledFor: number): Promise<string | void>;
     // @internal (undocumented)
     serialize(): protocol.PlayerSchema;
@@ -2349,6 +2367,8 @@ export class Player extends EventRouter implements protocol.Serializable {
     setInteractEnabled(enabled: boolean): void;
     setMaxInteractDistance(distance: number): void;
     setPersistedData(data: Record<string, unknown>): void;
+    // Warning: (ae-forgotten-export) The symbol "InputSchema" needs to be exported by the entry point index.d.ts
+    setRollbackPredictedInputs(inputs?: readonly (keyof InputSchema)[]): void;
     readonly ui: PlayerUI;
     unscheduleNotification(notificationId: string): Promise<boolean>;
     readonly username: string;
@@ -2721,8 +2741,6 @@ export interface PlayerEventPayloads {
     };
 }
 
-// Warning: (ae-forgotten-export) The symbol "InputSchema" needs to be exported by the entry point index.d.ts
-//
 // @public
 export type PlayerInput = InputSchema;
 

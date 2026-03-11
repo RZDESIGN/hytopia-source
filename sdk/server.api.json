@@ -8532,7 +8532,7 @@
             {
               "kind": "Method",
               "canonicalReference": "server!ChunkLattice#setBlock:member(1)",
-              "docComment": "/**\n * Sets the block at a global coordinate by block type ID.\n *\n * Use for: incremental terrain edits. Do NOT use for: bulk terrain loading; use `ChunkLattice.initializeBlocks`.\n *\n * @remarks\n *\n * **Air:** Use block type ID `0` to remove a block (set to air).\n *\n * **Collider updates:** For voxel block types, updates the existing collider. For trimesh block types, recreates the entire collider.\n *\n * **Removes previous:** If replacing an existing block, removes it from its collider first. If the previous block type has no remaining blocks, its collider is removed from simulation.\n *\n * @param globalCoordinate - The global coordinate of the block to set.\n *\n * @param blockTypeId - The block type ID to set. Use 0 to remove the block and replace with air.\n *\n * @param blockRotation - The rotation of the block.\n *\n * **Side effects:** Emits `ChunkLatticeEvent.SET_BLOCK` and mutates block colliders.\n *\n * **Category:** Blocks\n */\n",
+              "docComment": "/**\n * Sets the block at a global coordinate by block type ID.\n *\n * Use for: incremental terrain edits. Do NOT use for: bulk terrain loading; use `ChunkLattice.initializeBlocks`.\n *\n * @remarks\n *\n * **Air:** Use block type ID `0` to remove a block (set to air).\n *\n * **Collider updates:** Collider changes are batched and applied before the next physics step or physics query.\n *\n * **Removes previous:** If replacing an existing block, removes it from its collider first. If the previous block type has no remaining blocks, its collider is removed from simulation.\n *\n * @param globalCoordinate - The global coordinate of the block to set.\n *\n * @param blockTypeId - The block type ID to set. Use 0 to remove the block and replace with air.\n *\n * @param blockRotation - The rotation of the block.\n *\n * **Side effects:** Emits `ChunkLatticeEvent.SET_BLOCK` and queues collider updates.\n *\n * **Category:** Blocks\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",
@@ -13635,6 +13635,41 @@
             },
             {
               "kind": "Property",
+              "canonicalReference": "server!DefaultPlayerEntityController#rollbackPredictedInputs:member",
+              "docComment": "/**\n * Raw input keys that should be sequenced with rollback prediction for this controller.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "rollbackPredictedInputs: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictableInput",
+                  "canonicalReference": "server!~RollbackPredictableInput:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "rollbackPredictedInputs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 3
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
               "canonicalReference": "server!DefaultPlayerEntityController#runLoopedAnimations:member",
               "docComment": "/**\n * The looped animation(s) that will play when the entity is running.\n */\n",
               "excerptTokens": [
@@ -14512,6 +14547,42 @@
               "propertyTypeTokenRange": {
                 "startIndex": 1,
                 "endIndex": 2
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!DefaultPlayerEntityControllerOptions#rollbackPredictedInputs:member",
+              "docComment": "/**\n * Raw input keys that should be sequenced with rollback prediction for this controller.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "rollbackPredictedInputs?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "readonly "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictableInput",
+                  "canonicalReference": "server!~RollbackPredictableInput:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "rollbackPredictedInputs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 4
               }
             },
             {
@@ -41985,6 +42056,45 @@
               "name": "rollbackPredictedBlockEdit"
             },
             {
+              "kind": "Property",
+              "canonicalReference": "server!Player#rollbackPredictedInputs:member",
+              "docComment": "/**\n * The raw input keys that should be sequenced with rollback prediction.\n *\n * @remarks\n *\n * Inputs outside this list keep their existing reliable/immediate behavior. Defaults to the stock locomotion set (`w`, `a`, `s`, `d`, `sp`, `sh`, `c`, `jd`).\n *\n * **Category:** Players\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get rollbackPredictedInputs(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "readonly "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictableInput",
+                  "canonicalReference": "server!~RollbackPredictableInput:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "rollbackPredictedInputs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 4
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
               "kind": "Method",
               "canonicalReference": "server!Player#scheduleNotification:member(1)",
               "docComment": "/**\n * Schedules a notification for the player at a future time.\n *\n * Use for: re-engagement or timed reminders. Do NOT use for: immediate in-game messaging; use chat or UI instead.\n *\n * @remarks\n *\n * Automatically prompts for notification permission in-game if needed.\n *\n * @param type - The type of notification to schedule.\n *\n * @param scheduledFor - A future timestamp in milliseconds to schedule the notification for.\n *\n * @returns The ID of the notification if scheduled successfully, undefined otherwise.\n *\n * **Requires:** Player must be in a world to request permission.\n *\n * **Side effects:** Emits `PlayerEvent.REQUEST_NOTIFICATION_PERMISSION`.\n *\n * **Category:** Players\n */\n",
@@ -42263,6 +42373,63 @@
               "isOptional": false,
               "isAbstract": false,
               "name": "setPersistedData"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!Player#setRollbackPredictedInputs:member(1)",
+              "docComment": "/**\n * Sets the raw input keys that should be sequenced with rollback prediction.\n *\n * @remarks\n *\n * This preserves the existing game-facing input API. Games can keep reading `player.input.q`, `player.input.e`, etc. and only opt specific keys into rollback sequencing when they affect deterministic character state.\n *\n * **Category:** Players\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setRollbackPredictedInputs(inputs?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "readonly (keyof "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "InputSchema",
+                  "canonicalReference": "server!~InputSchema:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ")[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 5,
+                "endIndex": 6
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "inputs",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 4
+                  },
+                  "isOptional": true
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setRollbackPredictedInputs"
             },
             {
               "kind": "Property",

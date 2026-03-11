@@ -29,6 +29,7 @@ import type {
 } from '@hytopia.com/server-protocol';
 import PlayerEntity from '@/worlds/entities/PlayerEntity';
 import DefaultPlayerEntityController from '@/worlds/entities/controllers/DefaultPlayerEntityController';
+import { encodeLocalPredictionControllerFlags } from '@gameplay-shared/LocalPredictionControllerFlags';
 import type {
   GatewayToWorldHostMessage,
   HostedPlayerDetachReason,
@@ -821,12 +822,15 @@ export default class ProcessWorldHostClient implements WorldHostClient {
 
   private _applyOwnerPredictionEntitySync(
     entitySync: EntitySchema & {
+      pc?: number;
       fd?: boolean;
       ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rh?: number;
+      rl?: number;
       rv?: number;
       sc?: number;
       sf?: number;
@@ -836,6 +840,9 @@ export default class ProcessWorldHostClient implements WorldHostClient {
     },
     playerEntity: PlayerEntity,
   ): void {
+    entitySync.rl = playerEntity.player.rollbackPredictedInputMaskLow || undefined;
+    entitySync.rh = playerEntity.player.rollbackPredictedInputMaskHigh || undefined;
+
     const controller = playerEntity.controller;
     if (!(controller instanceof DefaultPlayerEntityController)) {
       return;
@@ -850,6 +857,13 @@ export default class ProcessWorldHostClient implements WorldHostClient {
     }
 
     entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
+    entitySync.pc = encodeLocalPredictionControllerFlags({
+      canWalk: controller.canWalk(controller),
+      canRun: controller.canRun(controller),
+      canJump: controller.canJump(controller),
+      applyDirectionalMovementRotations: controller.applyDirectionalMovementRotations,
+      facesCameraWhenIdle: controller.facesCameraWhenIdle,
+    });
     entitySync.ju = controller.jumpVelocity;
     entitySync.pf = predictionFlags || undefined;
     entitySync.py = controller.localPredictionMovementReferenceYaw;

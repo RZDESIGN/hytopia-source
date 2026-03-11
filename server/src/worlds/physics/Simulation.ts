@@ -331,6 +331,7 @@ export default class Simulation extends EventRouter {
    * **Category:** Physics
    */
   public getContactManifolds(colliderHandleA: RAPIER.ColliderHandle, colliderHandleB: RAPIER.ColliderHandle): ContactManifold[] {
+    this._flushPendingTerrainColliders();
     const contactManifolds: ContactManifold[] = [];
     
     this._rapierSimulation.narrowPhase.contactPair(colliderHandleA, colliderHandleB, (manifold, flipped) => {
@@ -370,6 +371,7 @@ export default class Simulation extends EventRouter {
    * **Category:** Physics
    */
   public intersectionsWithRawShape(rawShape: RawShape, position: Vector3Like, rotation: QuaternionLike, options: FilterOptions = {}): IntersectionResult[] {
+    this._flushPendingTerrainColliders();
     const intersectionDeduplicationSet = new Set<any>(); // prevent returning duplicates such as for multiple colliders of the same entity, etc.
     const intersectionResults: IntersectionResult[] = [];
 
@@ -421,6 +423,7 @@ export default class Simulation extends EventRouter {
    * **Category:** Physics
    */
   public raycast(origin: RAPIER.Vector3, direction: RAPIER.Vector3, length: number, options: RaycastOptions = {}): RaycastHit | null {
+    this._flushPendingTerrainColliders();
     const ray = new RAPIER.Ray(origin, direction);
     const rayColliderHit = this._rapierSimulation.castRay(
       ray,
@@ -514,6 +517,7 @@ export default class Simulation extends EventRouter {
 
   /** @internal */
   public step = (tickDeltaMs: number): void => {
+    this._flushPendingTerrainColliders();
     this.emitWithWorld(this._world, SimulationEvent.STEP_START, {
       simulation: this,
       tickDeltaMs,
@@ -604,5 +608,10 @@ export default class Simulation extends EventRouter {
                     this._colliderMap.getColliderHandleEntity(colliderHandleB);
 
     return [ objectA, objectB ];
+  }
+
+  /** @internal */
+  private _flushPendingTerrainColliders(): void {
+    this._world.chunkLattice.flushPendingColliderUpdates();
   }
 }

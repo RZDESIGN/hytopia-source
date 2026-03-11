@@ -99,6 +99,7 @@ const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_MEDIUM = 0.9984;
 const WATER_REFLECTION_VIEW_DIR_DOT_THRESHOLD_LOW = 0.9972;
 const WATER_REFLECTION_MAX_DISTANCE = 84;
 const WATER_REFLECTION_MIN_SCENE_COVERAGE = 0.18;
+const WORLD_FOG_VIEW_DISTANCE_BUFFER = 24;
 
 // Working variables
 const color = new Color();
@@ -363,7 +364,12 @@ export default class Renderer {
   public get sunLightIntensity(): number { return this._directionalSceneLight.intensity; }
   public get directionalShadowDistance(): number { return this._game.settingsManager.qualityPerfTradeoff.shadows?.directionalDistance ?? 48; }
   public get directionalShadowFocusCenter(): Vector3 { return this._lastDirectionalShadowFocusCenter; }
-  public get viewDistance(): number { return Math.min(this._game.settingsManager.qualityPerfTradeoff.viewDistance.distance, this._fogFar); }
+  public get viewDistance(): number {
+    return Math.min(
+      this._game.settingsManager.qualityPerfTradeoff.viewDistance.distance,
+      this._fogFar + WORLD_FOG_VIEW_DISTANCE_BUFFER,
+    );
+  }
   public get webGLRenderer(): WebGLRenderer { return this._renderer; }
   public get adaptiveResolutionScale(): number { return this._adaptiveResolutionScale; }
   public get effectivePixelRatio(): number { return this._lastAppliedPixelRatio || this._renderer.getPixelRatio(); }
@@ -1479,7 +1485,7 @@ export default class Renderer {
       return;
     }
 
-    const configuredViewDistance = this._game.settingsManager.qualityPerfTradeoff.viewDistance.distance;
+    const configuredViewDistance = this.viewDistance;
     const fog = this._scene.fog as Fog | null;
     const fogNear = fog?.near ?? configuredViewDistance * blurSettings.focusFarRatio;
     const fogFar = fog?.far ?? configuredViewDistance;

@@ -14,6 +14,7 @@ import type { VectorSchema } from './Vector';
 
 export type EntitySchema = {
   aq?: number;                    // last applied input sequence number (owner-only)
+  pc?: number;                    // local prediction controller flags bitmask (owner-only)
   fd?: boolean;                  // whether fast movement is the default intent (owner-only)
   js?: number;                    // local prediction just-submerged remaining ms (owner-only)
   i: number;                      // entity id
@@ -36,6 +37,8 @@ export type EntitySchema = {
   pf?: number;                    // local prediction flags bitmask (owner-only)
   pi?: number;                    // position interpolation time in milliseconds
   py?: number;                    // local prediction movement reference yaw in radians (owner-only)
+  rh?: number;                    // rollback-predicted input mask high word (owner-only)
+  rl?: number;                    // rollback-predicted input mask low word (owner-only)
   pn?: string;                    // parent node name
   r?: QuaternionSchema;           // rotation
   ri?: number;                    // rotation interpolation time in milliseconds
@@ -55,6 +58,7 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
   type: 'object',
   properties: {
     aq: { type: 'number', nullable: true },
+    pc: { type: 'number', nullable: true },
     fd: { type: 'boolean', nullable: true },
     js: { type: 'number', nullable: true },
     i: { type: 'number' },
@@ -77,6 +81,8 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
     pe: { type: 'number', nullable: true },
     pf: { type: 'number', nullable: true },
     py: { type: 'number', nullable: true },
+    rh: { type: 'number', nullable: true },
+    rl: { type: 'number', nullable: true },
     pn: { type: 'string', nullable: true },
     r: { ...quaternionSchema, nullable: true },
     ri: { type: 'number', nullable: true },

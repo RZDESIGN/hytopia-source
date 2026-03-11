@@ -288,6 +288,25 @@ _(Optional)_ The upward velocity applied to the entity when it jumps.
 </td></tr>
 <tr><td>
 
+[rollbackPredictedInputs?](./server.defaultplayerentitycontrolleroptions.rollbackpredictedinputs.md)
+
+
+</td><td>
+
+
+</td><td>
+
+readonly RollbackPredictableInput\[\]
+
+
+</td><td>
+
+_(Optional)_ Raw input keys that should be sequenced with rollback prediction for this controller.
+
+
+</td></tr>
+<tr><td>
+
 [runLoopedAnimations?](./server.defaultplayerentitycontrolleroptions.runloopedanimations.md)
 
 

@@ -78,7 +78,7 @@ blockRotation
 
 _(Optional)_ The rotation of the block.
 
-\*\*Side effects:\*\* Emits `ChunkLatticeEvent.SET_BLOCK` and mutates block colliders.
+\*\*Side effects:\*\* Emits `ChunkLatticeEvent.SET_BLOCK` and queues collider updates.
 
 \*\*Category:\*\* Blocks
 
@@ -94,7 +94,7 @@ void
 
 \*\*Air:\*\* Use block type ID `0` to remove a block (set to air).
 
-\*\*Collider updates:\*\* For voxel block types, updates the existing collider. For trimesh block types, recreates the entire collider.
+\*\*Collider updates:\*\* Collider changes are batched and applied before the next physics step or physics query.
 
 \*\*Removes previous:\*\* If replacing an existing block, removes it from its collider first. If the previous block type has no remaining blocks, its collider is removed from simulation.
 

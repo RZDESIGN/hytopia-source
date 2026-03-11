@@ -7,7 +7,12 @@ import { EntityModelAnimationBlendMode, EntityModelAnimationLoopMode } from '@/w
 import ErrorHandler from '@/errors/ErrorHandler';
 import PlayerEntity from '@/worlds/entities/PlayerEntity';
 import BlockType from '@/worlds/blocks/BlockType';
-import { resolveDeterministicMovementDirection } from '@gameplay-shared/DeterministicMovementCore';
+import { resolveDeterministicLocomotionStep } from '@gameplay-shared/DeterministicLocomotionCore';
+import {
+  DEFAULT_ROLLBACK_PREDICTED_INPUTS,
+  normalizeRollbackPredictedInputs,
+  type RollbackPredictableInput,
+} from '@gameplay-shared/InputContract';
 import type { PlayerInput } from '@/players/Player';
 import type { PlayerCameraOrientation } from '@/players/PlayerCamera';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
@@ -63,6 +68,9 @@ export interface DefaultPlayerEntityControllerOptions {
 
   /** The normalized horizontal velocity applied to the entity when it runs. */
   runVelocity?: number;
+
+  /** Raw input keys that should be sequenced with rollback prediction for this controller. */
+  rollbackPredictedInputs?: readonly RollbackPredictableInput[];
 
   /** Overrides the animation(s) that will play when the entity is running. */
   runLoopedAnimations?: string[];
@@ -140,18 +148,6 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
   private static readonly WALL_COLLIDER_HEIGHT_SCALE = 0.33;
   private static readonly WALL_COLLIDER_RADIUS_SCALE = 0.40;
 
-  // Movement rotation lookup (static to avoid per-tick allocation)
-  private static readonly MOVEMENT_ROTATIONS: Record<string, number> = {
-    'wa': Math.PI / 4,
-    'wd': -Math.PI / 4,
-    'sa': Math.PI - Math.PI / 4,
-    'sd': Math.PI + Math.PI / 4,
-    's': Math.PI,
-    'asd': Math.PI, // Special case for a+s+d without w
-    'a': Math.PI / 2,
-    'd': -Math.PI / 2,
-  };
-
   // Physics constants
   private static readonly EXTERNAL_IMPULSE_DECAY_RATE = 0.253;
   private static readonly SWIM_UPWARD_COOLDOWN_MS = 600;
@@ -219,6 +215,9 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
 
   /** The normalized horizontal velocity applied to the entity when it runs. */
   public runVelocity: number = 8;
+
+  /** Raw input keys that should be sequenced with rollback prediction for this controller. */
+  public rollbackPredictedInputs: RollbackPredictableInput[] = [ ...DEFAULT_ROLLBACK_PREDICTED_INPUTS ];
 
   /** Whether the entity sticks to platforms. */
   public sticksToPlatforms: boolean = true;
@@ -337,6 +336,9 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
     this.jumpLandHeavyOneshotAnimations = options.jumpLandHeavyOneshotAnimations ?? this.jumpLandHeavyOneshotAnimations;
     this.jumpLandLightOneshotAnimations = options.jumpLandLightOneshotAnimations ?? this.jumpLandLightOneshotAnimations;
     this.runLoopedAnimations = options.runLoopedAnimations ?? this.runLoopedAnimations;
+    this.rollbackPredictedInputs = normalizeRollbackPredictedInputs(
+      options.rollbackPredictedInputs ?? this.rollbackPredictedInputs,
+    );
     this.swimLoopedAnimations = options.swimLoopedAnimations ?? this.swimLoopedAnimations;
     this.swimIdleLoopedAnimations = options.swimIdleLoopedAnimations ?? this.swimIdleLoopedAnimations;
     this.walkLoopedAnimations = options.walkLoopedAnimations ?? this.walkLoopedAnimations;
@@ -651,37 +653,83 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
     const { w, a, s, d, c, sp, sh, ml, jd } = input;
     const { yaw } = cameraOrientation;
     const currentVelocity = entity.linearVelocity;
+    const now = performance.now();
 
     // Reset reusable target velocities
     this._reusableTargetVelocities.x = 0;
     this._reusableTargetVelocities.y = 0;
     this._reusableTargetVelocities.z = 0;
-    
-    const hasJoystickInput = typeof jd === 'number';
-    this._isActivelyMoving = hasJoystickInput || !!(w || a || s || d);
-    const isFastMovement = sh;
-    const hasConflictingInputs = !hasJoystickInput && ((a && d && !w && !s) || (w && s && !a && !d));
-    const canMove = (isFastMovement && this.canRun(this)) || (!isFastMovement && this.canWalk(this));
 
     // Update swimming state and handle water entry sinking
     if (this.isSwimming && !this._isFullySubmerged) {
       this._isFullySubmerged = true;
-      this._justSubmergedUntil = performance.now() + DefaultPlayerEntityController.WATER_ENTRY_SINKING_MS;
+      this._justSubmergedUntil = now + DefaultPlayerEntityController.WATER_ENTRY_SINKING_MS;
     } else if (!this.isSwimming) {
       this._isFullySubmerged = false;
       this._justSubmergedUntil = 0;
     }
 
+    const locomotion = resolveDeterministicLocomotionStep(
+      {
+        yaw,
+        joystickDirection: typeof jd === 'number' ? jd : null,
+        w: !!w,
+        a: !!a,
+        s: !!s,
+        d: !!d,
+        sp: !!sp,
+        sh: !!sh,
+        c: !!c,
+      },
+      {
+        grounded: this.isGrounded,
+        swimming: this.isSwimming,
+        fastMovementByDefault: this.localPredictionFastMovementByDefault,
+        movementReferenceYaw: this.localPredictionMovementReferenceYaw,
+        justSubmergedRemainingS: Math.max(0, this._justSubmergedUntil - now) / 1000,
+        swimUpwardCooldownRemainingS: Math.max(0, this._swimUpwardCooldownAt - now) / 1000,
+        verticalVelocity: currentVelocity.y,
+      },
+      {
+        canWalk: this.canWalk(this),
+        canRun: this.canRun(this),
+        canGroundJump:
+          this.canJump(this) &&
+          this.isGrounded &&
+          !this.isSwimming &&
+          currentVelocity.y > -0.001 &&
+          currentVelocity.y <= 3,
+        canSwimUpward:
+          this.canJump(this) &&
+          this.isSwimming &&
+          now > this._swimUpwardCooldownAt,
+        applyDirectionalMovementRotations: this.applyDirectionalMovementRotations,
+      },
+      {
+        deltaTimeS: deltaTimeMs / 1000,
+        walkVelocity: this.walkVelocity,
+        runVelocity: this.runVelocity,
+        swimFastVelocity: this.swimFastVelocity,
+        swimSlowVelocity: this.swimSlowVelocity,
+        jumpVelocity: this.jumpVelocity,
+        swimUpwardVelocity: this.swimUpwardVelocity,
+        swimUpwardCooldownS: DefaultPlayerEntityController.SWIM_UPWARD_COOLDOWN_MS / 1000,
+        waterEntrySinkingFactor: DefaultPlayerEntityController.WATER_ENTRY_SINKING_FACTOR,
+        swimmingDragFactor: DefaultPlayerEntityController.SWIMMING_DRAG_FACTOR,
+      },
+    );
+    this._isActivelyMoving = locomotion.hasMovementIntent;
+
     // Handle movement animations and audio
-    if (this.isGrounded && !this.isSwimming && this._isActivelyMoving && !hasConflictingInputs && canMove) {
+    if (this.isGrounded && !this.isSwimming && this._isActivelyMoving && !locomotion.hasConflictingInputs && locomotion.canMove) {
       // Ground movement animations
-      const animations = isFastMovement ? this.runLoopedAnimations : this.walkLoopedAnimations;
+      const animations = locomotion.isFastMovement ? this.runLoopedAnimations : this.walkLoopedAnimations;
       entity.stopAllModelAnimations(animation => animations.includes(animation.name) || animation.loopMode === EntityModelAnimationLoopMode.ONCE);
       for (const animation of animations) {
         entity.getModelAnimation(animation)?.setLoopMode(EntityModelAnimationLoopMode.LOOP);
         entity.getModelAnimation(animation)?.play();
       }
-      this._stepAudio?.setPlaybackRate(isFastMovement ? 0.75 : 0.51);
+      this._stepAudio?.setPlaybackRate(locomotion.isFastMovement ? 0.75 : 0.51);
       this._stepAudio?.play(entity.world, !this._stepAudio?.isPlaying);
     } else if (this._isFullySubmerged && this.canSwim(this)) {
       this._stepAudio?.pause();
@@ -708,24 +756,6 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
       }
     }
 
-    // Calculate movement rotation for character facing (avoid string concatenation)
-    let movementDiagonalRotation: number | undefined;
-    if (this.applyDirectionalMovementRotations && canMove) {
-      if (hasJoystickInput) {
-        // Joystick: face the exact joystick direction
-        movementDiagonalRotation = jd;
-      } else {
-        // WASD: use discrete directional rotations
-        if (w && a && !d && !s) movementDiagonalRotation = DefaultPlayerEntityController.MOVEMENT_ROTATIONS.wa;
-        else if (w && d && !a && !s) movementDiagonalRotation = DefaultPlayerEntityController.MOVEMENT_ROTATIONS.wd;
-        else if (s && a && !w && !d) movementDiagonalRotation = DefaultPlayerEntityController.MOVEMENT_ROTATIONS.sa;
-        else if (s && d && !w && !a) movementDiagonalRotation = DefaultPlayerEntityController.MOVEMENT_ROTATIONS.sd;
-        else if ((s && !w && !a && !d) || (a && s && d && !w)) movementDiagonalRotation = DefaultPlayerEntityController.MOVEMENT_ROTATIONS.s;
-        else if (a && !w && !s && !d) movementDiagonalRotation = DefaultPlayerEntityController.MOVEMENT_ROTATIONS.a;
-        else if (d && !w && !a && !s) movementDiagonalRotation = DefaultPlayerEntityController.MOVEMENT_ROTATIONS.d;
-      }
-    }
-
     // Handle interaction input
     if (ml) {
       for (const animation of this.interactOneshotAnimations) {
@@ -735,24 +765,8 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
       input.ml = !this.autoCancelMouseLeftClick;
     }
 
-    // Calculate horizontal movement velocities
-    if (canMove) {
-      const velocity = !this.isSwimming 
-        ? isFastMovement ? this.runVelocity : this.walkVelocity
-        : isFastMovement ? this.swimFastVelocity : this.swimSlowVelocity;
-      const movementDirection = resolveDeterministicMovementDirection({
-        yaw,
-        joystickDirection: hasJoystickInput ? jd : null,
-        w: !!w,
-        a: !!a,
-        s: !!s,
-        d: !!d,
-      });
-      if (movementDirection.lengthSq > 0) {
-        this._reusableTargetVelocities.x = movementDirection.x * velocity;
-        this._reusableTargetVelocities.z = movementDirection.z * velocity;
-      }
-    }
+    this._reusableTargetVelocities.x = locomotion.movementVelocityX;
+    this._reusableTargetVelocities.z = locomotion.movementVelocityZ;
 
     // Handle swimming physics and vertical movement
     if (this.isSwimming) {
@@ -771,22 +785,21 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
       }
 
       // Handle diving and water entry sinking
-      if (c) {
-        this._reusableTargetVelocities.y = -this.swimUpwardVelocity;
-      } else if (performance.now() < this._justSubmergedUntil) {
-        this._reusableTargetVelocities.y = -this.swimUpwardVelocity * DefaultPlayerEntityController.WATER_ENTRY_SINKING_FACTOR;
-      } else if (!sp) {
-        this._reusableTargetVelocities.y = -currentVelocity.y * DefaultPlayerEntityController.SWIMMING_DRAG_FACTOR;
+      if (
+        locomotion.verticalAction === 'dive' ||
+        locomotion.verticalAction === 'sink' ||
+        locomotion.verticalAction === 'swim_drag'
+      ) {
+        this._reusableTargetVelocities.y = locomotion.verticalVelocity;
       }
     }
 
     // Handle jumping and swimming upward
-    if (sp && this.canJump(this)) {
-      if (this.isGrounded && !this.isSwimming && currentVelocity.y > -0.001 && currentVelocity.y <= 3) {
-        this._reusableTargetVelocities.y = this.jumpVelocity;
-      } else if (this.isSwimming && performance.now() > this._swimUpwardCooldownAt) {
-        this._reusableTargetVelocities.y = this.swimUpwardVelocity;
-      }
+    if (locomotion.verticalAction === 'ground_jump') {
+      this._reusableTargetVelocities.y = locomotion.verticalVelocity;
+    } else if (locomotion.verticalAction === 'swim_up') {
+      this._reusableTargetVelocities.y = locomotion.verticalVelocity;
+      this._swimUpwardCooldownAt = now + DefaultPlayerEntityController.SWIM_UPWARD_COOLDOWN_MS;
     }
 
     // Apply physics impulses (avoid platform velocity object allocation)
@@ -843,7 +856,7 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
 
     // Apply character rotation
     if (yaw !== undefined && (this.facesCameraWhenIdle || this.isActivelyMoving)) {
-      const finalYaw = movementDiagonalRotation !== undefined ? yaw + movementDiagonalRotation : yaw;
+      const finalYaw = locomotion.facingYaw ?? yaw;
       const halfFinalYaw = finalYaw * 0.5;
       
       entity.setRotation({

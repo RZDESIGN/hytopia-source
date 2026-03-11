@@ -255,6 +255,27 @@ The profile picture URL for the player.
 </td></tr>
 <tr><td>
 
+[rollbackPredictedInputs](./server.player.rollbackpredictedinputs.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+readonly RollbackPredictableInput\[\]
+
+
+</td><td>
+
+The raw input keys that should be sequenced with rollback prediction.
+
+
+</td></tr>
+<tr><td>
+
 [ui](./server.player.ui.md)
 
 
@@ -521,6 +542,20 @@ Sets the maximum distance a player can interact with entities or blocks.
 Merges data into the player's persisted data cache.
 
 Use for: saving progress, inventory, or other player-specific state. Do NOT use for: large binary data or per-tick updates.
+
+
+</td></tr>
+<tr><td>
+
+[setRollbackPredictedInputs(inputs)](./server.player.setrollbackpredictedinputs.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Sets the raw input keys that should be sequenced with rollback prediction.
 
 
 </td></tr>

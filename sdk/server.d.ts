@@ -1892,6 +1892,7 @@ export declare class Chunk implements protocol.Serializable {
      * **Category:** Blocks
      */
     getBlockId(localCoordinate: Vector3Like): number;
+
     /**
      * Gets the rotation of a block at a specific local coordinate.
      *
@@ -1901,6 +1902,7 @@ export declare class Chunk implements protocol.Serializable {
      * **Category:** Blocks
      */
     getBlockRotation(localCoordinate: Vector3Like): BlockRotation;
+
     /**
      * Checks if a block exists at a specific local coordinate.
      *
@@ -1910,6 +1912,7 @@ export declare class Chunk implements protocol.Serializable {
      * **Category:** Blocks
      */
     hasBlock(localCoordinate: Vector3Like): boolean;
+
 
 
 
@@ -1937,6 +1940,8 @@ export declare class Chunk implements protocol.Serializable {
  * @public
  */
 export declare class ChunkLattice extends EventRouter {
+
+
 
 
 
@@ -1979,6 +1984,7 @@ export declare class ChunkLattice extends EventRouter {
      * **Category:** Blocks
      */
     getBlockId(globalCoordinate: Vector3Like): number;
+
 
     /**
      * Gets the block type at a specific global coordinate.
@@ -2081,8 +2087,8 @@ export declare class ChunkLattice extends EventRouter {
      * @remarks
      * **Air:** Use block type ID `0` to remove a block (set to air).
      *
-     * **Collider updates:** For voxel block types, updates the existing collider.
-     * For trimesh block types, recreates the entire collider.
+     * **Collider updates:** Collider changes are batched and applied before the next
+     * physics step or physics query.
      *
      * **Removes previous:** If replacing an existing block, removes it from its collider first.
      * If the previous block type has no remaining blocks, its collider is removed from simulation.
@@ -2091,11 +2097,14 @@ export declare class ChunkLattice extends EventRouter {
      * @param blockTypeId - The block type ID to set. Use 0 to remove the block and replace with air.
      * @param blockRotation - The rotation of the block.
      *
-     * **Side effects:** Emits `ChunkLatticeEvent.SET_BLOCK` and mutates block colliders.
+     * **Side effects:** Emits `ChunkLatticeEvent.SET_BLOCK` and queues collider updates.
      *
      * **Category:** Blocks
      */
     setBlock(globalCoordinate: Vector3Like, blockTypeId: number, blockRotation?: BlockRotation): void;
+
+
+
 
 
 
@@ -3030,7 +3039,6 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
     private static readonly JUMP_LAND_HEAVY_VELOCITY_THRESHOLD;
     private static readonly WALL_COLLIDER_HEIGHT_SCALE;
     private static readonly WALL_COLLIDER_RADIUS_SCALE;
-    private static readonly MOVEMENT_ROTATIONS;
     private static readonly EXTERNAL_IMPULSE_DECAY_RATE;
     private static readonly SWIM_UPWARD_COOLDOWN_MS;
     private static readonly SWIMMING_DRAG_FACTOR;
@@ -3082,6 +3090,8 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
     runLoopedAnimations: string[];
     /** The normalized horizontal velocity applied to the entity when it runs. */
     runVelocity: number;
+    /** Raw input keys that should be sequenced with rollback prediction for this controller. */
+    rollbackPredictedInputs: RollbackPredictableInput[];
     /** Whether the entity sticks to platforms. */
     sticksToPlatforms: boolean;
     /** The normalized horizontal velocity applied to the entity when it swims fast (equivalent to running). */
@@ -3309,6 +3319,8 @@ export declare interface DefaultPlayerEntityControllerOptions {
     jumpVelocity?: number;
     /** The normalized horizontal velocity applied to the entity when it runs. */
     runVelocity?: number;
+    /** Raw input keys that should be sequenced with rollback prediction for this controller. */
+    rollbackPredictedInputs?: readonly RollbackPredictableInput[];
     /** Overrides the animation(s) that will play when the entity is running. */
     runLoopedAnimations?: string[];
     /** Whether the entity sticks to platforms, defaults to true. */
@@ -5149,6 +5161,7 @@ export declare type EntityOptions = BlockEntityOptions | ModelEntityOptions;
 
 declare type EntitySchema = {
     aq?: number;
+    pc?: number;
     fd?: boolean;
     js?: number;
     i: number;
@@ -5171,6 +5184,8 @@ declare type EntitySchema = {
     pf?: number;
     pi?: number;
     py?: number;
+    rh?: number;
+    rl?: number;
     pn?: string;
     r?: QuaternionSchema;
     ri?: number;
@@ -8107,6 +8122,10 @@ export declare class Player extends EventRouter implements protocol.Serializable
 
 
 
+
+
+
+
     /**
      * The current `PlayerInput` of the player.
      *
@@ -8126,6 +8145,16 @@ export declare class Player extends EventRouter implements protocol.Serializable
      */
     get defaultBlockEditPredictionConfig(): DefaultBlockEditPredictionConfig;
     /**
+     * The raw input keys that should be sequenced with rollback prediction.
+     *
+     * @remarks
+     * Inputs outside this list keep their existing reliable/immediate behavior.
+     * Defaults to the stock locomotion set (`w`, `a`, `s`, `d`, `sp`, `sh`, `c`, `jd`).
+     *
+     * **Category:** Players
+     */
+    get rollbackPredictedInputs(): readonly RollbackPredictableInput[];
+    /**
      * Whether player click/tap input triggers interactions.
      *
      * @remarks
@@ -8143,6 +8172,8 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     get maxInteractDistance(): number;
+
+
 
     /**
      * The current `World` the player is in, or undefined if not yet joined.
@@ -8246,6 +8277,17 @@ export declare class Player extends EventRouter implements protocol.Serializable
      * **Category:** Players
      */
     setInteractEnabled(enabled: boolean): void;
+    /**
+     * Sets the raw input keys that should be sequenced with rollback prediction.
+     *
+     * @remarks
+     * This preserves the existing game-facing input API. Games can keep reading
+     * `player.input.q`, `player.input.e`, etc. and only opt specific keys into
+     * rollback sequencing when they affect deterministic character state.
+     *
+     * **Category:** Players
+     */
+    setRollbackPredictedInputs(inputs?: readonly (keyof InputSchema)[]): void;
     /**
      * Sets the maximum distance a player can interact with entities or blocks.
      *
@@ -9180,6 +9222,7 @@ export declare class PlayerEntity extends Entity {
     setTickWithPlayerInputEnabled(enabled: boolean): void;
 
 
+    private _syncRollbackPredictedInputsFromController;
 }
 
 /**
@@ -10843,6 +10886,10 @@ export declare enum RigidBodyType {
     KINEMATIC_VELOCITY = "kinematic_velocity"
 }
 
+declare const ROLLBACK_PREDICTABLE_INPUTS: readonly ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "i" | "f" | "k" | "x" | "z" | "w" | "a" | "s" | "d" | "q" | "e" | "r" | "c" | "v" | "u" | "o" | "j" | "l" | "n" | "m" | "sp" | "sh" | "tb" | "ml" | "mr" | "jd")[];
+
+declare type RollbackPredictableInput = typeof ROLLBACK_PREDICTABLE_INPUTS[number];
+
 /**
  * The options for a round cylinder collider. @public
  *
@@ -11514,6 +11561,7 @@ export declare class Simulation extends EventRouter {
      * **Category:** Physics
      */
     setGravity(gravity: RAPIER.Vector3): void;
+
 
 
 

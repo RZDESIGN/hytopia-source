@@ -1,4 +1,5 @@
 import protocol from '@hytopia.com/server-protocol';
+import { encodeLocalPredictionControllerFlags } from '@gameplay-shared/LocalPredictionControllerFlags';
 import ErrorHandler from '@/errors/ErrorHandler';
 import type GatewayPlayerSession from '@/networking/GatewayPlayerSession';
 import GatewayPlayerSessionManager from '@/networking/GatewayPlayerSessionManager';
@@ -51,12 +52,15 @@ const PROTOCOL_ENTITY_PROPERTIES = PROTOCOL_ENTITY_SCHEMA?.properties ?? {};
 const PROTOCOL_ENTITY_KEYS = Object.keys(PROTOCOL_ENTITY_PROPERTIES);
 const UNRELIABLE_OWNER_PREDICTION_ENTITY_SYNC_KEYS = new Set([
   'aq',
+  'pc',
   'fd',
   'ju',
   'js',
   'mv',
   'pf',
   'py',
+  'rh',
+  'rl',
   'rv',
   'sc',
   'sf',
@@ -68,7 +72,8 @@ const ENTITY_LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
 const ENTITY_LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
 const CHUNK_STREAM_HORIZONTAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_HORIZONTAL_RADIUS ?? 6)));
 const CHUNK_STREAM_VERTICAL_RADIUS = Math.max(0, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_VERTICAL_RADIUS ?? 3)));
-const CHUNK_STREAM_MAX_LOADS_PER_SYNC = Math.max(1, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_MAX_LOADS_PER_SYNC ?? 48)));
+const CHUNK_STREAM_MAX_LOADS_PER_SYNC = Math.max(1, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_MAX_LOADS_PER_SYNC ?? 8)));
+const CHUNK_STREAM_MAX_CHUNKS_PER_PACKET = Math.max(1, Math.floor(Number(process.env.HYTOPIA_CHUNK_STREAM_MAX_CHUNKS_PER_PACKET ?? 4)));
 const SCENE_UI_CHUNK_INTEREST_SAFE_VIEW_DISTANCE = Math.min(CHUNK_STREAM_HORIZONTAL_RADIUS, CHUNK_STREAM_VERTICAL_RADIUS) * CHUNK_SIZE;
 const INPUT_ACK_UNRELIABLE_RESEND_SYNCS = 3;
 
@@ -98,6 +103,7 @@ type ReliablePacketSlot = {
 };
 
 type PacketPlan = {
+  perPlayerPriorityUnreliablePackets: Map<Player, AnyPacket[]>;
   perPlayerUnreliablePackets: Map<Player, AnyPacket[]>;
   postPlayerUIAfterChatReliableSlots: ReliablePacketSlot[];
   postPlayerUIBeforeWorldAndPlayersReliableSlots: ReliablePacketSlot[];
@@ -3191,8 +3197,19 @@ export default class NetworkSynchronizer {
     packetPlan.perPlayerUnreliablePackets.set(player, [ packet ]);
   }
 
+  private _appendPerPlayerPriorityUnreliablePacket(packetPlan: PacketPlan, player: Player, packet: AnyPacket): void {
+    const existingPackets = packetPlan.perPlayerPriorityUnreliablePackets.get(player);
+    if (existingPackets) {
+      existingPackets.push(packet);
+      return;
+    }
+
+    packetPlan.perPlayerPriorityUnreliablePackets.set(player, [ packet ]);
+  }
+
   private _buildPacketPlan(currentTick: number): PacketPlan {
     const packetPlan: PacketPlan = {
+      perPlayerPriorityUnreliablePackets: new Map(),
       perPlayerUnreliablePackets: new Map(),
       postPlayerUIAfterChatReliableSlots: [],
       postPlayerUIBeforeWorldAndPlayersReliableSlots: [],
@@ -3241,7 +3258,7 @@ export default class NetworkSynchronizer {
     // 6. chunks
     this._pushReliablePacketSlot(
       packetPlan.prePlayerUIReliableSlots,
-      this._buildSyncPacketSlot(this._queuedChunkSyncs, protocol.outboundPackets.chunksPacketDefinition, currentTick),
+      this._buildChunkSyncPacketSlot(currentTick),
     );
 
     // 7. blocks
@@ -3304,6 +3321,7 @@ export default class NetworkSynchronizer {
 
     for (const player of targetPlayers) {
       const pendingUpdates: protocol.EntitySchema[] = [];
+      const priorityUnreliableUpdates: protocol.EntitySchema[] = [];
       const reliableUpdates: protocol.EntitySchema[] = [];
       const unreliableUpdates: protocol.EntitySchema[] = [];
 
@@ -3332,7 +3350,17 @@ export default class NetworkSynchronizer {
       const coalescedUpdates = this._coalesceRemovalDominatedSyncs(pendingUpdates);
       for (let i = 0; i < coalescedUpdates.length; i++) {
         const entitySync = coalescedUpdates[i];
-        (this._isReliableEntitySync(entitySync) ? reliableUpdates : unreliableUpdates).push(entitySync);
+        if (this._isReliableEntitySync(entitySync)) {
+          reliableUpdates.push(entitySync);
+          continue;
+        }
+
+        if (this._isPriorityOwnerPredictionEntitySync(entitySync)) {
+          priorityUnreliableUpdates.push(entitySync);
+          continue;
+        }
+
+        unreliableUpdates.push(entitySync);
       }
 
       if (reliableUpdates.length > 0) {
@@ -3340,6 +3368,14 @@ export default class NetworkSynchronizer {
           slot,
           player,
           protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, reliableUpdates, currentTick),
+        );
+      }
+
+      if (priorityUnreliableUpdates.length > 0) {
+        this._appendPerPlayerPriorityUnreliablePacket(
+          packetPlan,
+          player,
+          protocol.createPacket(protocol.outboundPackets.entitiesPacketDefinition, priorityUnreliableUpdates, currentTick),
         );
       }
 
@@ -3425,6 +3461,15 @@ export default class NetworkSynchronizer {
     return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
   }
 
+  private _buildChunkSyncPacketSlot(currentTick: number): ReliablePacketSlot | undefined {
+    return this._buildBatchedSyncPacketSlot(
+      this._queuedChunkSyncs,
+      protocol.outboundPackets.chunksPacketDefinition,
+      currentTick,
+      CHUNK_STREAM_MAX_CHUNKS_PER_PACKET,
+    );
+  }
+
   private _buildSyncPacketSlot<TKey, TId extends PacketId, TSchema extends object | null>(
     syncQueue: SyncQueue<TKey, TSchema>,
     packetDefinition: IPacketDefinition<TId, TSchema[]>,
@@ -3449,6 +3494,68 @@ export default class NetworkSynchronizer {
     }
 
     return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
+  }
+
+  private _buildBatchedSyncPacketSlot<TKey, TId extends PacketId, TSchema extends object | null>(
+    syncQueue: SyncQueue<TKey, TSchema>,
+    packetDefinition: IPacketDefinition<TId, TSchema[]>,
+    currentTick: number,
+    maxItemsPerPacket: number,
+  ): ReliablePacketSlot | undefined {
+    const slot: ReliablePacketSlot = {};
+
+    if (syncQueue.broadcast.size > 0) {
+      slot.sharedPackets = this._createBatchedPackets(
+        syncQueue.broadcast.valuesArray,
+        packetDefinition,
+        currentTick,
+        maxItemsPerPacket,
+      );
+    }
+
+    if (syncQueue.perPlayer.size > 0) {
+      for (const [ player, sync ] of syncQueue.perPlayer.entries()) {
+        const batchedPackets = this._createBatchedPackets(
+          sync.valuesArray,
+          packetDefinition,
+          currentTick,
+          maxItemsPerPacket,
+        );
+
+        if (batchedPackets.length === 0) {
+          continue;
+        }
+
+        const perPlayerPackets = slot.perPlayerPackets ?? new Map<Player, AnyPacket[]>();
+        perPlayerPackets.set(player, batchedPackets);
+        slot.perPlayerPackets = perPlayerPackets;
+      }
+    }
+
+    return this._hasReliablePacketSlotPackets(slot) ? slot : undefined;
+  }
+
+  private _createBatchedPackets<TId extends PacketId, TSchema extends object | null>(
+    syncs: readonly TSchema[],
+    packetDefinition: IPacketDefinition<TId, TSchema[]>,
+    currentTick: number,
+    maxItemsPerPacket: number,
+  ): AnyPacket[] {
+    if (syncs.length === 0) {
+      return [];
+    }
+
+    const packets: AnyPacket[] = [];
+
+    for (let i = 0; i < syncs.length; i += maxItemsPerPacket) {
+      packets.push(protocol.createPacket(
+        packetDefinition,
+        syncs.slice(i, i + maxItemsPerPacket) as TSchema[],
+        currentTick,
+      ));
+    }
+
+    return packets;
   }
 
   private _hasReliablePacketSlotPackets(slot: ReliablePacketSlot): boolean {
@@ -3479,6 +3586,11 @@ export default class NetworkSynchronizer {
         this._sendHostedPlayersToPlayer(session, player, currentTick);
         this._sendHostedChatToPlayer(session, player, currentTick);
         this._sendReliableSlotsToPlayer(session, player, packetPlan.postPlayerUIAfterChatReliableSlots);
+
+        const perPlayerPriorityUnreliablePackets = packetPlan.perPlayerPriorityUnreliablePackets.get(player);
+        if (perPlayerPriorityUnreliablePackets && perPlayerPriorityUnreliablePackets.length > 0) {
+          WorldHostManager.instance.client.sendPacketsToPlayer(session, perPlayerPriorityUnreliablePackets, false);
+        }
 
         if (packetPlan.sharedUnreliablePackets.length > 0) {
           WorldHostManager.instance.client.sendPacketsToPlayer(session, packetPlan.sharedUnreliablePackets, false);
@@ -3719,6 +3831,25 @@ export default class NetworkSynchronizer {
     return false;
   }
 
+  private _isPriorityOwnerPredictionEntitySync(entitySync: protocol.EntitySchema): boolean {
+    return 'aq' in entitySync ||
+      'fd' in entitySync ||
+      'pc' in entitySync ||
+      'ju' in entitySync ||
+      'js' in entitySync ||
+      'mv' in entitySync ||
+      'pf' in entitySync ||
+      'py' in entitySync ||
+      'rh' in entitySync ||
+      'rl' in entitySync ||
+      'rv' in entitySync ||
+      'sc' in entitySync ||
+      'sf' in entitySync ||
+      'sl' in entitySync ||
+      'su' in entitySync ||
+      'wv' in entitySync;
+  }
+
   private _syncPlayerCameraAttachedEntityModel(playerCamera: PlayerCamera): void {
     const entity = playerCamera.attachedToEntity;
     const modelUri = entity && (playerCamera.mode === PlayerCameraMode.FIRST_PERSON ? playerCamera.viewModelUri : entity.modelUri);
@@ -3731,12 +3862,15 @@ export default class NetworkSynchronizer {
   private _queuePlayerEntityOwnerPredictionState(
     entitySync: protocol.EntitySchema & {
       aq?: number;
+      pc?: number;
       fd?: boolean;
       ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rh?: number;
+      rl?: number;
       rv?: number;
       sc?: number;
       sf?: number;
@@ -3746,6 +3880,9 @@ export default class NetworkSynchronizer {
     },
     playerEntity: PlayerEntity,
   ): void {
+    entitySync.rl = playerEntity.player.rollbackPredictedInputMaskLow || undefined;
+    entitySync.rh = playerEntity.player.rollbackPredictedInputMaskHigh || undefined;
+
     const controller = playerEntity.controller;
 
     if (!(controller instanceof DefaultPlayerEntityController)) {
@@ -3761,6 +3898,13 @@ export default class NetworkSynchronizer {
     }
 
     entitySync.fd = controller.localPredictionFastMovementByDefault || undefined;
+    entitySync.pc = encodeLocalPredictionControllerFlags({
+      canWalk: controller.canWalk(controller),
+      canRun: controller.canRun(controller),
+      canJump: controller.canJump(controller),
+      applyDirectionalMovementRotations: controller.applyDirectionalMovementRotations,
+      facesCameraWhenIdle: controller.facesCameraWhenIdle,
+    });
     entitySync.ju = controller.jumpVelocity;
     entitySync.pf = predictionFlags;
     entitySync.py = controller.localPredictionMovementReferenceYaw;
@@ -3796,6 +3940,8 @@ export default class NetworkSynchronizer {
       mv?: protocol.VectorSchema;
       pf?: number;
       py?: number;
+      rh?: number;
+      rl?: number;
       rv?: number;
       sc?: number;
       sf?: number;
