@@ -670,6 +670,39 @@ export declare interface BaseColliderOptions {
  */
 export declare abstract class BaseEntityController extends EventRouter {
     /**
+     * Owner-only local prediction mode for this controller.
+     *
+     * @remarks
+     * Leave undefined to disable engine-managed local prediction metadata sync.
+     * Use `'default'` for the built-in humanoid locomotion predictor or
+     * `'custom'` to opt into generic rollback replay for a custom motor.
+     *
+     * **Category:** Controllers
+     */
+    localPredictionMode?: LocalPredictionMode;
+    /**
+     * Raw input keys that should be sequenced with rollback prediction.
+     *
+     * @remarks
+     * Player-owned controllers can override this to opt custom keys into the
+     * rollback queue without changing the game-facing input API.
+     *
+     * **Category:** Controllers
+     */
+    rollbackPredictedInputs?: readonly RollbackPredictableInput[];
+    /**
+     * Optional custom owner-only prediction state for custom motors.
+     *
+     * @remarks
+     * When `localPredictionMode` is `'custom'`, this array is mirrored to the
+     * owning client and restored before rollback replay. Use it for small
+     * deterministic numeric state such as angular velocity, dash cooldown
+     * counters, grapple length, or custom grounded timers.
+     *
+     * **Category:** Controllers
+     */
+    localPredictionCustomState?: readonly number[];
+    /**
      * Override this method to handle the attachment of an entity
      * to your entity controller.
      *
@@ -773,6 +806,7 @@ export declare enum BaseEntityControllerEvent {
     ATTACH = "BASE_ENTITY_CONTROLLER.ATTACH",
     DESPAWN = "BASE_ENTITY_CONTROLLER.DESPAWN",
     DETACH = "BASE_ENTITY_CONTROLLER.DETACH",
+    ROLLBACK_PREDICTION_STEP = "BASE_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP",
     SPAWN = "BASE_ENTITY_CONTROLLER.SPAWN",
     TICK = "BASE_ENTITY_CONTROLLER.TICK",
     TICK_WITH_PLAYER_INPUT = "BASE_ENTITY_CONTROLLER.TICK_WITH_PLAYER_INPUT"
@@ -800,6 +834,21 @@ export declare interface BaseEntityControllerEventPayloads {
     /** Emitted when an entity is spawned. */
     [BaseEntityControllerEvent.SPAWN]: {
         entity: Entity;
+    };
+    /** Emitted for rollback-predicted player input steps. */
+    [BaseEntityControllerEvent.ROLLBACK_PREDICTION_STEP]: {
+        entity: PlayerEntity;
+        input: PlayerInput;
+        cameraOrientation: PlayerCameraOrientation;
+        sequenceNumber: number;
+        deltaTimeMs: number;
+        deltaTimeS: number;
+        isReplay: false;
+        isFirstSubstep: true;
+        yaw: number;
+        joystickDirection: number | null;
+        rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
     };
     /** Emitted when an entity is ticked. */
     [BaseEntityControllerEvent.TICK]: {
@@ -3053,6 +3102,8 @@ export declare class DefaultPlayerEntityController extends BaseEntityController 
     applyDirectionalMovementRotations: boolean;
     /** Whether to automatically cancel left click input after first processed tick, defaults to true. */
     autoCancelMouseLeftClick: boolean;
+    /** Local prediction mode for the built-in humanoid locomotion controller. */
+    localPredictionMode: LocalPredictionMode;
     /**
      * A function allowing custom logic to determine if the entity can jump.
      * @param controller - The default player entity controller instance.
@@ -5236,6 +5287,8 @@ declare type EntitySchema = {
     ol?: OutlineSchema;
     p?: VectorSchema;
     pe?: number;
+    pm?: number;
+    ps?: number[];
     pf?: number;
     pi?: number;
     py?: number;
@@ -5946,6 +5999,8 @@ declare const lightsPacketDefinition: IPacketDefinition<PacketId.LIGHTS, LightsS
 declare type LightsSchema = LightSchema[];
 
 declare const lightsSchema: JSONSchemaType<LightsSchema>;
+
+export declare type LocalPredictionMode = 'default' | 'custom';
 
 /**
  * Represents a 2x2 matrix.
@@ -10954,7 +11009,7 @@ export declare enum RigidBodyType {
     KINEMATIC_VELOCITY = "kinematic_velocity"
 }
 
-declare const ROLLBACK_PREDICTABLE_INPUTS: readonly ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "i" | "f" | "k" | "w" | "a" | "s" | "d" | "q" | "e" | "r" | "z" | "x" | "c" | "v" | "u" | "o" | "j" | "l" | "n" | "m" | "sp" | "sh" | "tb" | "ml" | "mr" | "jd")[];
+declare const ROLLBACK_PREDICTABLE_INPUTS: readonly ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "i" | "f" | "k" | "x" | "z" | "w" | "a" | "s" | "d" | "q" | "e" | "r" | "c" | "v" | "u" | "o" | "j" | "l" | "n" | "m" | "sp" | "sh" | "tb" | "ml" | "mr" | "jd")[];
 
 export declare type RollbackPredictableInput = typeof ROLLBACK_PREDICTABLE_INPUTS[number];
 

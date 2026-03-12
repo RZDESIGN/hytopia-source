@@ -1,5 +1,6 @@
 import protocol from '@hytopia.com/server-protocol';
 import { encodeLocalPredictionControllerFlags } from '@gameplay-shared/LocalPredictionControllerFlags';
+import { encodeLocalPredictionMode } from '@gameplay-shared/LocalPredictionMode';
 import ErrorHandler from '@/errors/ErrorHandler';
 import type GatewayPlayerSession from '@/networking/GatewayPlayerSession';
 import GatewayPlayerSessionManager from '@/networking/GatewayPlayerSessionManager';
@@ -57,6 +58,8 @@ const UNRELIABLE_OWNER_PREDICTION_ENTITY_SYNC_KEYS = new Set([
   'ju',
   'js',
   'mv',
+  'pm',
+  'ps',
   'pf',
   'py',
   'rh',
@@ -3835,6 +3838,8 @@ export default class NetworkSynchronizer {
     return 'aq' in entitySync ||
       'fd' in entitySync ||
       'pc' in entitySync ||
+      'pm' in entitySync ||
+      'ps' in entitySync ||
       'ju' in entitySync ||
       'js' in entitySync ||
       'mv' in entitySync ||
@@ -3867,6 +3872,8 @@ export default class NetworkSynchronizer {
       ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
+      pm?: number;
+      ps?: number[];
       pf?: number;
       py?: number;
       rh?: number;
@@ -3884,6 +3891,13 @@ export default class NetworkSynchronizer {
     entitySync.rh = playerEntity.player.rollbackPredictedInputMaskHigh || undefined;
 
     const controller = playerEntity.controller;
+    if (!controller) {
+      return;
+    }
+    entitySync.pm = encodeLocalPredictionMode(controller.localPredictionMode);
+    entitySync.ps = controller.localPredictionCustomState
+      ? [ ...controller.localPredictionCustomState ]
+      : undefined;
 
     if (!(controller instanceof DefaultPlayerEntityController)) {
       return;
@@ -3938,6 +3952,8 @@ export default class NetworkSynchronizer {
       ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
+      pm?: number;
+      ps?: number[];
       pf?: number;
       py?: number;
       rh?: number;

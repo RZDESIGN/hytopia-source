@@ -7,6 +7,7 @@ import GatewayPlayerSessionManager from '@/networking/GatewayPlayerSessionManage
 import PlayerManager from '@/players/PlayerManager';
 import { PlayerCameraMode } from '@/players/PlayerCamera';
 import ProcessWorldHostClient from '@/worlds/hosting/ProcessWorldHostClient';
+import BaseEntityController from '@/worlds/entities/controllers/BaseEntityController';
 import DefaultPlayerEntityController from '@/worlds/entities/controllers/DefaultPlayerEntityController';
 import { unpack } from 'msgpackr';
 
@@ -259,6 +260,12 @@ const createSessionHarness = () => {
   return { client, inlineClient, player: session.player, playerEntity, sentMessages, session, world, worldDescriptor };
 };
 
+class CustomPredictionController extends BaseEntityController {
+  public override localPredictionMode = 'custom' as const;
+  public override localPredictionCustomState = [ 3, 9 ] as const;
+  public override rollbackPredictedInputs = [ 'w', 'q' ] as const;
+}
+
 test('replays cached and recoverable player-local entity state during mirrored world bootstrap', () => {
   const { player, playerEntity, world } = createWorldHarness();
   const sentMessages: any[] = [];
@@ -305,6 +312,47 @@ test('replays cached and recoverable player-local entity state during mirrored w
     pf: 3,
     py: 1.25,
   }));
+});
+
+test('custom player controllers preserve owner prediction mode during mirrored world bootstrap', () => {
+  const { player, playerEntity, world } = createWorldHarness();
+  const sentMessages: any[] = [];
+  const worldDescriptor = { id: world.id, mode: 'process', name: world.name, processId: 'shadow-test' } as const;
+  const session = new GatewayPlayerSession(player as any);
+  const inlineClient = createInlineClientStub(world);
+
+  playerEntity.controller = new CustomPredictionController();
+  player.rollbackPredictedInputMaskLow = 1;
+  player.rollbackPredictedInputMaskHigh = 0;
+
+  (ProcessWorldHostClient.prototype as any)._spawnChild = function noop() {};
+  PlayerManager.instance.getConnectedPlayersByWorldSet = () => new Set([ player as any ]);
+  GatewayPlayerSessionManager.instance.getSessionByPlayer = () => session;
+
+  const client = new ProcessWorldHostClient(inlineClient as any);
+  (client as any)._child = { connected: true };
+  (client as any)._send = (message: any) => {
+    sentMessages.push(message);
+  };
+  (client as any)._descriptorsByWorldId.set(world.id, worldDescriptor);
+
+  (client as any)._bootstrapMirroredWorlds();
+
+  const playerEntitiesMessage = sentMessages.find(message => {
+    return message.type === 'player_entities' && message.playerId === player.id;
+  });
+  expect(playerEntitiesMessage).toBeDefined();
+  expect(playerEntitiesMessage.entities).toHaveLength(1);
+  expect(playerEntitiesMessage.entities[0]).toEqual(expect.objectContaining({
+    aq: 77,
+    i: playerEntity.id,
+    m: 'models/view.glb',
+    pm: 2,
+    ps: [ 3, 9 ],
+    rl: 1,
+  }));
+  expect(playerEntitiesMessage.entities[0].pc).toBeUndefined();
+  expect(playerEntitiesMessage.entities[0].pf).toBeUndefined();
 });
 
 test('clears cached per-player entity overlay state when a player detaches from a mirrored world', () => {

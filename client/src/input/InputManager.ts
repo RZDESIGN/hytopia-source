@@ -228,6 +228,7 @@ export default class InputManager {
   private _moveStickState: StickState = { x: 0, y: 0, magnitude: 0 };
   private _lookStickState: StickState = { x: 0, y: 0, magnitude: 0 };
   private _lastMovementPacketTickTimeS: number = 0;
+  private _nextMovementPacketTickTimeS: number = 0;
   private _movementPacketTimerId: number | undefined;
   private _movementPacketImmediateFlushScheduled: boolean = false;
   private _serverMovementTickHz: number | undefined;
@@ -383,19 +384,38 @@ export default class InputManager {
   }
 
   private _setupPacketQueue(): void {
-    this._lastMovementPacketTickTimeS = performance.now() / 1000;
+    const nowS = performance.now() / 1000;
+    this._lastMovementPacketTickTimeS = nowS;
+    this._nextMovementPacketTickTimeS = nowS + (1 / this._getMovementPacketUpdateHz());
     this._scheduleNextMovementPacketTick();
   }
 
   private _scheduleNextMovementPacketTick(): void {
+    const nowS = performance.now() / 1000;
+    const tickIntervalS = 1 / this._getMovementPacketUpdateHz();
+    if (
+      !Number.isFinite(this._nextMovementPacketTickTimeS) ||
+      this._nextMovementPacketTickTimeS <= 0 ||
+      this._nextMovementPacketTickTimeS < nowS - (tickIntervalS * 2)
+    ) {
+      this._nextMovementPacketTickTimeS = nowS + tickIntervalS;
+    }
+
     this._movementPacketTimerId = window.setTimeout(
       this._tickMovementPacketQueue,
-      1000 / this._getMovementPacketUpdateHz(),
+      Math.max(0, (this._nextMovementPacketTickTimeS - nowS) * 1000),
     );
   }
 
   private _tickMovementPacketQueue = (): void => {
+    const tickIntervalS = 1 / this._getMovementPacketUpdateHz();
     this._drainPacketQueue(this._consumeMovementPacketQueueDeltaS());
+
+    const nowS = performance.now() / 1000;
+    do {
+      this._nextMovementPacketTickTimeS += tickIntervalS;
+    } while (this._nextMovementPacketTickTimeS <= nowS);
+
     this._scheduleNextMovementPacketTick();
   }
 
@@ -432,6 +452,8 @@ export default class InputManager {
       }
 
       this._drainPacketQueue(this._consumeMovementPacketQueueDeltaS());
+      this._nextMovementPacketTickTimeS =
+        (performance.now() / 1000) + (1 / this._getMovementPacketUpdateHz());
       this._scheduleNextMovementPacketTick();
     });
   }
@@ -536,9 +558,10 @@ export default class InputManager {
     );
 
     if (shouldSendMovementState && sequenceNumber !== undefined) {
+      const sequencedDeltaS = this._getSequencedMovementDeltaS(queueDeltaS);
       EventRouter.instance.emit(InputManagerEventType.MovementPacketSent, {
         sequenceNumber,
-        deltaTimeS: queueDeltaS,
+        deltaTimeS: sequencedDeltaS,
         yaw: this._game.camera.gameCameraYaw,
         joystickDirection: this._joystickDirection,
         rollbackInputs: rollbackInputs ?? {},
@@ -558,6 +581,21 @@ export default class InputManager {
     if (this._movementStateDirtyResendTicks > 0) {
       this._movementStateDirtyResendTicks--;
     }
+  }
+
+  private _getSequencedMovementDeltaS(measuredDeltaS: number): number {
+    if (
+      this._serverMovementTickHz !== undefined &&
+      Number.isFinite(this._serverMovementTickHz) &&
+      this._serverMovementTickHz > 0
+    ) {
+      return Math.min(
+        Math.max(1 / this._serverMovementTickHz, MOVEMENT_PACKET_MIN_DELTA_S),
+        MOVEMENT_PACKET_MAX_DELTA_S,
+      );
+    }
+
+    return measuredDeltaS;
   }
 
   private _shouldImmediatelyFlushSequencedMovement(): boolean {
@@ -614,6 +652,14 @@ export default class InputManager {
       MAX_FIRST_PERSON_INPUT_UPDATE_HZ,
       Math.max(1, 1 / timestepS),
     );
+
+    if (this._movementPacketTimerId !== undefined) {
+      window.clearTimeout(this._movementPacketTimerId);
+      this._movementPacketTimerId = undefined;
+      this._nextMovementPacketTickTimeS =
+        (performance.now() / 1000) + (1 / this._getMovementPacketUpdateHz());
+      this._scheduleNextMovementPacketTick();
+    }
   }
 
   private _onGameCameraOrientationChange = (payload: CameraEventPayload.GameCameraOrientationChange): void => {

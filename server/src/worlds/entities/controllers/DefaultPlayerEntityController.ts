@@ -14,6 +14,7 @@ import {
   type RollbackPredictedInputSnapshot,
   type RollbackPredictableInput,
 } from '@gameplay-shared/InputContract';
+import type { LocalPredictionMode } from '@gameplay-shared/LocalPredictionMode';
 import type { PlayerInput } from '@/players/Player';
 import type { PlayerCameraOrientation } from '@/players/PlayerCamera';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
@@ -197,6 +198,9 @@ export default class DefaultPlayerEntityController extends BaseEntityController 
 
   /** Whether to automatically cancel left click input after first processed tick, defaults to true. */
   public autoCancelMouseLeftClick: boolean = true;
+
+  /** Local prediction mode for the built-in humanoid locomotion controller. */
+  public override localPredictionMode: LocalPredictionMode = 'default';
 
   /**
    * A function allowing custom logic to determine if the entity can jump.

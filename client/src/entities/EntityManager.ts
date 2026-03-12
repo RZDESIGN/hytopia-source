@@ -22,6 +22,7 @@ import {
   DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS,
   type LocalPredictionControllerFlags,
 } from '@gameplay-shared/LocalPredictionControllerFlags';
+import type { LocalPredictionMode } from '@gameplay-shared/LocalPredictionMode';
 import {
   DEFAULT_ROLLBACK_PREDICTED_INPUT_SET,
   createRollbackPredictedInputSet,
@@ -65,10 +66,15 @@ export namespace EntityManagerEventPayload {
     joystickDirection: number | null;
     previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
     rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+    predictedPosition: Vector3;
+    predictedRotation: Quaternion;
+    predictionState: number[];
     grounded: boolean;
     swimming: boolean;
     motionBasisVelocity: Readonly<Vector3>;
     addMotionBasisVelocity: (delta: { x: number; y: number; z: number }) => void;
+    setGrounded: (grounded: boolean) => void;
+    setSwimming: (swimming: boolean) => void;
   }
 
   export interface ILocalPredictionStep {
@@ -110,6 +116,8 @@ const LOCAL_PREDICTION_SPEED_DOWNWARD_ADAPT_RATE = 0.05;
 const LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT = 0.85;
 const LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD = 1.5;
 const LOCAL_PREDICTION_MAX_FRAME_DELTA_S = 1 / 10;
+const LOCAL_PREDICTION_MIN_COMMAND_DELTA_S = 1 / 240;
+const LOCAL_PREDICTION_MAX_COMMAND_DELTA_S = 1 / 10;
 const LOCAL_PREDICTION_SUBSTEP_DELTA_S = 1 / 60;
 const LOCAL_PREDICTION_MAX_SUBSTEPS = 6;
 const LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S = 1 / 8;
@@ -229,10 +237,12 @@ type LocalPredictionControllerState = {
 
 type LocalPredictionState = {
   entityId?: number;
+  mode?: LocalPredictionMode;
   predictedPosition: Vector3;
   predictedRotation: Quaternion;
   authoritativePosition: Vector3;
   authoritativeRotation: Quaternion;
+  authoritativeCustomState: number[];
   authoritativeJumpVelocity: number;
   authoritativeRunVelocity: number;
   authoritativeSwimFastVelocity: number;
@@ -243,6 +253,7 @@ type LocalPredictionState = {
   estimatedVerticalVelocity: number;
   estimatedWalkSpeed: number;
   estimatedRunSpeed: number;
+  predictionAccumulatorS: number;
   worldTimestepS: number;
   supportsInputAcknowledgements: boolean;
   lastAcknowledgedHadMovementInput?: boolean;
@@ -256,6 +267,7 @@ type LocalPredictionState = {
   hasAuthoritativeRotation: boolean;
   lastAuthoritativePositionServerTick: number;
   lastAuthoritativeRotationServerTick: number;
+  predictedCustomState: number[];
   controllerState: LocalPredictionControllerState;
   commandBuffer: LocalPredictionCommand[];
   liveCommandBuffer: LocalPredictionCommand[];
@@ -293,10 +305,12 @@ export default class EntityManager {
   private _hasLightLevelVolumeUpdatedOnce: boolean = false;
   private _needsSkyLightRefresh: boolean = false;
   private _localPredictionState: LocalPredictionState = {
+    mode: undefined,
     predictedPosition: new Vector3(),
     predictedRotation: new Quaternion(),
     authoritativePosition: new Vector3(),
     authoritativeRotation: new Quaternion(),
+    authoritativeCustomState: [],
     authoritativeJumpVelocity: LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY,
     authoritativeRunVelocity: LOCAL_PREDICTION_DEFAULT_RUN_SPEED,
     authoritativeSwimFastVelocity: LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED,
@@ -338,6 +352,7 @@ export default class EntityManager {
     estimatedVerticalVelocity: 0,
     estimatedWalkSpeed: LOCAL_PREDICTION_DEFAULT_WALK_SPEED,
     estimatedRunSpeed: LOCAL_PREDICTION_DEFAULT_RUN_SPEED,
+    predictionAccumulatorS: 0,
     worldTimestepS: 1 / 60,
     supportsInputAcknowledgements: false,
     lastAcknowledgedHadMovementInput: undefined,
@@ -351,6 +366,7 @@ export default class EntityManager {
     hasAuthoritativeRotation: false,
     lastAuthoritativePositionServerTick: 0,
     lastAuthoritativeRotationServerTick: 0,
+    predictedCustomState: [],
     commandBuffer: new Array(LOCAL_PREDICTION_COMMAND_BUFFER_SIZE).fill(undefined).map(() => ({
       sequenceNumber: -1,
       deltaTimeS: 0,
@@ -906,10 +922,11 @@ export default class EntityManager {
       const shouldInterpolateTransform =
         deserializedEntity.parentEntityId === undefined &&
         deserializedEntity.parentNodeName === undefined;
-      const hasLocalPredictionSupport = this._hasLocalPredictionSupport(deserializedEntity);
+      const localPredictionMode = this._resolveLocalPredictionMode(deserializedEntity);
+      const hasLocalPredictionSupport = localPredictionMode !== undefined;
 
       if (entity instanceof Entity && hasLocalPredictionSupport) {
-        this._bindLocalPredictionToEntity(entity);
+        this._bindLocalPredictionToEntity(entity, localPredictionMode);
       }
 
       const shouldUseLocalPrediction =
@@ -925,7 +942,14 @@ export default class EntityManager {
         this._setLocalRollbackPredictedInputs(
           deserializedEntity.localPredictionRollbackPredictedInputs,
         );
-        this._setLocalAuthoritativeControllerState(deserializedEntity);
+        if (deserializedEntity.localPredictionCustomState !== undefined) {
+          this._setLocalAuthoritativeCustomPredictionState(
+            deserializedEntity.localPredictionCustomState,
+          );
+        }
+        if (localPredictionMode === 'default') {
+          this._setLocalAuthoritativeControllerState(deserializedEntity);
+        }
       }
 
       if (deserializedEntity.position) {
@@ -1025,6 +1049,7 @@ export default class EntityManager {
     this._localPredictionDebug.authoritativeGroundedTransitionCount = 0;
     this._localPredictionDebug.predictedGroundedTransitionCount = 0;
     this._localPredictionState.entityId = nextEntityId;
+    this._localPredictionState.mode = undefined;
     this._localPredictionState.estimatedVerticalVelocity = 0;
     this._localPredictionState.authoritativeWalkVelocity = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
     this._localPredictionState.authoritativeRunVelocity = LOCAL_PREDICTION_DEFAULT_RUN_SPEED;
@@ -1035,6 +1060,7 @@ export default class EntityManager {
     this._localPredictionState.useAuthoritativeMovementConfig = false;
     this._localPredictionState.estimatedWalkSpeed = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
     this._localPredictionState.estimatedRunSpeed = LOCAL_PREDICTION_DEFAULT_RUN_SPEED;
+    this._localPredictionState.predictionAccumulatorS = 0;
     this._localPredictionState.supportsInputAcknowledgements = false;
     this._localPredictionState.lastAcknowledgedHadMovementInput = undefined;
     this._localPredictionState.lastAcknowledgedMovementRunning = undefined;
@@ -1047,6 +1073,8 @@ export default class EntityManager {
     this._localPredictionState.hasAuthoritativeRotation = false;
     this._localPredictionState.lastAuthoritativePositionServerTick = 0;
     this._localPredictionState.lastAuthoritativeRotationServerTick = 0;
+    this._localPredictionState.authoritativeCustomState.length = 0;
+    this._localPredictionState.predictedCustomState.length = 0;
     this._localPredictionState.controllerState.authoritativeMotionBasisVelocity.set(0, 0, 0);
     this._localPredictionState.controllerState.predictedMotionBasisVelocity.set(0, 0, 0);
     this._localPredictionState.controllerState.authoritativeCanJump = DEFAULT_LOCAL_PREDICTION_CONTROLLER_FLAGS.canJump;
@@ -1085,11 +1113,14 @@ export default class EntityManager {
     this._syncLocalPredictionStats();
   }
 
-  private _bindLocalPredictionToEntity(entity: Entity): void {
+  private _bindLocalPredictionToEntity(entity: Entity, mode: LocalPredictionMode): void {
     const isFirstOwnedBinding = this._localPredictionState.entityId === undefined;
     let bindingChanged = false;
 
-    if (this._localPredictionState.entityId !== entity.id) {
+    if (
+      this._localPredictionState.entityId !== entity.id ||
+      this._localPredictionState.mode !== mode
+    ) {
       if (!isFirstOwnedBinding) {
         this._resetLocalPredictionState(entity.id);
       } else {
@@ -1103,6 +1134,8 @@ export default class EntityManager {
 
       bindingChanged = true;
     }
+
+    this._localPredictionState.mode = mode;
 
     if (
       !bindingChanged &&
@@ -1123,8 +1156,14 @@ export default class EntityManager {
     this._syncLocalPredictionStats();
   }
 
-  private _hasLocalPredictionSupport(deserializedEntity: DeserializedEntity): boolean {
-    return (
+  private _resolveLocalPredictionMode(
+    deserializedEntity: DeserializedEntity,
+  ): LocalPredictionMode | undefined {
+    if (deserializedEntity.localPredictionMode) {
+      return deserializedEntity.localPredictionMode;
+    }
+
+    if (
       deserializedEntity.localPredictionControllerFlags !== undefined ||
       deserializedEntity.localPredictionFastMovementByDefault !== undefined ||
       deserializedEntity.localPredictionFlags !== undefined ||
@@ -1138,7 +1177,11 @@ export default class EntityManager {
       deserializedEntity.localPredictionSwimUpwardCooldownRemainingMs !== undefined ||
       deserializedEntity.localPredictionSwimUpwardVelocity !== undefined ||
       deserializedEntity.localPredictionWalkVelocity !== undefined
-    );
+    ) {
+      return 'default';
+    }
+
+    return undefined;
   }
 
   private _setLocalRollbackPredictedInputs(
@@ -1220,6 +1263,9 @@ export default class EntityManager {
         joystickDirection: command.joystickDirection,
         previousRollbackInputs,
         rollbackInputs: command.rollbackInputs,
+        predictedPosition: this._localPredictionState.predictedPosition,
+        predictedRotation: this._localPredictionState.predictedRotation,
+        predictionState: this._localPredictionState.predictedCustomState,
         grounded: controllerState.predictedGrounded,
         swimming: controllerState.predictedSwimming,
         motionBasisVelocity,
@@ -1228,8 +1274,32 @@ export default class EntityManager {
           motionBasisVelocity.y += delta.y;
           motionBasisVelocity.z += delta.z;
         },
+        setGrounded: (grounded) => {
+          this._setPredictedGrounded(grounded);
+        },
+        setSwimming: (swimming) => {
+          controllerState.predictedSwimming = swimming;
+        },
       },
     );
+  }
+
+  private _setLocalAuthoritativeCustomPredictionState(
+    customState: readonly number[],
+  ): void {
+    this._localPredictionState.authoritativeCustomState.splice(
+      0,
+      this._localPredictionState.authoritativeCustomState.length,
+      ...customState,
+    );
+
+    if (this._localPredictionState.commandBufferCount === 0) {
+      this._localPredictionState.predictedCustomState.splice(
+        0,
+        this._localPredictionState.predictedCustomState.length,
+        ...customState,
+      );
+    }
   }
 
   private _setLocalAuthoritativeControllerState(deserializedEntity: DeserializedEntity): void {
@@ -1453,6 +1523,11 @@ export default class EntityManager {
       this._localPredictionState.predictedRotation.copy(this._localPredictionState.authoritativeRotation);
     }
 
+    this._localPredictionState.predictedCustomState.splice(
+      0,
+      this._localPredictionState.predictedCustomState.length,
+      ...this._localPredictionState.authoritativeCustomState,
+    );
     this._syncPredictedControllerStateFromAuthoritative();
     const predictedEntity = this.localPredictedEntity;
 
@@ -1505,24 +1580,35 @@ export default class EntityManager {
     while (remainingDeltaS > 0 && substeps < LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND) {
       const stepDeltaS = Math.min(LOCAL_PREDICTION_SUBSTEP_DELTA_S, remainingDeltaS);
 
-      this._stepPredictedMovement(
-        entity,
-        command,
-        stepPreviousRollbackInputs,
-        true,
-        substeps === 0,
-        stepDeltaS,
-        command.yaw,
-        command.joystickDirection,
-        command.w,
-        command.a,
-        command.s,
-        command.d,
-        command.sp,
-        command.sh,
-        command.c,
-      );
-      this._emitLocalPredictionStep(command, stepPreviousRollbackInputs, true, stepDeltaS, substeps === 0);
+      if (this._localPredictionState.mode === 'custom') {
+        this._stepCustomPredictedReplay(
+          entity,
+          command,
+          stepPreviousRollbackInputs,
+          true,
+          substeps === 0,
+          stepDeltaS,
+        );
+      } else {
+        this._stepPredictedMovement(
+          entity,
+          command,
+          stepPreviousRollbackInputs,
+          true,
+          substeps === 0,
+          stepDeltaS,
+          command.yaw,
+          command.joystickDirection,
+          command.w,
+          command.a,
+          command.s,
+          command.d,
+          command.sp,
+          command.sh,
+          command.c,
+        );
+        this._emitLocalPredictionStep(command, stepPreviousRollbackInputs, true, stepDeltaS, substeps === 0);
+      }
 
       remainingDeltaS -= stepDeltaS;
       substeps++;
@@ -1598,72 +1684,95 @@ export default class EntityManager {
       this._localPredictionState.hasPredictedTransform = true;
     }
 
-    const clampedDeltaS = Math.min(deltaTimeS, LOCAL_PREDICTION_MAX_FRAME_DELTA_S);
+    const clampedFrameDeltaS = Math.min(deltaTimeS, LOCAL_PREDICTION_MAX_FRAME_DELTA_S);
+    const predictionStepS = Math.min(
+      Math.max(this._localPredictionState.worldTimestepS, LOCAL_PREDICTION_MIN_COMMAND_DELTA_S),
+      LOCAL_PREDICTION_MAX_COMMAND_DELTA_S,
+    );
+    this._localPredictionState.predictionAccumulatorS = Math.min(
+      this._localPredictionState.predictionAccumulatorS + clampedFrameDeltaS,
+      predictionStepS * LOCAL_PREDICTION_MAX_SUBSTEPS,
+    );
     const inputState = this._game.inputManager.inputState;
     const previousRollbackInputs = this._getLatestPredictedRollbackInputSnapshot();
-    const localCommand: LocalPredictionCommand = {
-      sequenceNumber: -1,
-      deltaTimeS: clampedDeltaS,
-      yaw: this._game.camera.gameCameraYaw,
-      joystickDirection: this._game.inputManager.joystickDirection,
-      rollbackInputs: this._createCurrentRollbackPredictedInputSnapshot(),
-      w: !!inputState.w,
-      a: !!inputState.a,
-      s: !!inputState.s,
-      d: !!inputState.d,
-      sp: !!inputState.sp,
-      sh: !!inputState.sh,
-      c: !!inputState.c,
-    };
+    const currentRollbackInputs = this._createCurrentRollbackPredictedInputSnapshot();
     const hasLocalRollbackIntent = hasActiveRollbackPredictedInputSnapshot(
       this._localRollbackPredictedInputSet,
-      localCommand.rollbackInputs,
+      currentRollbackInputs,
     );
     let isActivelyMoving = false;
-    let remainingDeltaS = clampedDeltaS;
     let substeps = 0;
     let stepPreviousRollbackInputs = previousRollbackInputs;
 
-    while (remainingDeltaS > 0 && substeps < LOCAL_PREDICTION_MAX_SUBSTEPS) {
-      const stepDeltaS = Math.min(LOCAL_PREDICTION_SUBSTEP_DELTA_S, remainingDeltaS);
+    while (
+      this._localPredictionState.predictionAccumulatorS >= predictionStepS &&
+      substeps < LOCAL_PREDICTION_MAX_SUBSTEPS
+    ) {
+      const localCommand: LocalPredictionCommand = {
+        sequenceNumber: -1,
+        deltaTimeS: predictionStepS,
+        yaw: this._game.camera.gameCameraYaw,
+        joystickDirection: this._game.inputManager.joystickDirection,
+        rollbackInputs: { ...currentRollbackInputs },
+        w: !!inputState.w,
+        a: !!inputState.a,
+        s: !!inputState.s,
+        d: !!inputState.d,
+        sp: !!inputState.sp,
+        sh: !!inputState.sh,
+        c: !!inputState.c,
+      };
 
-      isActivelyMoving = this._stepPredictedMovement(
-        entity,
-        localCommand,
-        stepPreviousRollbackInputs,
-        false,
-        substeps === 0,
-        stepDeltaS,
-        localCommand.yaw,
-        localCommand.joystickDirection,
-        localCommand.w,
-        localCommand.a,
-        localCommand.s,
-        localCommand.d,
-        localCommand.sp,
-        localCommand.sh,
-        localCommand.c,
-      ) || isActivelyMoving;
-      this._emitLocalPredictionStep(
-        localCommand,
-        stepPreviousRollbackInputs,
-        false,
-        stepDeltaS,
-        substeps === 0,
-      );
+      if (this._localPredictionState.mode === 'custom') {
+        isActivelyMoving = this._stepCustomPredictedReplay(
+          entity,
+          localCommand,
+          stepPreviousRollbackInputs,
+          false,
+          substeps === 0,
+          predictionStepS,
+        ) || isActivelyMoving;
+      } else {
+        isActivelyMoving = this._stepPredictedMovement(
+          entity,
+          localCommand,
+          stepPreviousRollbackInputs,
+          false,
+          substeps === 0,
+          predictionStepS,
+          localCommand.yaw,
+          localCommand.joystickDirection,
+          localCommand.w,
+          localCommand.a,
+          localCommand.s,
+          localCommand.d,
+          localCommand.sp,
+          localCommand.sh,
+          localCommand.c,
+        ) || isActivelyMoving;
+        this._emitLocalPredictionStep(
+          localCommand,
+          stepPreviousRollbackInputs,
+          false,
+          predictionStepS,
+          substeps === 0,
+        );
+      }
 
-      remainingDeltaS -= stepDeltaS;
+      if (hasLocalRollbackIntent) {
+        this._localPredictionState.liveCommandBuffer.push(localCommand);
+      }
+
+      this._localPredictionState.predictionAccumulatorS -= predictionStepS;
       substeps++;
       stepPreviousRollbackInputs = localCommand.rollbackInputs;
     }
 
-    if (hasLocalRollbackIntent) {
-      this._localPredictionState.liveCommandBuffer.push(localCommand);
-    }
-
     // True CSP depends on input acknowledgements, so keep authoritative
     // reconciliation paused while any locally issued commands remain pending.
-    const shouldContinuouslyReconcile = this._localPredictionState.commandBufferCount === 0;
+    const shouldContinuouslyReconcile =
+      this._localPredictionState.commandBufferCount === 0 &&
+      this._localPredictionState.liveCommandBuffer.length === 0;
 
     this._localPredictionDebug.lastReconcileMode = shouldContinuouslyReconcile ? 'none' : 'buffered';
 
@@ -1680,7 +1789,7 @@ export default class EntityManager {
         }
 
         this._localPredictionDebug.lastReconcileMode =
-          this._reconcileLocalPrediction(isActivelyMoving, clampedDeltaS);
+          this._reconcileLocalPrediction(isActivelyMoving, clampedFrameDeltaS);
       } else {
         this._localPredictionDebug.deferredActiveReconcileCount++;
         this._localPredictionDebug.lastReconcileMode = 'deferred';
@@ -1690,6 +1799,61 @@ export default class EntityManager {
     entity.applyClientPredictedTransform(
       this._localPredictionState.predictedPosition,
       this._localPredictionState.predictedRotation,
+    );
+  }
+
+  private _stepCustomPredictedReplay(
+    entity: Entity | undefined,
+    command: Pick<LocalPredictionCommand, 'sequenceNumber' | 'yaw' | 'joystickDirection' | 'rollbackInputs'>,
+    previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+    isReplay: boolean,
+    isFirstSubstep: boolean,
+    deltaTimeS: number,
+  ): boolean {
+    const predictedPosition = this._localPredictionState.predictedPosition;
+    const predictedRotation = this._localPredictionState.predictedRotation;
+    const controllerState = this._localPredictionState.controllerState;
+    const previousPositionX = predictedPosition.x;
+    const previousPositionY = predictedPosition.y;
+    const previousPositionZ = predictedPosition.z;
+    const previousRotationX = predictedRotation.x;
+    const previousRotationY = predictedRotation.y;
+    const previousRotationZ = predictedRotation.z;
+    const previousRotationW = predictedRotation.w;
+    const previousGrounded = controllerState.predictedGrounded;
+    const previousSwimming = controllerState.predictedSwimming;
+    const motionBasisVelocity = controllerState.predictedMotionBasisVelocity;
+    const previousMotionBasisVelocityX = motionBasisVelocity.x;
+    const previousMotionBasisVelocityY = motionBasisVelocity.y;
+    const previousMotionBasisVelocityZ = motionBasisVelocity.z;
+    const predictedCustomState = this._localPredictionState.predictedCustomState;
+    const previousCustomStateLength = predictedCustomState.length;
+    const previousCustomState = predictedCustomState.slice();
+
+    this._emitLocalRollbackPredictionStep(
+      entity,
+      command,
+      previousRollbackInputs,
+      isReplay,
+      deltaTimeS,
+      isFirstSubstep,
+    );
+
+    return (
+      predictedPosition.x !== previousPositionX ||
+      predictedPosition.y !== previousPositionY ||
+      predictedPosition.z !== previousPositionZ ||
+      predictedRotation.x !== previousRotationX ||
+      predictedRotation.y !== previousRotationY ||
+      predictedRotation.z !== previousRotationZ ||
+      predictedRotation.w !== previousRotationW ||
+      controllerState.predictedGrounded !== previousGrounded ||
+      controllerState.predictedSwimming !== previousSwimming ||
+      motionBasisVelocity.x !== previousMotionBasisVelocityX ||
+      motionBasisVelocity.y !== previousMotionBasisVelocityY ||
+      motionBasisVelocity.z !== previousMotionBasisVelocityZ ||
+      predictedCustomState.length !== previousCustomStateLength ||
+      predictedCustomState.some((value, index) => value !== previousCustomState[index])
     );
   }
 

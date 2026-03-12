@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import protocol from '@hytopia.com/server-protocol';
 import NetworkSynchronizer from '@/networking/NetworkSynchronizer';
 import PlayerManager from '@/players/PlayerManager';
+import BaseEntityController from '@/worlds/entities/controllers/BaseEntityController';
 import DefaultPlayerEntityController from '@/worlds/entities/controllers/DefaultPlayerEntityController';
 
 const createHarness = () => {
@@ -47,6 +48,12 @@ const createHarness = () => {
   return { perPlayerEntitySyncs, playerEntity, synchronizer };
 };
 
+class CustomPredictionController extends BaseEntityController {
+  public override localPredictionMode = 'custom' as const;
+  public override localPredictionCustomState = [ 3, 9 ] as const;
+  public override rollbackPredictedInputs = [ 'w', 'q' ] as const;
+}
+
 test('owner transform sync keeps prediction metadata paired with authoritative transform', () => {
   const { perPlayerEntitySyncs, playerEntity, synchronizer } = createHarness();
 
@@ -89,6 +96,28 @@ test('owner prediction transform updates remain eligible for unreliable delivery
   (synchronizer as any)._queueOwnerPlayerEntityPredictionSync(playerEntity, true);
 
   expect((synchronizer as any)._isReliableEntitySync(perPlayerEntitySyncs())).toBe(false);
+});
+
+test('custom player controllers still sync owner prediction mode and rollback metadata', () => {
+  const { perPlayerEntitySyncs, playerEntity, synchronizer } = createHarness();
+
+  playerEntity.controller = new CustomPredictionController();
+  playerEntity.player.rollbackPredictedInputMaskLow = 1;
+  playerEntity.player.rollbackPredictedInputMaskHigh = 0;
+
+  (synchronizer as any)._queueOwnerPlayerEntityPredictionSync(playerEntity, true);
+
+  expect(perPlayerEntitySyncs()).toEqual(expect.objectContaining({
+    aq: 77,
+    i: 501,
+    p: [ 1, 2, 3 ],
+    pm: 2,
+    ps: [ 3, 9 ],
+    r: [ 0, 0, 0, 1 ],
+    rl: 1,
+  }));
+  expect(perPlayerEntitySyncs()?.pc).toBeUndefined();
+  expect(perPlayerEntitySyncs()?.pf).toBeUndefined();
 });
 
 test('owner prediction updates are isolated into a dedicated unreliable packet batch', () => {

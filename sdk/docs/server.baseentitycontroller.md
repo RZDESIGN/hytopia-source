@@ -29,6 +29,88 @@ This class is an EventRouter, and instances of it emit events with payloads list
 
 \*\*Category:\*\* Controllers
 
+## Properties
+
+<table><thead><tr><th>
+
+Property
+
+
+</th><th>
+
+Modifiers
+
+
+</th><th>
+
+Type
+
+
+</th><th>
+
+Description
+
+
+</th></tr></thead>
+<tbody><tr><td>
+
+[localPredictionCustomState?](./server.baseentitycontroller.localpredictioncustomstate.md)
+
+
+</td><td>
+
+
+</td><td>
+
+readonly number\[\]
+
+
+</td><td>
+
+_(Optional)_ Optional custom owner-only prediction state for custom motors.
+
+
+</td></tr>
+<tr><td>
+
+[localPredictionMode?](./server.baseentitycontroller.localpredictionmode.md)
+
+
+</td><td>
+
+
+</td><td>
+
+[LocalPredictionMode](./server.localpredictionmode.md)
+
+
+</td><td>
+
+_(Optional)_ Owner-only local prediction mode for this controller.
+
+
+</td></tr>
+<tr><td>
+
+[rollbackPredictedInputs?](./server.baseentitycontroller.rollbackpredictedinputs.md)
+
+
+</td><td>
+
+
+</td><td>
+
+readonly [RollbackPredictableInput](./server.rollbackpredictableinput.md)<!-- -->\[\]
+
+
+</td><td>
+
+_(Optional)_ Raw input keys that should be sequenced with rollback prediction.
+
+
+</td></tr>
+</tbody></table>
+
 ## Methods
 
 <table><thead><tr><th>

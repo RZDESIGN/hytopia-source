@@ -2397,6 +2397,15 @@ An intersection result.
 </td></tr>
 <tr><td>
 
+[LocalPredictionMode](./server.localpredictionmode.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 [ModelBoundingBox](./server.modelboundingbox.md)
 
 

@@ -96,6 +96,25 @@ Emitted when an entity is detached from the controller.
 </td></tr>
 <tr><td>
 
+["BASE\_ENTITY\_CONTROLLER.ROLLBACK\_PREDICTION\_STEP"](./server.baseentitycontrollereventpayloads._base_entity_controller.rollback_prediction_step_.md)
+
+
+</td><td>
+
+
+</td><td>
+
+{ entity: [PlayerEntity](./server.playerentity.md)<!-- -->; input: [PlayerInput](./server.playerinput.md)<!-- -->; cameraOrientation: [PlayerCameraOrientation](./server.playercameraorientation.md)<!-- -->; sequenceNumber: number; deltaTimeMs: number; deltaTimeS: number; isReplay: false; isFirstSubstep: true; yaw: number; joystickDirection: number \| null; rollbackInputs: Readonly&lt;[RollbackPredictedInputSnapshot](./server.rollbackpredictedinputsnapshot.md)<!-- -->&gt;; previousRollbackInputs: Readonly&lt;[RollbackPredictedInputSnapshot](./server.rollbackpredictedinputsnapshot.md)<!-- -->&gt;; }
+
+
+</td><td>
+
+Emitted for rollback-predicted player input steps.
+
+
+</td></tr>
+<tr><td>
+
 ["BASE\_ENTITY\_CONTROLLER.SPAWN"](./server.baseentitycontrollereventpayloads._base_entity_controller.spawn_.md)
 
 

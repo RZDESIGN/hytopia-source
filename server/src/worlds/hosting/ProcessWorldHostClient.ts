@@ -30,6 +30,7 @@ import type {
 import PlayerEntity from '@/worlds/entities/PlayerEntity';
 import DefaultPlayerEntityController from '@/worlds/entities/controllers/DefaultPlayerEntityController';
 import { encodeLocalPredictionControllerFlags } from '@gameplay-shared/LocalPredictionControllerFlags';
+import { encodeLocalPredictionMode } from '@gameplay-shared/LocalPredictionMode';
 import type {
   GatewayToWorldHostMessage,
   HostedPlayerDetachReason,
@@ -827,6 +828,8 @@ export default class ProcessWorldHostClient implements WorldHostClient {
       ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
+      pm?: number;
+      ps?: number[];
       pf?: number;
       py?: number;
       rh?: number;
@@ -844,6 +847,13 @@ export default class ProcessWorldHostClient implements WorldHostClient {
     entitySync.rh = playerEntity.player.rollbackPredictedInputMaskHigh || undefined;
 
     const controller = playerEntity.controller;
+    if (!controller) {
+      return;
+    }
+    entitySync.pm = encodeLocalPredictionMode(controller.localPredictionMode);
+    entitySync.ps = controller.localPredictionCustomState
+      ? [ ...controller.localPredictionCustomState ]
+      : undefined;
     if (!(controller instanceof DefaultPlayerEntityController)) {
       return;
     }

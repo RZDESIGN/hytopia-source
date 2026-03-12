@@ -163,6 +163,7 @@ export type {
   RollbackPredictedInputValue,
   RollbackPredictableInput,
 } from '@gameplay-shared/InputContract';
+export type { LocalPredictionMode } from '@gameplay-shared/LocalPredictionMode';
 
 // PlayerCamera
 export {

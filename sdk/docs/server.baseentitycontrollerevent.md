@@ -78,6 +78,20 @@ DETACH
 </td></tr>
 <tr><td>
 
+ROLLBACK\_PREDICTION\_STEP
+
+
+</td><td>
+
+`"BASE_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP"`
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 SPAWN
 
 

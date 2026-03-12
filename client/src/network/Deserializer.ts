@@ -4,6 +4,10 @@ import {
   decodeLocalPredictionControllerFlags,
   type LocalPredictionControllerFlags,
 } from '@gameplay-shared/LocalPredictionControllerFlags';
+import {
+  decodeLocalPredictionMode,
+  type LocalPredictionMode,
+} from '@gameplay-shared/LocalPredictionMode';
 import type { RollbackPredictableInput } from '@gameplay-shared/InputContract';
 import { decodeRollbackPredictedInputMask } from '@gameplay-shared/InputContract';
 
@@ -134,7 +138,9 @@ export type DeserializedEntity = {
   opacity?: number;
   outline?: DeserializedOutlineOptions | null;
   localPredictionControllerFlags?: LocalPredictionControllerFlags;
+  localPredictionCustomState?: readonly number[];
   localPredictionFastMovementByDefault?: boolean;
+  localPredictionMode?: LocalPredictionMode;
   parentEntityId?: number | null;
   parentNodeName?: string | null;
   localPredictionFlags?: number;
@@ -520,6 +526,8 @@ export default class Deserializer {
       ju?: number;
       js?: number;
       mv?: protocol.VectorSchema;
+      pm?: number;
+      ps?: number[];
       pf?: number;
       py?: number;
       rh?: number;
@@ -551,7 +559,9 @@ export default class Deserializer {
         'pc' in entityWithInputAck
           ? decodeLocalPredictionControllerFlags(entityWithInputAck.pc)
           : undefined,
+      localPredictionCustomState: entityWithInputAck.ps ? [ ...entityWithInputAck.ps ] : undefined,
       localPredictionFastMovementByDefault: entityWithInputAck.fd,
+      localPredictionMode: decodeLocalPredictionMode(entityWithInputAck.pm),
       parentEntityId: 'pe' in entity ? (entity.pe ?? null) : undefined,
       parentNodeName: 'pn' in entity ? (entity.pn ?? null) : undefined,
       localPredictionFlags: entityWithInputAck.pf,

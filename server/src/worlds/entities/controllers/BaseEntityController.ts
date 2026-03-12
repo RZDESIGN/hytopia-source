@@ -4,6 +4,9 @@ import type PlayerEntity from '@/worlds/entities/PlayerEntity';
 import type { PlayerInput, PredictedBlockEditBatch } from '@/players/Player';
 import type { PlayerCameraOrientation } from '@/players/PlayerCamera';
 import type {
+  LocalPredictionMode,
+} from '@gameplay-shared/LocalPredictionMode';
+import type {
   RollbackPredictedInputSnapshot,
   RollbackPredictableInput,
 } from '@gameplay-shared/InputContract';
@@ -105,6 +108,18 @@ export interface BaseEntityControllerEventPayloads {
  */
 export default abstract class BaseEntityController extends EventRouter {
   /**
+   * Owner-only local prediction mode for this controller.
+   *
+   * @remarks
+   * Leave undefined to disable engine-managed local prediction metadata sync.
+   * Use `'default'` for the built-in humanoid locomotion predictor or
+   * `'custom'` to opt into generic rollback replay for a custom motor.
+   *
+   * **Category:** Controllers
+   */
+  public localPredictionMode?: LocalPredictionMode;
+
+  /**
    * Raw input keys that should be sequenced with rollback prediction.
    *
    * @remarks
@@ -114,6 +129,19 @@ export default abstract class BaseEntityController extends EventRouter {
    * **Category:** Controllers
    */
   public rollbackPredictedInputs?: readonly RollbackPredictableInput[];
+
+  /**
+   * Optional custom owner-only prediction state for custom motors.
+   *
+   * @remarks
+   * When `localPredictionMode` is `'custom'`, this array is mirrored to the
+   * owning client and restored before rollback replay. Use it for small
+   * deterministic numeric state such as angular velocity, dash cooldown
+   * counters, grapple length, or custom grounded timers.
+   *
+   * **Category:** Controllers
+   */
+  public localPredictionCustomState?: readonly number[];
 
   /**
    * Override this method to handle the attachment of an entity

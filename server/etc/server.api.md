@@ -200,6 +200,9 @@ export abstract class BaseEntityController extends EventRouter {
     attach(entity: Entity): void;
     despawn(entity: Entity): void;
     detach(entity: Entity): void;
+    localPredictionCustomState?: readonly number[];
+    localPredictionMode?: LocalPredictionMode;
+    rollbackPredictedInputs?: readonly RollbackPredictableInput[];
     spawn(entity: Entity): void;
     tick(entity: Entity, deltaTimeMs: number): void;
     tickWithPlayerInput(entity: PlayerEntity, input: PlayerInput, cameraOrientation: PlayerCameraOrientation, deltaTimeMs: number): void;
@@ -213,6 +216,8 @@ export enum BaseEntityControllerEvent {
     DESPAWN = "BASE_ENTITY_CONTROLLER.DESPAWN",
     // (undocumented)
     DETACH = "BASE_ENTITY_CONTROLLER.DETACH",
+    // (undocumented)
+    ROLLBACK_PREDICTION_STEP = "BASE_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP",
     // (undocumented)
     SPAWN = "BASE_ENTITY_CONTROLLER.SPAWN",
     // (undocumented)
@@ -231,6 +236,20 @@ export interface BaseEntityControllerEventPayloads {
     };
     [BaseEntityControllerEvent.DETACH]: {
         entity: Entity;
+    };
+    [BaseEntityControllerEvent.ROLLBACK_PREDICTION_STEP]: {
+        entity: PlayerEntity;
+        input: PlayerInput;
+        cameraOrientation: PlayerCameraOrientation;
+        sequenceNumber: number;
+        deltaTimeMs: number;
+        deltaTimeS: number;
+        isReplay: false;
+        isFirstSubstep: true;
+        yaw: number;
+        joystickDirection: number | null;
+        rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+        previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
     };
     [BaseEntityControllerEvent.SPAWN]: {
         entity: Entity;
@@ -959,6 +978,7 @@ export class DefaultPlayerEntityController extends BaseEntityController {
     jumpVelocity: number;
     get localPredictionFastMovementByDefault(): boolean;
     get localPredictionJustSubmergedRemainingMs(): number;
+    localPredictionMode: LocalPredictionMode;
     get localPredictionMotionBasisVelocity(): Vector3Like;
     get localPredictionMovementReferenceYaw(): number | undefined;
     get localPredictionSwimUpwardCooldownRemainingMs(): number;
@@ -1750,6 +1770,9 @@ export interface KinematicVelocityRigidBodyOptions extends BaseRigidBodyOptions 
     // (undocumented)
     type: RigidBodyType.KINEMATIC_VELOCITY;
 }
+
+// @public (undocumented)
+export type LocalPredictionMode = 'default' | 'custom';
 
 // @public
 export class Matrix2 extends Float32Array {

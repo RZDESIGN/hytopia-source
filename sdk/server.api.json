@@ -3651,6 +3651,106 @@
               "name": "detach"
             },
             {
+              "kind": "Property",
+              "canonicalReference": "server!BaseEntityController#localPredictionCustomState:member",
+              "docComment": "/**\n * Optional custom owner-only prediction state for custom motors.\n *\n * @remarks\n *\n * When `localPredictionMode` is `'custom'`, this array is mirrored to the owning client and restored before rollback replay. Use it for small deterministic numeric state such as angular velocity, dash cooldown counters, grapple length, or custom grounded timers.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "localPredictionCustomState?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "readonly number[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "localPredictionCustomState",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!BaseEntityController#localPredictionMode:member",
+              "docComment": "/**\n * Owner-only local prediction mode for this controller.\n *\n * @remarks\n *\n * Leave undefined to disable engine-managed local prediction metadata sync. Use `'default'` for the built-in humanoid locomotion predictor or `'custom'` to opt into generic rollback replay for a custom motor.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "localPredictionMode?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "LocalPredictionMode",
+                  "canonicalReference": "server!LocalPredictionMode:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "localPredictionMode",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!BaseEntityController#rollbackPredictedInputs:member",
+              "docComment": "/**\n * Raw input keys that should be sequenced with rollback prediction.\n *\n * @remarks\n *\n * Player-owned controllers can override this to opt custom keys into the rollback queue without changing the game-facing input API.\n *\n * **Category:** Controllers\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "rollbackPredictedInputs?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "readonly "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictableInput",
+                  "canonicalReference": "server!RollbackPredictableInput:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "rollbackPredictedInputs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 4
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
               "kind": "Method",
               "canonicalReference": "server!BaseEntityController#spawn:member(1)",
               "docComment": "/**\n * Override this method to handle the spawning of an entity to your entity controller.\n *\n * @remarks\n *\n * **Called by:** `Entity.spawn()` after the entity is added to the physics simulation.\n *\n * **Super call:** Call `super.spawn(entity)` to emit the `SPAWN` event.\n *\n * @param entity - The entity being spawned.\n *\n * **Category:** Controllers\n */\n",
@@ -3950,6 +4050,27 @@
             },
             {
               "kind": "EnumMember",
+              "canonicalReference": "server!BaseEntityControllerEvent.ROLLBACK_PREDICTION_STEP:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "ROLLBACK_PREDICTION_STEP = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"BASE_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "ROLLBACK_PREDICTION_STEP"
+            },
+            {
+              "kind": "EnumMember",
               "canonicalReference": "server!BaseEntityControllerEvent.SPAWN:member",
               "docComment": "",
               "excerptTokens": [
@@ -4161,6 +4282,105 @@
               "propertyTypeTokenRange": {
                 "startIndex": 3,
                 "endIndex": 6
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!BaseEntityControllerEventPayloads#\"BASE_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP\":member",
+              "docComment": "/**\n * Emitted for rollback-predicted player input steps.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "["
+                },
+                {
+                  "kind": "Reference",
+                  "text": "BaseEntityControllerEvent.ROLLBACK_PREDICTION_STEP",
+                  "canonicalReference": "server!BaseEntityControllerEvent.ROLLBACK_PREDICTION_STEP:member"
+                },
+                {
+                  "kind": "Content",
+                  "text": "]: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "{\n        entity: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerEntity",
+                  "canonicalReference": "server!PlayerEntity:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n        input: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerInput",
+                  "canonicalReference": "server!PlayerInput:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n        cameraOrientation: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "PlayerCameraOrientation",
+                  "canonicalReference": "server!PlayerCameraOrientation:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n        sequenceNumber: number;\n        deltaTimeMs: number;\n        deltaTimeS: number;\n        isReplay: false;\n        isFirstSubstep: true;\n        yaw: number;\n        joystickDirection: number | null;\n        rollbackInputs: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Readonly",
+                  "canonicalReference": "!Readonly:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictedInputSnapshot",
+                  "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ">;\n        previousRollbackInputs: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Readonly",
+                  "canonicalReference": "!Readonly:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
+                  "text": "RollbackPredictedInputSnapshot",
+                  "canonicalReference": "server!RollbackPredictedInputSnapshot:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ">;\n    }"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "\"BASE_ENTITY_CONTROLLER.ROLLBACK_PREDICTION_STEP\"",
+              "propertyTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 18
               }
             },
             {
@@ -13607,6 +13827,37 @@
               "isOptional": false,
               "releaseTag": "Public",
               "name": "localPredictionJustSubmergedRemainingMs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!DefaultPlayerEntityController#localPredictionMode:member",
+              "docComment": "/**\n * Local prediction mode for the built-in humanoid locomotion controller.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "localPredictionMode: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "LocalPredictionMode",
+                  "canonicalReference": "server!LocalPredictionMode:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "localPredictionMode",
               "propertyTypeTokenRange": {
                 "startIndex": 1,
                 "endIndex": 2
@@ -28471,6 +28722,32 @@
               "endIndex": 2
             }
           ]
+        },
+        {
+          "kind": "TypeAlias",
+          "canonicalReference": "server!LocalPredictionMode:type",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export type LocalPredictionMode = "
+            },
+            {
+              "kind": "Content",
+              "text": "'default' | 'custom'"
+            },
+            {
+              "kind": "Content",
+              "text": ";"
+            }
+          ],
+          "fileUrlPath": "src/shared/gameplay/LocalPredictionMode.ts",
+          "releaseTag": "Public",
+          "name": "LocalPredictionMode",
+          "typeTokenRange": {
+            "startIndex": 1,
+            "endIndex": 2
+          }
         },
         {
           "kind": "Class",

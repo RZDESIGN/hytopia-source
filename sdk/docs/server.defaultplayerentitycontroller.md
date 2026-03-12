@@ -477,6 +477,25 @@ Remaining just-submerged sinking time for owner prediction, in milliseconds.
 </td></tr>
 <tr><td>
 
+[localPredictionMode](./server.defaultplayerentitycontroller.localpredictionmode.md)
+
+
+</td><td>
+
+
+</td><td>
+
+[LocalPredictionMode](./server.localpredictionmode.md)
+
+
+</td><td>
+
+Local prediction mode for the built-in humanoid locomotion controller.
+
+
+</td></tr>
+<tr><td>
+
 [localPredictionMotionBasisVelocity](./server.defaultplayerentitycontroller.localpredictionmotionbasisvelocity.md)
 
 

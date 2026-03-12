@@ -34,6 +34,8 @@ export type EntitySchema = {
   ol?: OutlineSchema;             // outline options
   p?: VectorSchema;               // position
   pe?: number;                    // parent entity id
+  pm?: number;                    // local prediction mode (owner-only)
+  ps?: number[];                  // local prediction custom numeric state (owner-only)
   pf?: number;                    // local prediction flags bitmask (owner-only)
   pi?: number;                    // position interpolation time in milliseconds
   py?: number;                    // local prediction movement reference yaw in radians (owner-only)
@@ -79,6 +81,8 @@ export const entitySchema: JSONSchemaType<EntitySchema> = {
     p: { ...vectorSchema, nullable: true },
     pi: { type: 'number', nullable: true },
     pe: { type: 'number', nullable: true },
+    pm: { type: 'number', nullable: true },
+    ps: { type: 'array', items: { type: 'number' }, nullable: true },
     pf: { type: 'number', nullable: true },
     py: { type: 'number', nullable: true },
     rh: { type: 'number', nullable: true },
