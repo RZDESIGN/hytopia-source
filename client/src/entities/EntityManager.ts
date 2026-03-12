@@ -1293,7 +1293,7 @@ export default class EntityManager {
       ...customState,
     );
 
-    if (this._localPredictionState.commandBufferCount === 0) {
+    if (!this._hasPendingLocalPredictionCommands()) {
       this._localPredictionState.predictedCustomState.splice(
         0,
         this._localPredictionState.predictedCustomState.length,
@@ -1370,7 +1370,7 @@ export default class EntityManager {
     this._localPredictionState.estimatedWalkSpeed = this._localPredictionState.authoritativeWalkVelocity;
     this._localPredictionState.estimatedRunSpeed = this._localPredictionState.authoritativeRunVelocity;
 
-    if (this._localPredictionState.commandBufferCount === 0) {
+    if (!this._hasPendingLocalPredictionCommands()) {
       this._syncPredictedControllerStateFromAuthoritative();
     }
   }
@@ -1488,7 +1488,7 @@ export default class EntityManager {
 
     return (
       this._localPredictionState.supportsInputAcknowledgements &&
-      this._localPredictionState.commandBufferCount > 0
+      this._hasPendingLocalPredictionCommands()
     );
   }
 
@@ -1875,7 +1875,7 @@ export default class EntityManager {
     c: boolean,
   ): boolean {
     const controllerState = this._localPredictionState.controllerState;
-    if (this._localPredictionState.commandBufferCount === 0) {
+    if (!this._hasPendingLocalPredictionCommands()) {
       this._syncPredictedControllerStateFromAuthoritative();
     }
     controllerState.predictedGroundGraceRemainingS = Math.max(
@@ -2523,13 +2523,22 @@ export default class EntityManager {
     return reconcileMode;
   }
 
+  private _hasPendingLocalPredictionCommands(): boolean {
+    return (
+      this._localPredictionState.commandBufferCount > 0 ||
+      this._localPredictionState.liveCommandBuffer.length > 0
+    );
+  }
+
   private _syncLocalPredictionStats(
     lastReplayCommandCount?: number,
     lastReplaySubstepCount?: number,
   ): void {
     LocalPredictionStats.entityId = this._localPredictionState.entityId ?? -1;
     LocalPredictionStats.supportsInputAcknowledgements = this._localPredictionState.supportsInputAcknowledgements;
-    LocalPredictionStats.bufferedCommandCount = this._localPredictionState.commandBufferCount;
+    LocalPredictionStats.bufferedCommandCount =
+      this._localPredictionState.commandBufferCount +
+      this._localPredictionState.liveCommandBuffer.length;
     LocalPredictionStats.lastAcknowledgedInputSequenceNumber = this._localPredictionState.lastAcknowledgedInputSequenceNumber;
     LocalPredictionStats.lastReconcileMode = this._localPredictionDebug.lastReconcileMode;
     LocalPredictionStats.softReconcileCount = this._localPredictionDebug.softReconcileCount;
