@@ -39,7 +39,10 @@ import type { RaycastHit } from '@/worlds/physics/Simulation';
  */
 export const SUPPORTED_INPUTS = SHARED_SUPPORTED_INPUTS;
 
-const MAX_QUEUED_SEQUENCED_MOVEMENT_COMMANDS = 64;
+// Allow up to 5 seconds of queued inputs at 60Hz. If the server has a large
+// physics hitch (e.g. mass block updates), we do NOT want to drop inputs
+// because that causes massive rubber-banding for the client.
+const MAX_QUEUED_SEQUENCED_MOVEMENT_COMMANDS = 300;
 const MAX_PREDICTED_BLOCK_EDITS_PER_BATCH = 64;
 const MAX_QUEUED_PREDICTED_BLOCK_EDIT_BATCHES = 64;
 const MAX_QUEUED_PREDICTED_BLOCK_EDITS = 256;
@@ -810,15 +813,14 @@ export default class Player extends EventRouter implements protocol.Serializable
       return;
     }
 
-    // Drain up to MAX_INPUT_DRAIN_PER_TICK queued commands so the server
-    // catches up faster after a brief hitch.  Only the last command's
-    // input state is applied – intermediate frames are skipped since the
-    // server physics doesn't simulate each client input tick individually.
-    const MAX_INPUT_DRAIN_PER_TICK = 3;
-    const commandsToDrain = Math.min(
-      this._queuedSequencedMovementInputs.length,
-      MAX_INPUT_DRAIN_PER_TICK,
-    );
+    // Drain queued commands so the server catches up faster after a brief hitch.
+    // Scale the drain rate dynamically — if the server lagged for a full second
+    // (60 inputs), we drain 6 per tick to catch up over 10 ticks.
+    // Only the last command's input state is applied – intermediate frames
+    // are skipped since the server physics doesn't simulate each tick individually.
+    const queueLength = this._queuedSequencedMovementInputs.length;
+    const MAX_INPUT_DRAIN_PER_TICK = Math.max(3, Math.ceil(queueLength / 10));
+    const commandsToDrain = Math.min(queueLength, MAX_INPUT_DRAIN_PER_TICK);
 
     let command!: SequencedMovementInputCommand;
     for (let ci = 0; ci < commandsToDrain; ci++) {
