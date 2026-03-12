@@ -23,26 +23,33 @@ export const LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S = 1 / 8;
 export const LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND = 12;
 
 // ── Horizontal reconciliation ────────────────────────────────────────
-export const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.18 * 0.18;
+// Widen the moving dead zone so the steady-state 1-command-ahead error
+// (~0.13 units, errSq~0.017) sits comfortably inside it. This prevents
+// the reconciler from oscillating between correction/no-correction.
+export const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.25 * 0.25;
 export const LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.08 * 0.08;
 export const LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ = 2.5 * 2.5;
-export const LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE = 10;
+export const LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE = 6;
 export const LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE = 16;
 
 // ── Vertical reconciliation ──────────────────────────────────────────
-export const LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE = 0.03;
+// Widen the moving vertical dead zone to absorb typical jump/landing
+// prediction discrepancies (0.03-0.2 units).
+export const LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE = 0.08;
 export const LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE = 0.02;
 export const LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE = 2.5;
-export const LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE = 18;
+export const LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE = 10;
 export const LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE = 26;
 export const LOCAL_PREDICTION_VERTICAL_VELOCITY_ADAPT_RATE = 0.35;
 export const LOCAL_PREDICTION_VERTICAL_VELOCITY_REJECT_THRESHOLD = 80;
 
 // ── Rotation reconciliation ──────────────────────────────────────────
-export const LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE = 0.5;
+// Widen the moving rotation dead zone and slow correction rate for
+// smoother FPS camera/character rotation. 0.8 rad ≈ 46° dead zone.
+export const LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE = 0.8;
 export const LOCAL_PREDICTION_IDLE_ROTATION_ERROR_DEAD_ZONE = 0.05;
 export const LOCAL_PREDICTION_ROTATION_SNAP_ANGLE = 1.2;
-export const LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE = 4;
+export const LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE = 2.5;
 export const LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE = 12;
 
 // ── Swimming ─────────────────────────────────────────────────────────
