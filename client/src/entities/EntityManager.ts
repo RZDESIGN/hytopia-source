@@ -128,7 +128,7 @@ const LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ = 2.5 * 2.5;
 const LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE = 10;
 const LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE = 16;
 const LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE = 0.03;
-const LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE = 0.01;
+const LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE = 0.02;
 const LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE = 2.5;
 const LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE = 18;
 const LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE = 26;
@@ -153,7 +153,7 @@ const LOCAL_PREDICTION_MAX_FOOT_OFFSET = 0.8;
 const LOCAL_PREDICTION_GROUND_SNAP_DISTANCE = 0.18;
 const LOCAL_PREDICTION_GROUND_HOLD_DISTANCE = 0.32;
 const LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE = 0.4;
-const LOCAL_PREDICTION_GROUNDED_GRACE_S = 0.05;
+const LOCAL_PREDICTION_GROUNDED_GRACE_S = 0.1;
 const LOCAL_PREDICTION_GROUNDED_UPWARD_RELEASE_VELOCITY = 1.25;
 const LOCAL_PREDICTION_COLLISION_EPSILON = 0.001;
 // Match the server ground sensor instead of the wider wall collider so
@@ -163,8 +163,20 @@ const LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET =
   LOCAL_PREDICTION_GROUND_SENSOR_RADIUS - LOCAL_PREDICTION_COLLISION_EPSILON;
 const LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET =
   LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET * Math.SQRT1_2;
+const LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET =
+  LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET * 0.5;
+const LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET =
+  LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET * 0.5;
 const LOCAL_PREDICTION_FOOTPRINT_SAMPLES = [
   [0, 0],
+  [LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET, 0],
+  [-LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET, 0],
+  [0, LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET],
+  [0, -LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET],
+  [LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
+  [LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
+  [-LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
+  [-LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
   [LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET, 0],
   [-LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET, 0],
   [0, LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET],
@@ -1689,17 +1701,45 @@ export default class EntityManager {
       Math.max(this._localPredictionState.worldTimestepS, LOCAL_PREDICTION_MIN_COMMAND_DELTA_S),
       LOCAL_PREDICTION_MAX_COMMAND_DELTA_S,
     );
-    this._localPredictionState.predictionAccumulatorS = Math.min(
-      this._localPredictionState.predictionAccumulatorS + clampedFrameDeltaS,
-      predictionStepS * LOCAL_PREDICTION_MAX_SUBSTEPS,
-    );
     const inputState = this._game.inputManager.inputState;
-    const previousRollbackInputs = this._getLatestPredictedRollbackInputSnapshot();
     const currentRollbackInputs = this._createCurrentRollbackPredictedInputSnapshot();
     const hasLocalRollbackIntent = hasActiveRollbackPredictedInputSnapshot(
       this._localRollbackPredictedInputSet,
       currentRollbackInputs,
     );
+    const hasPendingLocalPredictionCommands = this._hasPendingLocalPredictionCommands();
+
+    if (!hasLocalRollbackIntent && !hasPendingLocalPredictionCommands) {
+      this._localPredictionState.predictionAccumulatorS = 0;
+
+      if (this._localPredictionState.hasAuthoritativePosition) {
+        this._localPredictionState.predictedPosition.copy(this._localPredictionState.authoritativePosition);
+      }
+
+      if (this._localPredictionState.hasAuthoritativeRotation) {
+        this._localPredictionState.predictedRotation.copy(this._localPredictionState.authoritativeRotation);
+      }
+
+      this._localPredictionState.predictedCustomState.splice(
+        0,
+        this._localPredictionState.predictedCustomState.length,
+        ...this._localPredictionState.authoritativeCustomState,
+      );
+      this._syncPredictedControllerStateFromAuthoritative();
+      this._localPredictionDebug.lastReconcileMode = 'none';
+      this._syncLocalPredictionStats(0, 0);
+      entity.applyClientPredictedTransform(
+        this._localPredictionState.predictedPosition,
+        this._localPredictionState.predictedRotation,
+      );
+      return;
+    }
+
+    this._localPredictionState.predictionAccumulatorS = Math.min(
+      this._localPredictionState.predictionAccumulatorS + clampedFrameDeltaS,
+      predictionStepS * LOCAL_PREDICTION_MAX_SUBSTEPS,
+    );
+    const previousRollbackInputs = this._getLatestPredictedRollbackInputSnapshot();
     let isActivelyMoving = false;
     let substeps = 0;
     let stepPreviousRollbackInputs = previousRollbackInputs;
