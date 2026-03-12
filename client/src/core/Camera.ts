@@ -122,6 +122,7 @@ export default class Camera {
   private _gameCameraCollisionRaycastOrigin: Vector3 = new Vector3();
   private _gameCameraCollisionRaycastDirection: Vector3 = new Vector3();
   private _gameCameraShoulderPositionOffset: Vector3 = new Vector3();
+  private _smoothedLocalPredictedEntity: Entity | undefined;
 
   private _spectatorCamera: PerspectiveCamera;
   private _spectatorCameraPitch: number = 0;
@@ -347,6 +348,8 @@ export default class Camera {
   }
 
   public update(frameDeltaS: number): void {
+    this._updateOwnerVisualSmoothingBinding();
+
     if (this._activeCamera === this._gameCamera) {
       this._updateGameCamera(frameDeltaS);
     }
@@ -820,6 +823,43 @@ export default class Camera {
       : undefined;
   }
 
+  private _resolveOwnerVisualSmoothingEntity(): Entity | undefined {
+    if (this._activeCamera !== this._gameCamera || this._gameCameraMode !== CameraMode.THIRD_PERSON) {
+      return undefined;
+    }
+
+    const localPredictedEntity = this._game.entityManager.localPredictedEntity;
+    if (!localPredictedEntity) {
+      return undefined;
+    }
+
+    if (this._gameCameraAttachedEntity?.id === localPredictedEntity.id) {
+      return localPredictedEntity;
+    }
+
+    if (this._gameCameraTrackedEntity?.id === localPredictedEntity.id) {
+      return localPredictedEntity;
+    }
+
+    if (this._gameCameraDynamicFollowEntityId === localPredictedEntity.id) {
+      return localPredictedEntity;
+    }
+
+    return undefined;
+  }
+
+  private _updateOwnerVisualSmoothingBinding(): void {
+    const nextSmoothedEntity = this._resolveOwnerVisualSmoothingEntity();
+
+    if (this._smoothedLocalPredictedEntity === nextSmoothedEntity) {
+      return;
+    }
+
+    this._smoothedLocalPredictedEntity?.setClientPredictedTransformSmoothingEnabled(false);
+    this._smoothedLocalPredictedEntity = nextSmoothedEntity;
+    this._smoothedLocalPredictedEntity?.setClientPredictedTransformSmoothingEnabled(true);
+  }
+
   private _resolveDynamicFollowAttachmentPosition(target: Vector3): Vector3 | undefined {
     const followEntity = this._getLocallyPredictedDynamicFollowEntity();
     const followOffset = this._gameCameraDynamicFollowOffset;
@@ -883,7 +923,9 @@ export default class Camera {
     }
 
     // Get base positions for camera calculations.
-    const attachedPosition = this._gameCameraAttachedEntity?.getWorldPosition(vec3)
+    const attachedPosition = this._gameCameraMode === CameraMode.FIRST_PERSON && this._gameCameraAttachedEntity
+      ? vec3.copy(this._gameCameraAttachedEntity.predictedPosition)
+      : this._gameCameraAttachedEntity?.getWorldPosition(vec3)
       || this._resolveDynamicFollowAttachmentPosition(vec3e)
       || this._gameCameraAttachedPosition!;
     const trackedPosition = this._resolveDynamicFollowTargetPosition(vec3f) || this._gameCameraTrackedPosition;

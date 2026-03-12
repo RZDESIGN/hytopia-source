@@ -46,6 +46,10 @@ const DEFAULT_ANIMATION_BLEND_TIME_S = 0.1;
 const DEFAULT_OPACITY = 1.0;
 const SKY_LIGHT_INTERPOLATION_TIME_S = 0.1;
 const TRANSFORM_INTERPOLATION_TIME_S = 0.04;
+const CLIENT_PREDICTED_VISUAL_POSITION_INTERPOLATION_TIME_S = 0.06;
+const CLIENT_PREDICTED_VISUAL_ROTATION_INTERPOLATION_TIME_S = 0.05;
+const CLIENT_PREDICTED_VISUAL_POSITION_SNAP_DISTANCE_SQ = 3 * 3;
+const CLIENT_PREDICTED_VISUAL_ROTATION_SNAP_DOT_THRESHOLD = 0.5;
 const LOOP_MODE_ONCE = 0;
 const LOOP_MODE_LOOP = 1;
 const LOOP_MODE_PING_PONG = 2;
@@ -196,6 +200,10 @@ export default class Entity {
   private _blockTextureUri: string | undefined;
   private _currentPosition: Vector3;
   private _currentRotation: Quaternion;
+  private _clientPredictedPosition: Vector3;
+  private _clientPredictedRotation: Quaternion;
+  private _clientPredictedTransformSmoothingEnabled: boolean = false;
+  private _hasClientPredictedTransform: boolean = false;
   private _customTexture: CustomTextureWrapper | null = null;
   private _customTextureUri: string | null = null;
   // _entityRoot controls the position, quaternion, and scale of the entire model.
@@ -295,6 +303,8 @@ export default class Entity {
     this._blockHalfExtents = data.blockHalfExtents;
     this._currentPosition = data.position.clone();
     this._currentRotation = data.rotation.clone();
+    this._clientPredictedPosition = data.position.clone();
+    this._clientPredictedRotation = data.rotation.clone();
     this._isEnvironmental = data.isEnvironmental ?? false;
     this._name = data.name;
     this._opacity = data.opacity ?? DEFAULT_OPACITY;
@@ -439,6 +449,14 @@ export default class Entity {
   
   public get rotation(): Quaternion {
     return this._currentRotation;
+  }
+
+  public get predictedPosition(): Vector3 {
+    return this._hasClientPredictedTransform ? this._clientPredictedPosition : this._currentPosition;
+  }
+
+  public get predictedRotation(): Quaternion {
+    return this._hasClientPredictedTransform ? this._clientPredictedRotation : this._currentRotation;
   }
   
   public get scale(): Vector3 {
@@ -1640,22 +1658,79 @@ export default class Entity {
     this._interpolatingRotation = !this._currentRotation.equals(this._targetRotation);
   }
 
-  // Applies a client-side predicted transform without touching authoritative server tick tracking.
-  public applyClientPredictedTransform(position: Vector3Like, rotation?: QuaternionLike): void {
-    this._currentPosition.copy(position);
-    this._targetPosition.copy(position);
-    this._entityRoot.position.copy(this._currentPosition);
-    this._interpolatingPosition = false;
-
-    if (rotation) {
-      this._currentRotation.copy(rotation);
-      this._targetRotation.copy(rotation);
-      this._entityRoot.quaternion.copy(this._currentRotation);
-      this._interpolatingRotation = false;
+  public setClientPredictedTransformSmoothingEnabled(enabled: boolean): void {
+    if (this._clientPredictedTransformSmoothingEnabled === enabled) {
+      return;
     }
 
-    this._needsMatrixUpdate.add(this._entityRoot);
-    this._needsWorldBoundingBoxUpdate = true;
+    this._clientPredictedTransformSmoothingEnabled = enabled;
+
+    if (!enabled && this._hasClientPredictedTransform) {
+      this._currentPosition.copy(this._clientPredictedPosition);
+      this._targetPosition.copy(this._clientPredictedPosition);
+      this._entityRoot.position.copy(this._currentPosition);
+      this._interpolatingPosition = false;
+
+      this._currentRotation.copy(this._clientPredictedRotation);
+      this._targetRotation.copy(this._clientPredictedRotation);
+      this._entityRoot.quaternion.copy(this._currentRotation);
+      this._interpolatingRotation = false;
+
+      this._needsMatrixUpdate.add(this._entityRoot);
+      this._needsWorldBoundingBoxUpdate = true;
+    }
+  }
+
+  // Applies a client-side predicted transform without touching authoritative server tick tracking.
+  public applyClientPredictedTransform(position: Vector3Like, rotation?: QuaternionLike): void {
+    this._clientPredictedPosition.copy(position);
+    this._hasClientPredictedTransform = true;
+    let updatedVisualTransformImmediately = false;
+
+    if (!this._clientPredictedTransformSmoothingEnabled) {
+      this._currentPosition.copy(position);
+      this._targetPosition.copy(position);
+      this._entityRoot.position.copy(this._currentPosition);
+      this._interpolatingPosition = false;
+      updatedVisualTransformImmediately = true;
+    } else {
+      this._targetPosition.copy(position);
+      if (this._currentPosition.distanceToSquared(this._targetPosition) > CLIENT_PREDICTED_VISUAL_POSITION_SNAP_DISTANCE_SQ) {
+        this._currentPosition.copy(position);
+        this._entityRoot.position.copy(this._currentPosition);
+        this._interpolatingPosition = false;
+        updatedVisualTransformImmediately = true;
+      } else {
+        this._interpolatingPosition = !this._currentPosition.equals(this._targetPosition);
+      }
+    }
+
+    if (rotation) {
+      this._clientPredictedRotation.copy(rotation);
+
+      if (!this._clientPredictedTransformSmoothingEnabled) {
+        this._currentRotation.copy(rotation);
+        this._targetRotation.copy(rotation);
+        this._entityRoot.quaternion.copy(this._currentRotation);
+        this._interpolatingRotation = false;
+        updatedVisualTransformImmediately = true;
+      } else {
+        this._targetRotation.copy(rotation);
+        if (Math.abs(this._currentRotation.dot(this._targetRotation)) < CLIENT_PREDICTED_VISUAL_ROTATION_SNAP_DOT_THRESHOLD) {
+          this._currentRotation.copy(rotation);
+          this._entityRoot.quaternion.copy(this._currentRotation);
+          this._interpolatingRotation = false;
+          updatedVisualTransformImmediately = true;
+        } else {
+          this._interpolatingRotation = !this._currentRotation.equals(this._targetRotation);
+        }
+      }
+    }
+
+    if (updatedVisualTransformImmediately) {
+      this._needsMatrixUpdate.add(this._entityRoot);
+      this._needsWorldBoundingBoxUpdate = true;
+    }
   }
   
   public setRotationInterpolationMs(interpolationMs: number | null): void {
@@ -3280,9 +3355,15 @@ export default class Entity {
     if (this._interpolatingPosition || this._interpolatingRotation || this._interpolatingScale) {
       // Default interpolation is tuned for 30Hz server updates (~33ms between packets).
       // Interpolation settings are stateful and persist until explicitly changed.
+      const positionInterpolationTimeS = this._clientPredictedTransformSmoothingEnabled
+        ? CLIENT_PREDICTED_VISUAL_POSITION_INTERPOLATION_TIME_S
+        : this._positionInterpolationTimeS;
+      const rotationInterpolationTimeS = this._clientPredictedTransformSmoothingEnabled
+        ? CLIENT_PREDICTED_VISUAL_ROTATION_INTERPOLATION_TIME_S
+        : this._rotationInterpolationTimeS;
 
       if (this._interpolatingPosition) {
-        const positionT = this._calculateInterpolationFactor(deltaTimeS, this._positionInterpolationTimeS);
+        const positionT = this._calculateInterpolationFactor(deltaTimeS, positionInterpolationTimeS);
         if (lerp(this._currentPosition, this._targetPosition, positionT)) {
           this._interpolatingPosition = false;
         }
@@ -3290,7 +3371,7 @@ export default class Entity {
       }
 
       if (this._interpolatingRotation) {
-        const rotationT = this._calculateInterpolationFactor(deltaTimeS, this._rotationInterpolationTimeS);
+        const rotationT = this._calculateInterpolationFactor(deltaTimeS, rotationInterpolationTimeS);
         if (slerp(this._currentRotation, this._targetRotation, rotationT)) {
           this._interpolatingRotation = false;
         }

@@ -1158,10 +1158,10 @@ export default class EntityManager {
       return;
     }
 
-    this._localPredictionState.predictedPosition.copy(entity.position);
-    this._localPredictionState.predictedRotation.copy(entity.rotation);
-    this._localPredictionState.authoritativePosition.copy(entity.position);
-    this._localPredictionState.authoritativeRotation.copy(entity.rotation);
+    this._localPredictionState.predictedPosition.copy(entity.predictedPosition);
+    this._localPredictionState.predictedRotation.copy(entity.predictedRotation);
+    this._localPredictionState.authoritativePosition.copy(entity.predictedPosition);
+    this._localPredictionState.authoritativeRotation.copy(entity.predictedRotation);
     this._localPredictionState.hasPredictedTransform = true;
     this._localPredictionState.hasAuthoritativePosition = true;
     this._localPredictionState.hasAuthoritativeRotation = true;
@@ -1691,8 +1691,8 @@ export default class EntityManager {
     }
 
     if (!this._localPredictionState.hasPredictedTransform) {
-      this._localPredictionState.predictedPosition.copy(entity.position);
-      this._localPredictionState.predictedRotation.copy(entity.rotation);
+      this._localPredictionState.predictedPosition.copy(entity.predictedPosition);
+      this._localPredictionState.predictedRotation.copy(entity.predictedRotation);
       this._localPredictionState.hasPredictedTransform = true;
     }
 
