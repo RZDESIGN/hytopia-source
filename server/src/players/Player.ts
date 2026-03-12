@@ -810,10 +810,20 @@ export default class Player extends EventRouter implements protocol.Serializable
       return;
     }
 
-    // Consume one sequenced movement command per simulation tick so a brief
-    // server hitch does not falsely acknowledge an entire backlog that was
-    // never actually simulated.
-    const command = this._queuedSequencedMovementInputs.shift()!;
+    // Drain up to MAX_INPUT_DRAIN_PER_TICK queued commands so the server
+    // catches up faster after a brief hitch.  Only the last command's
+    // input state is applied – intermediate frames are skipped since the
+    // server physics doesn't simulate each client input tick individually.
+    const MAX_INPUT_DRAIN_PER_TICK = 3;
+    const commandsToDrain = Math.min(
+      this._queuedSequencedMovementInputs.length,
+      MAX_INPUT_DRAIN_PER_TICK,
+    );
+
+    let command!: SequencedMovementInputCommand;
+    for (let ci = 0; ci < commandsToDrain; ci++) {
+      command = this._queuedSequencedMovementInputs.shift()!;
+    }
 
     for (const inputKey of this._rollbackPredictedInputs) {
       if (inputKey === 'jd') {

@@ -1411,7 +1411,13 @@ export default class EntityManager {
     let previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot> =
       this._localPredictionState.lastAcknowledgedRollbackInputs;
 
+    // Cap replayed commands per rebuild to avoid P95 frame spikes when
+    // the buffer has grown large during a server ACK stall.
+    const MAX_REPLAY_COMMANDS_PER_REBUILD = 24;
+
     for (let i = 0; i < this._localPredictionState.commandBufferCount; i++) {
+      if (replayedCommandCount >= MAX_REPLAY_COMMANDS_PER_REBUILD) break;
+
       const command = this._localPredictionState.commandBuffer[
         (this._localPredictionState.commandBufferHead + i) % LOCAL_PREDICTION_COMMAND_BUFFER_SIZE
       ];
@@ -1612,15 +1618,20 @@ export default class EntityManager {
       return;
     }
 
-    // True CSP depends on input acknowledgements, so keep authoritative
-    // reconciliation paused while any locally issued commands remain pending.
-    const shouldContinuouslyReconcile = this._localPredictionState.commandBufferCount === 0;
+    // True CSP depends on input acknowledgements, so force/snap
+    // reconciliation is paused while commands remain pending.
+    // However, soft reconciliation always runs so the predicted position
+    // gently nudges toward authoritative — this prevents unchecked drift
+    // during server ACK stalls.
+    const shouldContinuouslyReconcile = true;
+    const allowForceOrSnap = this._localPredictionState.commandBufferCount === 0;
     const isActivelyMoving = hasLocalRollbackIntent;
 
-    this._localPredictionDebug.lastReconcileMode = shouldContinuouslyReconcile ? 'none' : 'buffered';
+    this._localPredictionDebug.lastReconcileMode = allowForceOrSnap ? 'none' : 'buffered';
 
     if (shouldContinuouslyReconcile) {
-      const shouldForceActiveInputReconcile = hasLocalRollbackIntent &&
+      const shouldForceActiveInputReconcile = allowForceOrSnap &&
+        hasLocalRollbackIntent &&
         this._shouldForceActiveInputReconcile();
       const shouldDeferActiveInputReconcile = hasLocalRollbackIntent
         ? !shouldForceActiveInputReconcile

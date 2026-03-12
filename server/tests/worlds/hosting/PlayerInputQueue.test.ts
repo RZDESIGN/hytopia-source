@@ -62,56 +62,17 @@ const createPlayerHarness = () => {
   return { cameraPitchCalls, cameraYawCalls, player };
 };
 
-test('applyQueuedInputForSimulation only acknowledges the command that was actually simulated', () => {
+test('applyQueuedInputForSimulation drains up to 3 commands and acknowledges the last one', () => {
   const { cameraPitchCalls, cameraYawCalls, player } = createPlayerHarness();
 
-  player.applyQueuedInputForSimulation();
-
-  expect(player._lastAppliedInputSequenceNumber).toBe(101);
-  expect(player._queuedSequencedMovementInputs).toHaveLength(1);
-  expect(player._queuedSequencedMovementInputs[0].sequenceNumber).toBe(102);
-  expect(player._currentRollbackPredictedInputSequenceNumber).toBe(101);
-  expect(player._previousRollbackPredictedInputSnapshot).toEqual({});
-  expect(player._rollbackPredictedInputSnapshot).toEqual({
-    w: true,
-    a: false,
-    s: false,
-    d: false,
-    sp: false,
-    sh: false,
-    c: false,
-    jd: null,
-  });
-  expect(player._input).toEqual(expect.objectContaining({
-    cp: 0.25,
-    cy: 1.5,
-    w: true,
-  }));
-  expect(player._input.a).toBeUndefined();
-  expect(player._input.c).toBeUndefined();
-  expect(player._input.d).toBeUndefined();
-  expect(player._input.s).toBeUndefined();
-  expect(player._input.sh).toBeUndefined();
-  expect(player._input.sp).toBeUndefined();
-  expect(player._input.jd).toBeUndefined();
-  expect(cameraPitchCalls).toEqual([ 0.25 ]);
-  expect(cameraYawCalls).toEqual([ 1.5 ]);
-
+  // With 2 queued commands and MAX_INPUT_DRAIN_PER_TICK=3, both are
+  // consumed in one call.  Only the last command's input state is applied.
   player.applyQueuedInputForSimulation();
 
   expect(player._lastAppliedInputSequenceNumber).toBe(102);
   expect(player._queuedSequencedMovementInputs).toHaveLength(0);
   expect(player._currentRollbackPredictedInputSequenceNumber).toBe(102);
-  expect(player._previousRollbackPredictedInputSnapshot).toEqual({
-    w: true,
-    a: false,
-    s: false,
-    d: false,
-    sp: false,
-    sh: false,
-    c: false,
-    jd: null,
-  });
+  expect(player._previousRollbackPredictedInputSnapshot).toEqual({});
   expect(player._rollbackPredictedInputSnapshot).toEqual({
     w: false,
     a: true,
@@ -134,6 +95,6 @@ test('applyQueuedInputForSimulation only acknowledges the command that was actua
   expect(player._input.s).toBeUndefined();
   expect(player._input.sh).toBeUndefined();
   expect(player._input.w).toBeUndefined();
-  expect(cameraPitchCalls).toEqual([ 0.25, 0.5 ]);
-  expect(cameraYawCalls).toEqual([ 1.5, 2.25 ]);
+  expect(cameraPitchCalls).toEqual([ 0.5 ]);
+  expect(cameraYawCalls).toEqual([ 2.25 ]);
 });
