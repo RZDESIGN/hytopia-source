@@ -116,10 +116,7 @@ const LOCAL_PREDICTION_SPEED_DOWNWARD_ADAPT_RATE = 0.05;
 const LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT = 0.85;
 const LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD = 1.5;
 const LOCAL_PREDICTION_MAX_FRAME_DELTA_S = 1 / 10;
-const LOCAL_PREDICTION_MIN_COMMAND_DELTA_S = 1 / 240;
-const LOCAL_PREDICTION_MAX_COMMAND_DELTA_S = 1 / 10;
 const LOCAL_PREDICTION_SUBSTEP_DELTA_S = 1 / 60;
-const LOCAL_PREDICTION_MAX_SUBSTEPS = 6;
 const LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S = 1 / 8;
 const LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND = 12;
 const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.18 * 0.18;
@@ -265,7 +262,6 @@ type LocalPredictionState = {
   estimatedVerticalVelocity: number;
   estimatedWalkSpeed: number;
   estimatedRunSpeed: number;
-  predictionAccumulatorS: number;
   worldTimestepS: number;
   supportsInputAcknowledgements: boolean;
   lastAcknowledgedHadMovementInput?: boolean;
@@ -282,7 +278,6 @@ type LocalPredictionState = {
   predictedCustomState: number[];
   controllerState: LocalPredictionControllerState;
   commandBuffer: LocalPredictionCommand[];
-  liveCommandBuffer: LocalPredictionCommand[];
   commandBufferHead: number;
   commandBufferCount: number;
   lastAcknowledgedInputSequenceNumber: number;
@@ -364,7 +359,6 @@ export default class EntityManager {
     estimatedVerticalVelocity: 0,
     estimatedWalkSpeed: LOCAL_PREDICTION_DEFAULT_WALK_SPEED,
     estimatedRunSpeed: LOCAL_PREDICTION_DEFAULT_RUN_SPEED,
-    predictionAccumulatorS: 0,
     worldTimestepS: 1 / 60,
     supportsInputAcknowledgements: false,
     lastAcknowledgedHadMovementInput: undefined,
@@ -393,7 +387,6 @@ export default class EntityManager {
       sh: false,
       c: false,
     })),
-    liveCommandBuffer: [],
     commandBufferHead: 0,
     commandBufferCount: 0,
     lastAcknowledgedInputSequenceNumber: -1,
@@ -1072,7 +1065,6 @@ export default class EntityManager {
     this._localPredictionState.useAuthoritativeMovementConfig = false;
     this._localPredictionState.estimatedWalkSpeed = LOCAL_PREDICTION_DEFAULT_WALK_SPEED;
     this._localPredictionState.estimatedRunSpeed = LOCAL_PREDICTION_DEFAULT_RUN_SPEED;
-    this._localPredictionState.predictionAccumulatorS = 0;
     this._localPredictionState.supportsInputAcknowledgements = false;
     this._localPredictionState.lastAcknowledgedHadMovementInput = undefined;
     this._localPredictionState.lastAcknowledgedMovementRunning = undefined;
@@ -1118,7 +1110,6 @@ export default class EntityManager {
     this._localPredictionState.controllerState.predictedJustSubmergedRemainingS = 0;
     this._localPredictionState.controllerState.authoritativeSwimUpwardCooldownRemainingS = 0;
     this._localPredictionState.controllerState.predictedSwimUpwardCooldownRemainingS = 0;
-    this._localPredictionState.liveCommandBuffer = [];
     this._localPredictionState.commandBufferHead = 0;
     this._localPredictionState.commandBufferCount = 0;
     this._localPredictionState.lastAcknowledgedInputSequenceNumber = -1;
@@ -1553,21 +1544,11 @@ export default class EntityManager {
         (this._localPredictionState.commandBufferHead + i) % LOCAL_PREDICTION_COMMAND_BUFFER_SIZE
       ];
 
-      const replayResult = this._replayPredictedCommand(
+      const replayResult = this._applyPredictedCommand(
         predictedEntity,
         command,
         previousRollbackInputs,
-      );
-      replayedSubstepCount += replayResult.substeps;
-      previousRollbackInputs = replayResult.latestRollbackInputs;
-      replayedCommandCount++;
-    }
-
-    for (const command of this._localPredictionState.liveCommandBuffer) {
-      const replayResult = this._replayPredictedCommand(
-        predictedEntity,
-        command,
-        previousRollbackInputs,
+        true,
       );
       replayedSubstepCount += replayResult.substeps;
       previousRollbackInputs = replayResult.latestRollbackInputs;
@@ -1577,10 +1558,11 @@ export default class EntityManager {
     this._syncLocalPredictionStats(replayedCommandCount, replayedSubstepCount);
   }
 
-  private _replayPredictedCommand(
+  private _applyPredictedCommand(
     entity: Entity | undefined,
     command: LocalPredictionCommand,
     previousRollbackInputs: Readonly<RollbackPredictedInputSnapshot>,
+    isReplay: boolean,
   ): { substeps: number, latestRollbackInputs: Readonly<RollbackPredictedInputSnapshot> } {
     let remainingDeltaS = Math.min(
       Math.max(command.deltaTimeS, 0),
@@ -1597,7 +1579,7 @@ export default class EntityManager {
           entity,
           command,
           stepPreviousRollbackInputs,
-          true,
+          isReplay,
           substeps === 0,
           stepDeltaS,
         );
@@ -1606,7 +1588,7 @@ export default class EntityManager {
           entity,
           command,
           stepPreviousRollbackInputs,
-          true,
+          isReplay,
           substeps === 0,
           stepDeltaS,
           command.yaw,
@@ -1619,7 +1601,13 @@ export default class EntityManager {
           command.sh,
           command.c,
         );
-        this._emitLocalPredictionStep(command, stepPreviousRollbackInputs, true, stepDeltaS, substeps === 0);
+        this._emitLocalPredictionStep(
+          command,
+          stepPreviousRollbackInputs,
+          isReplay,
+          stepDeltaS,
+          substeps === 0,
+        );
       }
 
       remainingDeltaS -= stepDeltaS;
@@ -1634,10 +1622,6 @@ export default class EntityManager {
   }
 
   private _getLatestPredictedRollbackInputSnapshot(): Readonly<RollbackPredictedInputSnapshot> {
-    if (this._localPredictionState.liveCommandBuffer.length > 0) {
-      return this._localPredictionState.liveCommandBuffer[this._localPredictionState.liveCommandBuffer.length - 1].rollbackInputs;
-    }
-
     if (this._localPredictionState.commandBufferCount > 0) {
       const lastBufferedCommandIndex =
         (this._localPredictionState.commandBufferHead + this._localPredictionState.commandBufferCount - 1)
@@ -1652,6 +1636,9 @@ export default class EntityManager {
     if (payload.sequenceNumber <= this._localPredictionState.lastAcknowledgedInputSequenceNumber) {
       return;
     }
+
+    const hadPendingLocalPredictionCommands = this._hasPendingLocalPredictionCommands();
+    const previousRollbackInputs = this._getLatestPredictedRollbackInputSnapshot();
 
     const bufferWriteIndex =
       (this._localPredictionState.commandBufferHead + this._localPredictionState.commandBufferCount)
@@ -1678,7 +1665,32 @@ export default class EntityManager {
     command.c = payload.c;
 
     this._localPredictionState.commandBufferCount++;
-    this._localPredictionState.liveCommandBuffer = [];
+
+    const predictedEntity = this.localPredictedEntity;
+    if (!predictedEntity) {
+      return;
+    }
+
+    if (!this._localPredictionState.hasPredictedTransform) {
+      this._localPredictionState.predictedPosition.copy(predictedEntity.position);
+      this._localPredictionState.predictedRotation.copy(predictedEntity.rotation);
+      this._localPredictionState.hasPredictedTransform = true;
+    }
+
+    if (!hadPendingLocalPredictionCommands) {
+      this._localPredictionState.predictedCustomState.splice(
+        0,
+        this._localPredictionState.predictedCustomState.length,
+        ...this._localPredictionState.authoritativeCustomState,
+      );
+      this._syncPredictedControllerStateFromAuthoritative();
+    }
+
+    this._applyPredictedCommand(predictedEntity, command, previousRollbackInputs, false);
+    predictedEntity.applyClientPredictedTransform(
+      this._localPredictionState.predictedPosition,
+      this._localPredictionState.predictedRotation,
+    );
   }
 
   private _applyLocalPrediction(entity: Entity, deltaTimeS: number): void {
@@ -1697,11 +1709,6 @@ export default class EntityManager {
     }
 
     const clampedFrameDeltaS = Math.min(deltaTimeS, LOCAL_PREDICTION_MAX_FRAME_DELTA_S);
-    const predictionStepS = Math.min(
-      Math.max(this._localPredictionState.worldTimestepS, LOCAL_PREDICTION_MIN_COMMAND_DELTA_S),
-      LOCAL_PREDICTION_MAX_COMMAND_DELTA_S,
-    );
-    const inputState = this._game.inputManager.inputState;
     const currentRollbackInputs = this._createCurrentRollbackPredictedInputSnapshot();
     const hasLocalRollbackIntent = hasActiveRollbackPredictedInputSnapshot(
       this._localRollbackPredictedInputSet,
@@ -1710,8 +1717,6 @@ export default class EntityManager {
     const hasPendingLocalPredictionCommands = this._hasPendingLocalPredictionCommands();
 
     if (!hasLocalRollbackIntent && !hasPendingLocalPredictionCommands) {
-      this._localPredictionState.predictionAccumulatorS = 0;
-
       if (this._localPredictionState.hasAuthoritativePosition) {
         this._localPredictionState.predictedPosition.copy(this._localPredictionState.authoritativePosition);
       }
@@ -1735,84 +1740,10 @@ export default class EntityManager {
       return;
     }
 
-    this._localPredictionState.predictionAccumulatorS = Math.min(
-      this._localPredictionState.predictionAccumulatorS + clampedFrameDeltaS,
-      predictionStepS * LOCAL_PREDICTION_MAX_SUBSTEPS,
-    );
-    const previousRollbackInputs = this._getLatestPredictedRollbackInputSnapshot();
-    let isActivelyMoving = false;
-    let substeps = 0;
-    let stepPreviousRollbackInputs = previousRollbackInputs;
-
-    while (
-      this._localPredictionState.predictionAccumulatorS >= predictionStepS &&
-      substeps < LOCAL_PREDICTION_MAX_SUBSTEPS
-    ) {
-      const localCommand: LocalPredictionCommand = {
-        sequenceNumber: -1,
-        deltaTimeS: predictionStepS,
-        yaw: this._game.camera.gameCameraYaw,
-        joystickDirection: this._game.inputManager.joystickDirection,
-        rollbackInputs: { ...currentRollbackInputs },
-        w: !!inputState.w,
-        a: !!inputState.a,
-        s: !!inputState.s,
-        d: !!inputState.d,
-        sp: !!inputState.sp,
-        sh: !!inputState.sh,
-        c: !!inputState.c,
-      };
-
-      if (this._localPredictionState.mode === 'custom') {
-        isActivelyMoving = this._stepCustomPredictedReplay(
-          entity,
-          localCommand,
-          stepPreviousRollbackInputs,
-          false,
-          substeps === 0,
-          predictionStepS,
-        ) || isActivelyMoving;
-      } else {
-        isActivelyMoving = this._stepPredictedMovement(
-          entity,
-          localCommand,
-          stepPreviousRollbackInputs,
-          false,
-          substeps === 0,
-          predictionStepS,
-          localCommand.yaw,
-          localCommand.joystickDirection,
-          localCommand.w,
-          localCommand.a,
-          localCommand.s,
-          localCommand.d,
-          localCommand.sp,
-          localCommand.sh,
-          localCommand.c,
-        ) || isActivelyMoving;
-        this._emitLocalPredictionStep(
-          localCommand,
-          stepPreviousRollbackInputs,
-          false,
-          predictionStepS,
-          substeps === 0,
-        );
-      }
-
-      if (hasLocalRollbackIntent) {
-        this._localPredictionState.liveCommandBuffer.push(localCommand);
-      }
-
-      this._localPredictionState.predictionAccumulatorS -= predictionStepS;
-      substeps++;
-      stepPreviousRollbackInputs = localCommand.rollbackInputs;
-    }
-
     // True CSP depends on input acknowledgements, so keep authoritative
     // reconciliation paused while any locally issued commands remain pending.
-    const shouldContinuouslyReconcile =
-      this._localPredictionState.commandBufferCount === 0 &&
-      this._localPredictionState.liveCommandBuffer.length === 0;
+    const shouldContinuouslyReconcile = this._localPredictionState.commandBufferCount === 0;
+    const isActivelyMoving = hasLocalRollbackIntent;
 
     this._localPredictionDebug.lastReconcileMode = shouldContinuouslyReconcile ? 'none' : 'buffered';
 
@@ -2564,10 +2495,7 @@ export default class EntityManager {
   }
 
   private _hasPendingLocalPredictionCommands(): boolean {
-    return (
-      this._localPredictionState.commandBufferCount > 0 ||
-      this._localPredictionState.liveCommandBuffer.length > 0
-    );
+    return this._localPredictionState.commandBufferCount > 0;
   }
 
   private _syncLocalPredictionStats(
@@ -2576,9 +2504,7 @@ export default class EntityManager {
   ): void {
     LocalPredictionStats.entityId = this._localPredictionState.entityId ?? -1;
     LocalPredictionStats.supportsInputAcknowledgements = this._localPredictionState.supportsInputAcknowledgements;
-    LocalPredictionStats.bufferedCommandCount =
-      this._localPredictionState.commandBufferCount +
-      this._localPredictionState.liveCommandBuffer.length;
+    LocalPredictionStats.bufferedCommandCount = this._localPredictionState.commandBufferCount;
     LocalPredictionStats.lastAcknowledgedInputSequenceNumber = this._localPredictionState.lastAcknowledgedInputSequenceNumber;
     LocalPredictionStats.lastReconcileMode = this._localPredictionDebug.lastReconcileMode;
     LocalPredictionStats.softReconcileCount = this._localPredictionDebug.softReconcileCount;
