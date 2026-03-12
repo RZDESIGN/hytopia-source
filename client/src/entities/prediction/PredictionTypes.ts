@@ -1,0 +1,112 @@
+import type { Vector3, Quaternion } from 'three';
+import type { RollbackPredictedInputSnapshot } from '@gameplay-shared/InputContract';
+import type { LocalPredictionMode } from '@gameplay-shared/LocalPredictionMode';
+
+export type LocalPredictionCommand = {
+  sequenceNumber: number;
+  deltaTimeS: number;
+  yaw: number;
+  joystickDirection: number | null;
+  rollbackInputs: RollbackPredictedInputSnapshot;
+  w: boolean;
+  a: boolean;
+  s: boolean;
+  d: boolean;
+  sp: boolean;
+  sh: boolean;
+  c: boolean;
+};
+
+export type MovementPacketSentPayload = {
+  sequenceNumber: number;
+  deltaTimeS: number;
+  yaw: number;
+  joystickDirection: number | null;
+  rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
+  w: boolean;
+  a: boolean;
+  s: boolean;
+  d: boolean;
+  sp: boolean;
+  sh: boolean;
+  c: boolean;
+};
+
+export type LocalPredictionControllerState = {
+  authoritativeMotionBasisVelocity: Vector3;
+  predictedMotionBasisVelocity: Vector3;
+  authoritativeCanJump: boolean;
+  predictedCanJump: boolean;
+  authoritativeCanRun: boolean;
+  predictedCanRun: boolean;
+  authoritativeCanWalk: boolean;
+  predictedCanWalk: boolean;
+  authoritativeFastMovementByDefault: boolean;
+  predictedFastMovementByDefault: boolean;
+  authoritativeGrounded: boolean;
+  predictedGrounded: boolean;
+  authoritativeApplyDirectionalMovementRotations: boolean;
+  predictedApplyDirectionalMovementRotations: boolean;
+  authoritativeFacesCameraWhenIdle: boolean;
+  predictedFacesCameraWhenIdle: boolean;
+  authoritativeMovementReferenceYaw?: number;
+  predictedMovementReferenceYaw?: number;
+  authoritativeSwimming: boolean;
+  predictedSwimming: boolean;
+  authoritativeGroundFootOffset: number;
+  predictedGroundFootOffset: number;
+  predictedGroundGraceRemainingS: number;
+  authoritativeJustSubmergedRemainingS: number;
+  predictedJustSubmergedRemainingS: number;
+  authoritativeSwimUpwardCooldownRemainingS: number;
+  predictedSwimUpwardCooldownRemainingS: number;
+};
+
+export type LocalPredictionState = {
+  entityId?: number;
+  mode?: LocalPredictionMode;
+  predictedPosition: Vector3;
+  predictedRotation: Quaternion;
+  authoritativePosition: Vector3;
+  authoritativeRotation: Quaternion;
+  authoritativeCustomState: number[];
+  authoritativeJumpVelocity: number;
+  authoritativeRunVelocity: number;
+  authoritativeSwimFastVelocity: number;
+  authoritativeSwimSlowVelocity: number;
+  authoritativeSwimUpwardVelocity: number;
+  authoritativeWalkVelocity: number;
+  useAuthoritativeMovementConfig: boolean;
+  estimatedVerticalVelocity: number;
+  estimatedWalkSpeed: number;
+  estimatedRunSpeed: number;
+  worldTimestepS: number;
+  supportsInputAcknowledgements: boolean;
+  lastAcknowledgedHadMovementInput?: boolean;
+  lastAcknowledgedMovementRunning?: boolean;
+  lastAcknowledgedMovementDirectionX?: number;
+  lastAcknowledgedMovementDirectionZ?: number;
+  lastAcknowledgedRollbackInputs: RollbackPredictedInputSnapshot;
+  pendingSpeedCalibrationAcknowledgedInputSequenceNumber?: number;
+  hasPredictedTransform: boolean;
+  hasAuthoritativePosition: boolean;
+  hasAuthoritativeRotation: boolean;
+  lastAuthoritativePositionServerTick: number;
+  lastAuthoritativeRotationServerTick: number;
+  predictedCustomState: number[];
+  controllerState: LocalPredictionControllerState;
+  commandBuffer: LocalPredictionCommand[];
+  commandBufferHead: number;
+  commandBufferCount: number;
+  lastAcknowledgedInputSequenceNumber: number;
+};
+
+export type LocalPredictionDebugState = {
+  lastReconcileMode: 'none' | 'buffered' | 'deferred' | 'soft' | 'snap';
+  softReconcileCount: number;
+  snapReconcileCount: number;
+  forcedActiveReconcileCount: number;
+  deferredActiveReconcileCount: number;
+  authoritativeGroundedTransitionCount: number;
+  predictedGroundedTransitionCount: number;
+};

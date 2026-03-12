@@ -101,197 +101,69 @@ const DEFAULT_OUTLINE_OPTIONS: OutlineOptions = {
   occluded: true,
 };
 
-const LOCAL_PREDICTION_DEFAULT_WALK_SPEED = 4;
-const LOCAL_PREDICTION_DEFAULT_RUN_SPEED = 8;
-const LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY = 10;
-const LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED = 5;
-const LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED = 3;
-const LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY = 2;
-const LOCAL_PREDICTION_DEFAULT_GRAVITY_Y = -32;
-const LOCAL_PREDICTION_MIN_SPEED = 0.2;
-const LOCAL_PREDICTION_MAX_SPEED = 20;
-const LOCAL_PREDICTION_SPEED_REJECT_THRESHOLD = 30;
-const LOCAL_PREDICTION_SPEED_UPWARD_ADAPT_RATE = 0.2;
-const LOCAL_PREDICTION_SPEED_DOWNWARD_ADAPT_RATE = 0.05;
-const LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT = 0.85;
-const LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD = 1.5;
-const LOCAL_PREDICTION_MAX_FRAME_DELTA_S = 1 / 10;
-const LOCAL_PREDICTION_SUBSTEP_DELTA_S = 1 / 60;
-const LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S = 1 / 8;
-const LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND = 12;
-const LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.18 * 0.18;
-const LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ = 0.08 * 0.08;
-const LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ = 2.5 * 2.5;
-const LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE = 10;
-const LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE = 16;
-const LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE = 0.03;
-const LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE = 0.02;
-const LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE = 2.5;
-const LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE = 18;
-const LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE = 26;
-const LOCAL_PREDICTION_VERTICAL_VELOCITY_ADAPT_RATE = 0.35;
-const LOCAL_PREDICTION_VERTICAL_VELOCITY_REJECT_THRESHOLD = 80;
-const LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE = 0.5;
-const LOCAL_PREDICTION_IDLE_ROTATION_ERROR_DEAD_ZONE = 0.05;
-const LOCAL_PREDICTION_ROTATION_SNAP_ANGLE = 1.2;
-const LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE = 4;
-const LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE = 12;
-const LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR = 0.05;
-const LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR = 0.8;
-const LOCAL_PREDICTION_COMMAND_BUFFER_SIZE = 96;
-const INPUT_MANAGER_MOVEMENT_PACKET_SENT_EVENT = 'INPUT_MANAGER.MOVEMENT_PACKET_SENT';
-const LOCAL_PREDICTION_FLAG_GROUNDED = 1 << 0;
-const LOCAL_PREDICTION_FLAG_SWIMMING = 1 << 1;
-const LOCAL_PREDICTION_COLLIDER_RADIUS = 0.4;
-const LOCAL_PREDICTION_ENTITY_HEIGHT = 1.5;
-const LOCAL_PREDICTION_FOOT_OFFSET = 0.75;
-const LOCAL_PREDICTION_MIN_FOOT_OFFSET = 0.65;
-const LOCAL_PREDICTION_MAX_FOOT_OFFSET = 0.8;
-const LOCAL_PREDICTION_GROUND_SNAP_DISTANCE = 0.18;
-const LOCAL_PREDICTION_GROUND_HOLD_DISTANCE = 0.32;
-const LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE = 0.4;
-const LOCAL_PREDICTION_GROUNDED_GRACE_S = 0.1;
-const LOCAL_PREDICTION_GROUNDED_UPWARD_RELEASE_VELOCITY = 1.25;
-const LOCAL_PREDICTION_COLLISION_EPSILON = 0.001;
-// Match the server ground sensor instead of the wider wall collider so
-// moving jump/land prediction samples the same support footprint.
-const LOCAL_PREDICTION_GROUND_SENSOR_RADIUS = 0.23 * (LOCAL_PREDICTION_ENTITY_HEIGHT / 1.5);
-const LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET =
-  LOCAL_PREDICTION_GROUND_SENSOR_RADIUS - LOCAL_PREDICTION_COLLISION_EPSILON;
-const LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET =
-  LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET * Math.SQRT1_2;
-const LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET =
-  LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET * 0.5;
-const LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET =
-  LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET * 0.5;
-const LOCAL_PREDICTION_FOOTPRINT_SAMPLES = [
-  [0, 0],
-  [LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET, 0],
-  [-LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET, 0],
-  [0, LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET],
-  [0, -LOCAL_PREDICTION_GROUND_SAMPLE_INNER_CARDINAL_OFFSET],
-  [LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
-  [LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
-  [-LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
-  [-LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_INNER_DIAGONAL_OFFSET],
-  [LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET, 0],
-  [-LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET, 0],
-  [0, LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET],
-  [0, -LOCAL_PREDICTION_GROUND_SAMPLE_CARDINAL_OFFSET],
-  [LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
-  [LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
-  [-LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
-  [-LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET, -LOCAL_PREDICTION_GROUND_SAMPLE_DIAGONAL_OFFSET],
-] as const;
+import {
+  LOCAL_PREDICTION_DEFAULT_WALK_SPEED,
+  LOCAL_PREDICTION_DEFAULT_RUN_SPEED,
+  LOCAL_PREDICTION_DEFAULT_JUMP_VELOCITY,
+  LOCAL_PREDICTION_DEFAULT_SWIM_FAST_SPEED,
+  LOCAL_PREDICTION_DEFAULT_SWIM_SLOW_SPEED,
+  LOCAL_PREDICTION_DEFAULT_SWIM_UPWARD_VELOCITY,
+  LOCAL_PREDICTION_DEFAULT_GRAVITY_Y,
+  LOCAL_PREDICTION_MIN_SPEED,
+  LOCAL_PREDICTION_MAX_SPEED,
+  LOCAL_PREDICTION_SPEED_REJECT_THRESHOLD,
+  LOCAL_PREDICTION_SPEED_UPWARD_ADAPT_RATE,
+  LOCAL_PREDICTION_SPEED_DOWNWARD_ADAPT_RATE,
+  LOCAL_PREDICTION_SPEED_DIRECTION_ALIGNMENT_MIN_DOT,
+  LOCAL_PREDICTION_SPEED_VERTICAL_REJECT_THRESHOLD,
+  LOCAL_PREDICTION_MAX_FRAME_DELTA_S,
+  LOCAL_PREDICTION_SUBSTEP_DELTA_S,
+  LOCAL_PREDICTION_REPLAY_COMMAND_MAX_DELTA_S,
+  LOCAL_PREDICTION_REPLAY_MAX_SUBSTEPS_PER_COMMAND,
+  LOCAL_PREDICTION_MOVING_HORIZONTAL_ERROR_DEAD_ZONE_SQ,
+  LOCAL_PREDICTION_IDLE_HORIZONTAL_ERROR_DEAD_ZONE_SQ,
+  LOCAL_PREDICTION_HORIZONTAL_SNAP_DISTANCE_SQ,
+  LOCAL_PREDICTION_MOVING_HORIZONTAL_CORRECTION_RATE,
+  LOCAL_PREDICTION_IDLE_HORIZONTAL_CORRECTION_RATE,
+  LOCAL_PREDICTION_MOVING_VERTICAL_ERROR_DEAD_ZONE,
+  LOCAL_PREDICTION_IDLE_VERTICAL_ERROR_DEAD_ZONE,
+  LOCAL_PREDICTION_VERTICAL_SNAP_DISTANCE,
+  LOCAL_PREDICTION_MOVING_VERTICAL_CORRECTION_RATE,
+  LOCAL_PREDICTION_IDLE_VERTICAL_CORRECTION_RATE,
+  LOCAL_PREDICTION_VERTICAL_VELOCITY_ADAPT_RATE,
+  LOCAL_PREDICTION_VERTICAL_VELOCITY_REJECT_THRESHOLD,
+  LOCAL_PREDICTION_MOVING_ROTATION_ERROR_DEAD_ZONE,
+  LOCAL_PREDICTION_IDLE_ROTATION_ERROR_DEAD_ZONE,
+  LOCAL_PREDICTION_ROTATION_SNAP_ANGLE,
+  LOCAL_PREDICTION_MOVING_ROTATION_CORRECTION_RATE,
+  LOCAL_PREDICTION_IDLE_ROTATION_CORRECTION_RATE,
+  LOCAL_PREDICTION_SWIMMING_DRAG_FACTOR,
+  LOCAL_PREDICTION_WATER_ENTRY_SINKING_FACTOR,
+  LOCAL_PREDICTION_COMMAND_BUFFER_SIZE,
+  INPUT_MANAGER_MOVEMENT_PACKET_SENT_EVENT,
+  LOCAL_PREDICTION_FLAG_GROUNDED,
+  LOCAL_PREDICTION_FLAG_SWIMMING,
+  LOCAL_PREDICTION_COLLIDER_RADIUS,
+  LOCAL_PREDICTION_COLLISION_EPSILON,
+  LOCAL_PREDICTION_ENTITY_HEIGHT,
+  LOCAL_PREDICTION_FOOT_OFFSET,
+  LOCAL_PREDICTION_MIN_FOOT_OFFSET,
+  LOCAL_PREDICTION_MAX_FOOT_OFFSET,
+  LOCAL_PREDICTION_GROUND_SNAP_DISTANCE,
+  LOCAL_PREDICTION_GROUND_HOLD_DISTANCE,
+  LOCAL_PREDICTION_GROUND_RELEASE_DISTANCE,
+  LOCAL_PREDICTION_GROUNDED_GRACE_S,
+  LOCAL_PREDICTION_GROUNDED_UPWARD_RELEASE_VELOCITY,
+  LOCAL_PREDICTION_FOOTPRINT_SAMPLES,
+} from './prediction/PredictionConstants';
+import type {
+  LocalPredictionCommand,
+  LocalPredictionDebugState,
+  LocalPredictionState,
+  MovementPacketSentPayload,
+} from './prediction/PredictionTypes';
 
-type LocalPredictionCommand = {
-  sequenceNumber: number;
-  deltaTimeS: number;
-  yaw: number;
-  joystickDirection: number | null;
-  rollbackInputs: RollbackPredictedInputSnapshot;
-  w: boolean;
-  a: boolean;
-  s: boolean;
-  d: boolean;
-  sp: boolean;
-  sh: boolean;
-  c: boolean;
-};
-
-type MovementPacketSentPayload = {
-  sequenceNumber: number;
-  deltaTimeS: number;
-  yaw: number;
-  joystickDirection: number | null;
-  rollbackInputs: Readonly<RollbackPredictedInputSnapshot>;
-  w: boolean;
-  a: boolean;
-  s: boolean;
-  d: boolean;
-  sp: boolean;
-  sh: boolean;
-  c: boolean;
-};
-
-type LocalPredictionControllerState = {
-  authoritativeMotionBasisVelocity: Vector3;
-  predictedMotionBasisVelocity: Vector3;
-  authoritativeCanJump: boolean;
-  predictedCanJump: boolean;
-  authoritativeCanRun: boolean;
-  predictedCanRun: boolean;
-  authoritativeCanWalk: boolean;
-  predictedCanWalk: boolean;
-  authoritativeFastMovementByDefault: boolean;
-  predictedFastMovementByDefault: boolean;
-  authoritativeGrounded: boolean;
-  predictedGrounded: boolean;
-  authoritativeApplyDirectionalMovementRotations: boolean;
-  predictedApplyDirectionalMovementRotations: boolean;
-  authoritativeFacesCameraWhenIdle: boolean;
-  predictedFacesCameraWhenIdle: boolean;
-  authoritativeMovementReferenceYaw?: number;
-  predictedMovementReferenceYaw?: number;
-  authoritativeSwimming: boolean;
-  predictedSwimming: boolean;
-  authoritativeGroundFootOffset: number;
-  predictedGroundFootOffset: number;
-  predictedGroundGraceRemainingS: number;
-  authoritativeJustSubmergedRemainingS: number;
-  predictedJustSubmergedRemainingS: number;
-  authoritativeSwimUpwardCooldownRemainingS: number;
-  predictedSwimUpwardCooldownRemainingS: number;
-};
-
-type LocalPredictionState = {
-  entityId?: number;
-  mode?: LocalPredictionMode;
-  predictedPosition: Vector3;
-  predictedRotation: Quaternion;
-  authoritativePosition: Vector3;
-  authoritativeRotation: Quaternion;
-  authoritativeCustomState: number[];
-  authoritativeJumpVelocity: number;
-  authoritativeRunVelocity: number;
-  authoritativeSwimFastVelocity: number;
-  authoritativeSwimSlowVelocity: number;
-  authoritativeSwimUpwardVelocity: number;
-  authoritativeWalkVelocity: number;
-  useAuthoritativeMovementConfig: boolean;
-  estimatedVerticalVelocity: number;
-  estimatedWalkSpeed: number;
-  estimatedRunSpeed: number;
-  worldTimestepS: number;
-  supportsInputAcknowledgements: boolean;
-  lastAcknowledgedHadMovementInput?: boolean;
-  lastAcknowledgedMovementRunning?: boolean;
-  lastAcknowledgedMovementDirectionX?: number;
-  lastAcknowledgedMovementDirectionZ?: number;
-  lastAcknowledgedRollbackInputs: RollbackPredictedInputSnapshot;
-  pendingSpeedCalibrationAcknowledgedInputSequenceNumber?: number;
-  hasPredictedTransform: boolean;
-  hasAuthoritativePosition: boolean;
-  hasAuthoritativeRotation: boolean;
-  lastAuthoritativePositionServerTick: number;
-  lastAuthoritativeRotationServerTick: number;
-  predictedCustomState: number[];
-  controllerState: LocalPredictionControllerState;
-  commandBuffer: LocalPredictionCommand[];
-  commandBufferHead: number;
-  commandBufferCount: number;
-  lastAcknowledgedInputSequenceNumber: number;
-};
-
-type LocalPredictionDebugState = {
-  lastReconcileMode: 'none' | 'buffered' | 'deferred' | 'soft' | 'snap';
-  softReconcileCount: number;
-  snapReconcileCount: number;
-  forcedActiveReconcileCount: number;
-  deferredActiveReconcileCount: number;
-  authoritativeGroundedTransitionCount: number;
-  predictedGroundedTransitionCount: number;
-};
+// Types are imported from './prediction/PredictionTypes' above.
 
 export default class EntityManager {
   private _game: Game;
