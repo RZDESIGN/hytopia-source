@@ -1620,34 +1620,31 @@ export default class EntityManager {
 
     // True CSP depends on input acknowledgements, so force/snap
     // reconciliation is paused while commands remain pending.
-    // However, soft reconciliation always runs so the predicted position
-    // gently nudges toward authoritative — this prevents unchecked drift
-    // during server ACK stalls.
-    const shouldContinuouslyReconcile = true;
+    // Soft reconciliation always runs — the reconciler itself has proper
+    // dead zones and correction rates for active-movement vs idle.
     const allowForceOrSnap = this._localPredictionState.commandBufferCount === 0;
     const isActivelyMoving = hasLocalRollbackIntent;
 
-    this._localPredictionDebug.lastReconcileMode = allowForceOrSnap ? 'none' : 'buffered';
+    // Check if a forced reconciliation is needed (large error during movement)
+    const shouldForceActiveInputReconcile = allowForceOrSnap &&
+      hasLocalRollbackIntent &&
+      this._shouldForceActiveInputReconcile();
 
-    if (shouldContinuouslyReconcile) {
-      const shouldForceActiveInputReconcile = allowForceOrSnap &&
-        hasLocalRollbackIntent &&
-        this._shouldForceActiveInputReconcile();
-      const shouldDeferActiveInputReconcile = hasLocalRollbackIntent
-        ? !shouldForceActiveInputReconcile
-        : false;
+    if (shouldForceActiveInputReconcile) {
+      this._localPredictionDebug.forcedActiveReconcileCount++;
+    }
 
-      if (!shouldDeferActiveInputReconcile) {
-        if (shouldForceActiveInputReconcile) {
-          this._localPredictionDebug.forcedActiveReconcileCount++;
-        }
+    // Only defer when force is required but the buffer isn't empty yet
+    const shouldDefer = hasLocalRollbackIntent &&
+      !allowForceOrSnap &&
+      this._shouldForceActiveInputReconcile();
 
-        this._localPredictionDebug.lastReconcileMode =
-          this._reconcileLocalPrediction(isActivelyMoving, clampedFrameDeltaS);
-      } else {
-        this._localPredictionDebug.deferredActiveReconcileCount++;
-        this._localPredictionDebug.lastReconcileMode = 'deferred';
-      }
+    if (shouldDefer) {
+      this._localPredictionDebug.deferredActiveReconcileCount++;
+      this._localPredictionDebug.lastReconcileMode = 'deferred';
+    } else {
+      this._localPredictionDebug.lastReconcileMode =
+        this._reconcileLocalPrediction(isActivelyMoving, clampedFrameDeltaS);
     }
 
     entity.applyClientPredictedTransform(
