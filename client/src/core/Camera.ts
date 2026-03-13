@@ -36,6 +36,7 @@ const vec3 = new Vector3();
 const vec3b = new Vector3();
 const vec3c = new Vector3();
 const vec3d = new Vector3();
+const vec3e = new Vector3();
 const vec3f = new Vector3();
 const modelViewEuler = new Euler(0, 0, 0, 'YXZ');
 const yawOnlyEuler = new Euler(0, 0, 0, 'YXZ');
@@ -942,6 +943,39 @@ export default class Camera {
     return this._gameCameraAttachedPosition!;
   }
 
+  private _resolveThirdPersonLocalModelPositionOffset(
+    entity: Entity,
+    target: Vector3,
+  ): Vector3 | undefined {
+    if (
+      this._gameCameraMode !== CameraMode.THIRD_PERSON ||
+      this._gameCameraAttachedEntity?.id !== entity.id ||
+      this._gameCameraLocalAttachmentSourceKey !== `entity:${entity.id}` ||
+      !this._gameCameraLocalAttachmentPosition
+    ) {
+      return undefined;
+    }
+
+    const localPredictedEntity = this._game.entityManager.localPredictedEntity;
+    if (!localPredictedEntity || localPredictedEntity.id !== entity.id) {
+      return undefined;
+    }
+
+    target.copy(this._gameCameraLocalAttachmentPosition).sub(entity.position);
+    if (target.lengthSq() <= CAMERA_POSITION_DEADZONE_SQ) {
+      return undefined;
+    }
+
+    tempQuat.copy(entity.entityRoot.quaternion).invert();
+    target.applyQuaternion(tempQuat);
+
+    if (entity.scale.x !== 0) target.x /= entity.scale.x;
+    if (entity.scale.y !== 0) target.y /= entity.scale.y;
+    if (entity.scale.z !== 0) target.z /= entity.scale.z;
+
+    return target;
+  }
+
   private _updateGameCamera(frameDeltaS: number): void {
     if (!this._gameCameraAttachedEntity && !this._gameCameraAttachedPosition) {
       return console.warn(`Camera._updateGameCamera(): No camera attachment or position set for game camera.`);
@@ -1166,13 +1200,17 @@ export default class Camera {
       const basePosition = model?.userData.cameraViewModelBasePosition as Vector3 | undefined;
       const baseQuaternion = model?.userData.cameraViewModelBaseQuaternion as Quaternion | undefined;
       const baseCameraOffset = model?.userData.cameraViewModelBaseCameraOffset as Vector3 | undefined;
+      const resolvedBasePosition = model
+        ? (basePosition ?? (model.userData.cameraViewModelBasePosition = model.position.clone()))
+        : undefined;
+      const resolvedBaseQuaternion = model
+        ? (baseQuaternion ?? (model.userData.cameraViewModelBaseQuaternion = model.quaternion.clone()))
+        : undefined;
+      const localThirdPersonModelOffset = model
+        ? this._resolveThirdPersonLocalModelPositionOffset(entity, vec3e)
+        : undefined;
 
       if (model && (this._gameCameraMode === CameraMode.FIRST_PERSON || this._gameCameraModelPitchesWithCamera || this._gameCameraModelYawsWithCamera)) {
-        if (!basePosition) {
-          model.userData.cameraViewModelBasePosition = model.position.clone();
-        }
-        const resolvedBaseQuaternion = baseQuaternion ?? (model.userData.cameraViewModelBaseQuaternion = model.quaternion.clone());
-
         const pitch = this._gameCameraModelPitchesWithCamera ? -this._gameCameraPitch : 0;
         let yaw = 0;
         if (this._gameCameraModelYawsWithCamera) {
@@ -1214,18 +1252,25 @@ export default class Camera {
             .add(modelAnchorPosition);
           entity.entityRoot.worldToLocal(vec3);
           model.position.copy(vec3);
-        } else if (basePosition) {
+        } else if (resolvedBasePosition) {
           // Third-person: keep the model anchored to its base position.
-          model.position.copy(basePosition);
+          model.position.copy(resolvedBasePosition);
         }
 
-        model.quaternion.copy(modelViewQuat).multiply(resolvedBaseQuaternion);
+        if (localThirdPersonModelOffset) {
+          model.position.add(localThirdPersonModelOffset);
+        }
+
+        model.quaternion.copy(modelViewQuat).multiply(resolvedBaseQuaternion!);
         model.updateMatrix();
         model.updateMatrixWorld(true);
       } else if (model) {
-        if (basePosition && baseQuaternion) {
-          model.position.copy(basePosition);
-          model.quaternion.copy(baseQuaternion);
+        if (resolvedBasePosition && resolvedBaseQuaternion) {
+          model.position.copy(resolvedBasePosition);
+          if (localThirdPersonModelOffset) {
+            model.position.add(localThirdPersonModelOffset);
+          }
+          model.quaternion.copy(resolvedBaseQuaternion);
           model.updateMatrix();
           model.updateMatrixWorld(true);
         }
