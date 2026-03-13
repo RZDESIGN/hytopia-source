@@ -25144,6 +25144,447 @@
         },
         {
           "kind": "Class",
+          "canonicalReference": "server!EnvironmentController:class",
+          "docComment": "/**\n * Drives a world's day/night lighting and procedural weather state.\n *\n * Use for: quickly enabling a Minecraft-style moving sun, dynamic ambient/fog, and procedural sky weather on any world. Do NOT use for: biome-specific precipitation audio or gameplay reactions; keep those in your game code via `onWeatherPresetChange`.\n *\n * **Category:** Core\n *\n * @public\n */\n",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export default class EnvironmentController "
+            }
+          ],
+          "fileUrlPath": "src/worlds/EnvironmentController.ts",
+          "releaseTag": "Public",
+          "isAbstract": false,
+          "name": "EnvironmentController",
+          "preserveMemberOrder": false,
+          "members": [
+            {
+              "kind": "Constructor",
+              "canonicalReference": "server!EnvironmentController:constructor(1)",
+              "docComment": "/**\n * Constructs a new instance of the `EnvironmentController` class\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "constructor(world: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "World",
+                  "canonicalReference": "server!World:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": ", options?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "EnvironmentControllerOptions",
+                  "canonicalReference": "server!EnvironmentControllerOptions:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ");"
+                }
+              ],
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "world",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                },
+                {
+                  "parameterName": "options",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 3,
+                    "endIndex": 4
+                  },
+                  "isOptional": true
+                }
+              ]
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!EnvironmentController#dispose:member(1)",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "dispose(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "dispose"
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!EnvironmentController#hour:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get hour(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "hour",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!EnvironmentController#minute:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get minute(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "minute",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!EnvironmentController#setTimeMs:member(1)",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setTimeMs(timeMs: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "timeMs",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setTimeMs"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!EnvironmentController#start:member(1)",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "start(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "start"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!EnvironmentController#stop:member(1)",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "stop(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "stop"
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!EnvironmentController#timeMs:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get timeMs(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "number"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "timeMs",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!EnvironmentController#update:member(1)",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "update(): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "update"
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!EnvironmentController#weatherPreset:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get weatherPreset(): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "EnvironmentWeatherPreset",
+                  "canonicalReference": "server!EnvironmentWeatherPreset:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "weatherPreset",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            }
+          ],
+          "implementsTokenRanges": []
+        },
+        {
+          "kind": "TypeAlias",
+          "canonicalReference": "server!EnvironmentControllerOptions:type",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export type EnvironmentControllerOptions = "
+            },
+            {
+              "kind": "Content",
+              "text": "{\n    autoStart?: boolean;\n    clockIntervalMs?: number;\n    cycleDurationMs?: number;\n    cycleOffsetHours?: number;\n    dayDurationRatio?: number;\n    daySkyboxIntensity?: number;\n    ensureProceduralSky?: boolean;\n    fogColor?: "
+            },
+            {
+              "kind": "Reference",
+              "text": "RgbColor",
+              "canonicalReference": "server!RgbColor:interface"
+            },
+            {
+              "kind": "Content",
+              "text": ";\n    maxAmbientLightIntensity?: number;\n    maxDirectionalLightIntensity?: number;\n    minAmbientLightIntensity?: number;\n    minDirectionalLightIntensity?: number;\n    nightSkyboxIntensity?: number;\n    onWeatherPresetChange?: (world: "
+            },
+            {
+              "kind": "Reference",
+              "text": "World",
+              "canonicalReference": "server!World:class"
+            },
+            {
+              "kind": "Content",
+              "text": ", weatherPreset: "
+            },
+            {
+              "kind": "Reference",
+              "text": "EnvironmentWeatherPreset",
+              "canonicalReference": "server!EnvironmentWeatherPreset:type"
+            },
+            {
+              "kind": "Content",
+              "text": ") => void;\n    proceduralSkyUri?: string;\n    startTimeMs?: number;\n    sunBaseHeight?: number;\n    sunHeightRange?: number;\n    sunRadius?: number;\n    weatherEnabled?: boolean;\n    weatherSeed?: number;\n}"
+            },
+            {
+              "kind": "Content",
+              "text": ";"
+            }
+          ],
+          "fileUrlPath": "src/worlds/EnvironmentController.ts",
+          "releaseTag": "Public",
+          "name": "EnvironmentControllerOptions",
+          "typeTokenRange": {
+            "startIndex": 1,
+            "endIndex": 8
+          }
+        },
+        {
+          "kind": "TypeAlias",
+          "canonicalReference": "server!EnvironmentWeatherPreset:type",
+          "docComment": "",
+          "excerptTokens": [
+            {
+              "kind": "Content",
+              "text": "export type EnvironmentWeatherPreset = "
+            },
+            {
+              "kind": "Content",
+              "text": "'clear' | 'cloudy' | 'overcast' | 'storm'"
+            },
+            {
+              "kind": "Content",
+              "text": ";"
+            }
+          ],
+          "fileUrlPath": "src/worlds/EnvironmentController.ts",
+          "releaseTag": "Public",
+          "name": "EnvironmentWeatherPreset",
+          "typeTokenRange": {
+            "startIndex": 1,
+            "endIndex": 2
+          }
+        },
+        {
+          "kind": "Class",
           "canonicalReference": "server!ErrorHandler:class",
           "docComment": "/**\n * Manages error and warning logging.\n *\n * When to use: reporting recoverable issues or fatal errors with consistent formatting. Do NOT use for: normal control flow; prefer explicit return values or exceptions.\n *\n * @remarks\n *\n * In production, `console.log` is disabled to reduce log spam; use `console.info` instead. Pattern: log warnings for recoverable issues and use `ErrorHandler.fatalError` for unrecoverable state. Anti-pattern: swallowing exceptions without logging context.\n *\n * **Category:** Utilities\n *\n * @public\n */\n",
           "excerptTokens": [
@@ -64090,6 +64531,41 @@
             },
             {
               "kind": "Property",
+              "canonicalReference": "server!World#environmentController:member",
+              "docComment": "/**\n * The built-in environment controller for this world, if enabled.\n *\n * **Category:** Core\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get environmentController(): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "EnvironmentController",
+                  "canonicalReference": "server!EnvironmentController:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": " | null"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "environmentController",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 3
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
               "canonicalReference": "server!World#fogColor:member",
               "docComment": "/**\n * The fog color, or undefined to use ambient light color.\n *\n * **Category:** Core\n */\n",
               "excerptTokens": [
@@ -64828,7 +65304,7 @@
             {
               "kind": "Method",
               "canonicalReference": "server!World#setSkyboxUri:member(1)",
-              "docComment": "/**\n * Sets the cubemap URI of the world's skybox.\n *\n * @param skyboxUri - The cubemap URI of the skybox.\n *\n * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.\n *\n * **Category:** Core\n */\n",
+              "docComment": "/**\n * Sets the skybox URI for the world.\n *\n * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the dynamic sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain`.\n *\n * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.\n *\n * **Category:** Core\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",
@@ -67229,6 +67705,38 @@
             },
             {
               "kind": "PropertySignature",
+              "canonicalReference": "server!WorldOptions#environment:member",
+              "docComment": "/**\n * Enables the built-in day/night and procedural weather controller. Defaults to enabled for `skyboxes/procedural` worlds.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "environment?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "boolean | "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "EnvironmentControllerOptions",
+                  "canonicalReference": "server!EnvironmentControllerOptions:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": true,
+              "releaseTag": "Public",
+              "name": "environment",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 3
+              }
+            },
+            {
+              "kind": "PropertySignature",
               "canonicalReference": "server!WorldOptions#fogColor:member",
               "docComment": "/**\n * The color of the fog for the world. Defaults to ambient light color.\n */\n",
               "excerptTokens": [
@@ -67449,7 +67957,7 @@
             {
               "kind": "PropertySignature",
               "canonicalReference": "server!WorldOptions#skyboxUri:member",
-              "docComment": "/**\n * The URI of the skybox cubemap for the world.\n */\n",
+              "docComment": "/**\n * The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the dynamic sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain`.\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",

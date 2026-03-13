@@ -140,6 +140,25 @@ _(Optional)_ The position the directional light originates from for the world.
 </td></tr>
 <tr><td>
 
+[environment?](./server.worldoptions.environment.md)
+
+
+</td><td>
+
+
+</td><td>
+
+boolean \| [EnvironmentControllerOptions](./server.environmentcontrolleroptions.md)
+
+
+</td><td>
+
+_(Optional)_ Enables the built-in day/night and procedural weather controller. Defaults to enabled for `skyboxes/procedural` worlds.
+
+
+</td></tr>
+<tr><td>
+
 [fogColor?](./server.worldoptions.fogcolor.md)
 
 
@@ -305,7 +324,7 @@ string
 
 </td><td>
 
-The URI of the skybox cubemap for the world.
+The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the dynamic sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain`<!-- -->.
 
 
 </td></tr>

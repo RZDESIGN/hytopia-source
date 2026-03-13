@@ -1,5 +1,4 @@
 import { Player, PlayerManager, World } from 'hytopia';
-import GameClock from './GameClock';
 import GamePlayer from './GamePlayer';
 import ItemRegistry from './items/ItemRegistry';
 import QuestRegistry from './quests/QuestRegistry';
@@ -45,34 +44,28 @@ export default class GameManager {
     // Chitter Forest
     const chitterForestRegion = new ChitterForestRegion();
     this._regions.set(chitterForestRegion.id, chitterForestRegion);
-    GameClock.instance.addRegionClockCycle(chitterForestRegion);
 
     // Hearthwilds
     const hearthwildsRegion = new HearthwildsRegion();
     this._regions.set(hearthwildsRegion.id, hearthwildsRegion);
-    GameClock.instance.addRegionClockCycle(hearthwildsRegion);
     // this._startRegion = hearthwildsRegion;
 
     // Ratkin Nest
     const ratkinNestRegion = new RatkinNestRegion();
     this._regions.set(ratkinNestRegion.id, ratkinNestRegion);
-    GameClock.instance.addRegionClockCycle(ratkinNestRegion);
     
     // Stalkhaven
     const stalkhavenRegion = new StalkhavenRegion();
     this._regions.set(stalkhavenRegion.id, stalkhavenRegion);
-    GameClock.instance.addRegionClockCycle(stalkhavenRegion);
 
     // Stalkhaven Port
     const stalkhavenPortRegion = new StalkhavenPortRegion();
     this._regions.set(stalkhavenPortRegion.id, stalkhavenPortRegion);
-    GameClock.instance.addRegionClockCycle(stalkhavenPortRegion);
     this._startRegion = stalkhavenPortRegion;
 
     // Weaver's Hollow
     const weaversHollowRegion = new WeaversHollowRegion();
     this._regions.set(weaversHollowRegion.id, weaversHollowRegion);
-    GameClock.instance.addRegionClockCycle(weaversHollowRegion);
   }
 
   private _selectWorldForPlayer = async (player: Player): Promise<World | undefined> => {

@@ -4,7 +4,7 @@
 
 ## World.setSkyboxUri() method
 
-Sets the cubemap URI of the world's skybox.
+Sets the skybox URI for the world.
 
 **Signature:**
 
@@ -42,7 +42,7 @@ string
 
 </td><td>
 
-The cubemap URI of the skybox.
+The cubemap URI of the skybox, or `skyboxes/procedural` for the dynamic sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`<!-- -->, and precipitation can be overridden with `?precip=rain`<!-- -->.
 
 \*\*Side effects:\*\* Emits `WorldEvent.SET_SKYBOX_URI`<!-- -->.
 

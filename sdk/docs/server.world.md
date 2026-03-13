@@ -329,6 +329,29 @@ The entity manager for this world.
 </td></tr>
 <tr><td>
 
+[environmentController](./server.world.environmentcontroller.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+[EnvironmentController](./server.environmentcontroller.md) \| null
+
+
+</td><td>
+
+The built-in environment controller for this world, if enabled.
+
+\*\*Category:\*\* Core
+
+
+</td></tr>
+<tr><td>
+
 [fogColor](./server.world.fogcolor.md)
 
 
@@ -773,7 +796,7 @@ Sets the intensity of the world's skybox brightness.
 
 </td><td>
 
-Sets the cubemap URI of the world's skybox.
+Sets the skybox URI for the world.
 
 
 </td></tr>

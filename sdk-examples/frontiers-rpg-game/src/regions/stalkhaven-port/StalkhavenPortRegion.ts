@@ -12,7 +12,7 @@ export default class StalkhavenRegion extends GameRegion {
       id: 'stalkhaven-port',
       name: 'Stalkhaven Port',
       map: stalkhavenPortMap,
-      skyboxUri: 'skyboxes/partly-cloudy',
+      skyboxUri: 'skyboxes/procedural?weather=cloudy',
       spawnPoint: { x: -5, y: 8, z: 11 },
       ambientAudioUri: 'audio/music/hytopia-main-theme.mp3',
     });

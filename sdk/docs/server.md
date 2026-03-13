@@ -251,6 +251,21 @@ When to use: configuring visual and transform overrides for one or more model no
 </td></tr>
 <tr><td>
 
+[EnvironmentController](./server.environmentcontroller.md)
+
+
+</td><td>
+
+Drives a world's day/night lighting and procedural weather state.
+
+Use for: quickly enabling a Minecraft-style moving sun, dynamic ambient/fog, and procedural sky weather on any world. Do NOT use for: biome-specific precipitation audio or gameplay reactions; keep those in your game code via `onWeatherPresetChange`<!-- -->.
+
+\*\*Category:\*\* Core
+
+
+</td></tr>
+<tr><td>
+
 [ErrorHandler](./server.errorhandler.md)
 
 
@@ -2327,6 +2342,24 @@ The options for creating an `Entity` instance.
 Use for: constructing an entity; choose `BlockEntityOptions` or `ModelEntityOptions`<!-- -->. Do NOT use for: mutating entity state after spawn; use entity setters and methods.
 
 \*\*Category:\*\* Entities
+
+
+</td></tr>
+<tr><td>
+
+[EnvironmentControllerOptions](./server.environmentcontrolleroptions.md)
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
+[EnvironmentWeatherPreset](./server.environmentweatherpreset.md)
+
+
+</td><td>
 
 
 </td></tr>

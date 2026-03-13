@@ -26,7 +26,7 @@ export default class ChitterForestRegion extends GameRegion {
       id: 'chitter-forest',
       name: 'Chitter Forest',
       map: chitterForestMap,
-      skyboxUri: 'skyboxes/partly-cloudy',
+      skyboxUri: 'skyboxes/procedural?weather=cloudy',
       spawnPoint: { x: -7, y: 2, z: 75 },
       ambientAudioUri: 'audio/music/jungle-theme-looping.mp3',
     });

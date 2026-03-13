@@ -11,7 +11,6 @@ import {
 } from 'hytopia';
 
 import { SkillId } from './config';
-import GameClock from './GameClock';
 import GamePlayer from './GamePlayer';
 import Levels from './systems/Levels';
 import type BaseCraftingEntity from './entities/BaseCraftingEntity';
@@ -387,10 +386,11 @@ export default class GamePlayerEntity extends DefaultPlayerEntity implements IDa
     this.nametagSceneUI.setOffset({ x: 0, y: nameplateYOffset + 0.25, z: 0 });
 
     // Sync HUD Clock
+    const environmentController = this._gamePlayer.currentRegion?.world.environmentController;
     this.player.ui.sendData({
       type: 'syncClock',
-      hour: GameClock.instance.hour,
-      minute: GameClock.instance.minute,
+      hour: environmentController?.hour ?? 12,
+      minute: environmentController?.minute ?? 0,
     });
 
     // Show Area Banner

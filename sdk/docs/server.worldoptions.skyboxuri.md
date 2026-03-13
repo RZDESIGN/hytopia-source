@@ -4,7 +4,7 @@
 
 ## WorldOptions.skyboxUri property
 
-The URI of the skybox cubemap for the world.
+The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the dynamic sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain`<!-- -->.
 
 **Signature:**
 

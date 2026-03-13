@@ -3,6 +3,7 @@ import AudioManager from '@/worlds/audios/AudioManager';
 import BlockTypeRegistry from '@/worlds/blocks/BlockTypeRegistry';
 import ChatManager from '@/worlds/chat/ChatManager';
 import ChunkLattice from '@/worlds/blocks/ChunkLattice';
+import EnvironmentController from '@/worlds/EnvironmentController';
 import Entity from '@/worlds/entities/Entity';
 import EntityManager from '@/worlds/entities/EntityManager';
 import EventRouter from '@/events/EventRouter';
@@ -17,6 +18,7 @@ import type { BlockTypeOptions } from '@/worlds/blocks/BlockType';
 import type { EntityOptions } from '@/worlds/entities/Entity';
 import type RgbColor from '@/shared/types/RgbColor';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
+import type { EnvironmentControllerOptions } from '@/worlds/EnvironmentController';
 
 /**
  * A map representation for initializing a world.
@@ -103,7 +105,7 @@ export interface WorldOptions {
   /** The intensity of the skybox brightness for the world. 0 is black, 1 is full brightness, 1+ is brighter. */
   skyboxIntensity?: number;
 
-  /** The URI of the skybox cubemap for the world. */
+  /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the dynamic sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain`. */
   skyboxUri: string;
 
   /** An arbitrary identifier tag of the world. Useful for your own logic */
@@ -114,6 +116,9 @@ export interface WorldOptions {
 
   /** The gravity vector for the world. */
   gravity?: Vector3Like;
+
+  /** Enables the built-in day/night and procedural weather controller. Defaults to enabled for `skyboxes/procedural` worlds. */
+  environment?: boolean | EnvironmentControllerOptions;
 }
 
 /**
@@ -246,6 +251,9 @@ export default class World extends EventRouter implements protocol.Serializable 
   private _directionalLightPosition: Vector3Like;
 
   /** @internal */
+  private _environmentController: EnvironmentController | null = null;
+
+  /** @internal */
   private _entityManager: EntityManager;
 
   /** @internal */
@@ -327,6 +335,16 @@ export default class World extends EventRouter implements protocol.Serializable 
     this._sceneUIManager = new SceneUIManager(this);
     this._simulation = new Simulation(this, options.tickRate, options.gravity);
 
+    const shouldEnableEnvironment = options.environment !== false
+      && (options.environment !== undefined || this._skyboxUri.startsWith('skyboxes/procedural'));
+    if (shouldEnableEnvironment) {
+      const environmentOptions = typeof options.environment === 'object' ? options.environment : undefined;
+      this._environmentController = new EnvironmentController(this, {
+        ...environmentOptions,
+        autoStart: false,
+      });
+    }
+
     if (options.map) {
       this.loadMap(options.map);
     }
@@ -394,6 +412,13 @@ export default class World extends EventRouter implements protocol.Serializable 
    * **Category:** Core
    */
   public get directionalLightPosition(): Vector3Like { return this._directionalLightPosition; }
+
+  /**
+   * The built-in environment controller for this world, if enabled.
+   *
+   * **Category:** Core
+   */
+  public get environmentController(): EnvironmentController | null { return this._environmentController; }
 
   /**
    * The entity manager for this world.
@@ -748,9 +773,9 @@ export default class World extends EventRouter implements protocol.Serializable 
   }
 
   /**
-   * Sets the cubemap URI of the world's skybox.
+   * Sets the skybox URI for the world.
    *
-   * @param skyboxUri - The cubemap URI of the skybox.
+   * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the dynamic sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain`.
    *
    * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.
    *
@@ -779,6 +804,7 @@ export default class World extends EventRouter implements protocol.Serializable 
   public start(): void {
     if (this._loop.isStarted) return; // already started
 
+    this._environmentController?.start();
     this._loop.start();
 
     this.emit(WorldEvent.START, {
@@ -799,7 +825,8 @@ export default class World extends EventRouter implements protocol.Serializable 
    */
   public stop(): void {
     if (!this._loop.isStarted) return; // not started
-    
+
+    this._environmentController?.stop();
     this._loop.stop();
 
     this.emit(WorldEvent.STOP, {

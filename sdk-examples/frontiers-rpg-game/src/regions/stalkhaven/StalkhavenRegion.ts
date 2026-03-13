@@ -21,7 +21,7 @@ export default class StalkhavenRegion extends GameRegion {
       id: 'stalkhaven',
       name: 'Stalkhaven',
       map: stalkhavenMap,
-      skyboxUri: 'skyboxes/partly-cloudy',
+      skyboxUri: 'skyboxes/procedural?weather=cloudy',
       spawnPoint: { x: 1, y: 2, z: 40 },
       ambientAudioUri: 'audio/music/hytopia-main-theme.mp3',
     });

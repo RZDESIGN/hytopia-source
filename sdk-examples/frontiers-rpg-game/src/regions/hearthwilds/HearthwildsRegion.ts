@@ -34,7 +34,7 @@ export default class HearthwildsRegion extends GameRegion {
       id: 'hearthwilds',
       name: 'Hearthwilds',
       map: hearthwildsMap,
-      skyboxUri: 'skyboxes/partly-cloudy',
+      skyboxUri: 'skyboxes/procedural?weather=cloudy',
       spawnPoint: { x: 245, y: 22, z: -90 },
       ambientAudioUri: 'audio/music/jungle-theme-looping.mp3',
       fogColor: { r: 152, g: 196, b: 127 },

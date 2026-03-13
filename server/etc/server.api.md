@@ -1616,6 +1616,57 @@ export interface EntityModelNodeOverrideOptions {
 export type EntityOptions = BlockEntityOptions | ModelEntityOptions;
 
 // @public
+export class EnvironmentController {
+    constructor(world: World, options?: EnvironmentControllerOptions);
+    // (undocumented)
+    dispose(): void;
+    // (undocumented)
+    get hour(): number;
+    // (undocumented)
+    get minute(): number;
+    // (undocumented)
+    setTimeMs(timeMs: number): void;
+    // (undocumented)
+    start(): void;
+    // (undocumented)
+    stop(): void;
+    // (undocumented)
+    get timeMs(): number;
+    // (undocumented)
+    update(): void;
+    // (undocumented)
+    get weatherPreset(): EnvironmentWeatherPreset;
+}
+
+// @public (undocumented)
+export type EnvironmentControllerOptions = {
+    autoStart?: boolean;
+    clockIntervalMs?: number;
+    cycleDurationMs?: number;
+    cycleOffsetHours?: number;
+    dayDurationRatio?: number;
+    daySkyboxIntensity?: number;
+    ensureProceduralSky?: boolean;
+    fogColor?: RgbColor;
+    maxAmbientLightIntensity?: number;
+    maxDirectionalLightIntensity?: number;
+    minAmbientLightIntensity?: number;
+    minDirectionalLightIntensity?: number;
+    nightSkyboxIntensity?: number;
+    onWeatherPresetChange?: (world: World, weatherPreset: EnvironmentWeatherPreset) => void;
+    proceduralSkyUri?: string;
+    startTimeMs?: number;
+    sunBaseHeight?: number;
+    sunHeightRange?: number;
+    sunRadius?: number;
+    weatherEnabled?: boolean;
+    weatherSeed?: number;
+};
+
+// @public (undocumented)
+export type EnvironmentWeatherPreset = 'clear' | 'cloudy' | 'overcast' | 'storm';
+
+// @public
 export class ErrorHandler {
     // @internal
     static enableCrashProtection(): void;
@@ -3591,6 +3642,7 @@ export class World extends EventRouter implements protocol.Serializable {
     get directionalLightIntensity(): number;
     get directionalLightPosition(): Vector3Like;
     get entityManager(): EntityManager;
+    get environmentController(): EnvironmentController | null;
     get fogColor(): RgbColor | undefined;
     get fogFar(): number;
     get fogNear(): number;
@@ -3804,6 +3856,7 @@ export interface WorldOptions {
     directionalLightColor?: RgbColor;
     directionalLightIntensity?: number;
     directionalLightPosition?: Vector3Like;
+    environment?: boolean | EnvironmentControllerOptions;
     fogColor?: RgbColor;
     fogFar?: number;
     fogNear?: number;

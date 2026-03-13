@@ -72,6 +72,10 @@ export type { BaseEntityOptions, BlockEntityOptions, EntityEventPayloads, Entity
 // EntityManager
 export { default as EntityManager } from '@/worlds/entities/EntityManager';
 
+// EnvironmentController
+export { default as EnvironmentController } from '@/worlds/EnvironmentController';
+export type { EnvironmentControllerOptions, EnvironmentWeatherPreset } from '@/worlds/EnvironmentController';
+
 // EntityModelAnimation
 export { default as EntityModelAnimation, EntityModelAnimationBlendMode, EntityModelAnimationEvent, EntityModelAnimationLoopMode, EntityModelAnimationState } from '@/worlds/entities/EntityModelAnimation';
 export type { EntityModelAnimationOptions, EntityModelAnimationEventPayloads } from '@/worlds/entities/EntityModelAnimation';
