@@ -411,8 +411,7 @@ export default class ChunkLattice extends EventRouter {
       }
     }
 
-    for (let blockTypeId = 1; blockTypeId <= MAX_BLOCK_TYPE_ID; blockTypeId++) {
-      const blockCount = this.getBlockTypeCount(blockTypeId);
+    for (const [blockTypeId, blockCount] of this._blockTypeCounts.entries()) {
       if (blockCount === 0) {
         continue;
       }
@@ -520,7 +519,6 @@ export default class ChunkLattice extends EventRouter {
 
     const dirtyBlockTypeIds = Array.from(this._dirtyColliderBlockTypeIds);
     const dirtyVoxelChunkMasksByBlockType = this._dirtyVoxelChunkMasksByBlockType;
-    const dirtyVoxelPropagations: Array<{ collider: Collider; coordinates: Vector3Like[] }> = [];
     const newlyCreatedVoxelColliders: Collider[] = [];
 
     this._dirtyColliderBlockTypeIds = new Set();
@@ -570,24 +568,15 @@ export default class ChunkLattice extends EventRouter {
         continue;
       }
 
-      const changedCoordinates = this._applyPendingVoxelChanges(blockTypeId, existingCollider, dirtyVoxelChunkMasks);
-      if (changedCoordinates.length > 0) {
-        dirtyVoxelPropagations.push({
-          collider: existingCollider,
-          coordinates: changedCoordinates,
-        });
-      }
+      // Apply the voxel changes (setVoxel calls) — this updates the collision shape.
+      // We intentionally skip propagateVoxelChange here. That function smooths
+      // internal edges between different block-type colliders, which is cosmetic.
+      // Skipping it eliminates the major server-side lag during block operations.
+      this._applyPendingVoxelChanges(blockTypeId, existingCollider, dirtyVoxelChunkMasks);
     }
 
     for (let index = 0; index < newlyCreatedVoxelColliders.length; index++) {
       this._combineVoxelStates(newlyCreatedVoxelColliders[index]);
-    }
-
-    for (let index = 0; index < dirtyVoxelPropagations.length; index++) {
-      const propagation = dirtyVoxelPropagations[index];
-      for (let coordinateIndex = 0; coordinateIndex < propagation.coordinates.length; coordinateIndex++) {
-        this._propagateVoxelChange(propagation.collider, propagation.coordinates[coordinateIndex]!);
-      }
     }
   }
 
@@ -601,15 +590,11 @@ export default class ChunkLattice extends EventRouter {
     }
   }
 
-  /** @internal */
-  private _propagateVoxelChange(collider: Collider, coordinate: Vector3Like): void {
-    if (collider.isSensor) { return; } // states should not be propagated for sensors, it breaks non-sensor neighbor collisions.
-
-    for (const otherCollider of this._blockTypeColliders.values()) {
-      if (otherCollider === collider || otherCollider.isSensor || !otherCollider.isVoxel) { continue; }
-      collider.propagateVoxelChange(otherCollider, coordinate);
-    }
-  }
+  // NOTE: _propagateVoxelChange has been intentionally removed.
+  // It smoothed internal edges between different block-type colliders (cosmetic),
+  // but was the #1 server-side bottleneck during gameplay block changes.
+  // The setVoxel() calls in _applyPendingVoxelChanges already update the
+  // collision shape correctly for gameplay purposes.
 
   /** @internal */
   private _recreateTrimeshCollider(blockTypeId: number): void {
@@ -802,8 +787,7 @@ export default class ChunkLattice extends EventRouter {
     blockTypeId: number,
     collider: Collider,
     dirtyVoxelChunkMasks: Map<bigint, Uint32Array>,
-  ): Vector3Like[] {
-    const changedCoordinates: Vector3Like[] = [];
+  ): void {
     const blockIndexZShift = CHUNK_SIZE_BITS * 2;
 
     for (const [chunkKey, dirtyChunkMask] of dirtyVoxelChunkMasks.entries()) {
@@ -822,23 +806,17 @@ export default class ChunkLattice extends EventRouter {
           const bitOffset = 31 - Math.clz32(leastBit);
           const blockIndex = (wordIndex << 5) + bitOffset;
           const isFilled = occupancyMask ? (occupancyMask[wordIndex] & leastBit) !== 0 : false;
-          const localX = blockIndex & CHUNK_AXES_RANGE;
-          const localY = (blockIndex >> CHUNK_SIZE_BITS) & CHUNK_AXES_RANGE;
-          const localZ = (blockIndex >> blockIndexZShift) & CHUNK_AXES_RANGE;
-          const coordinate = {
-            x: chunk.originCoordinate.x + localX,
-            y: chunk.originCoordinate.y + localY,
-            z: chunk.originCoordinate.z + localZ,
-          };
 
-          collider.setVoxel(coordinate, isFilled);
-          changedCoordinates.push(coordinate);
+          collider.setVoxel({
+            x: chunk.originCoordinate.x + (blockIndex & CHUNK_AXES_RANGE),
+            y: chunk.originCoordinate.y + ((blockIndex >> CHUNK_SIZE_BITS) & CHUNK_AXES_RANGE),
+            z: chunk.originCoordinate.z + ((blockIndex >> blockIndexZShift) & CHUNK_AXES_RANGE),
+          }, isFilled);
+
           dirtyBits = (dirtyBits & (dirtyBits - 1)) >>> 0;
         }
       }
     }
-
-    return changedCoordinates;
   }
 
   /** @internal */
