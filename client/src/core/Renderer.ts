@@ -1079,12 +1079,12 @@ export default class Renderer {
     const sunViewDirection = vec3b.copy(skySunDirection).negate();
     const sunMaterial = this._proceduralSunMesh.material as SquareSunMaterial;
     const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24)) * (1 - this._proceduralSkySettings.storminess * 0.65);
-    const sunDistance = 4200;
-    const sunSize = 960 + (1 - Math.max(0, sunViewDirection.y)) * 320;
+    const sunDistance = 880;
+    const sunSize = 260 + (1 - Math.max(0, sunViewDirection.y)) * 60;
 
     sunMaterial.dayAmount = dayAmount;
     sunMaterial.haloAmount = 1.0 - this._proceduralSkySettings.storminess * 0.16;
-    sunMaterial.sunColor.setRGB(1.0, 0.86, 0.42);
+    sunMaterial.sunColor.setRGB(1.0, 0.97, 0.92);
     sunMaterial.sunIntensity = Math.max(3.6, Math.min(this._directionalSceneLight.intensity + 1.2, 4.8));
 
     this._proceduralSunMesh.visible = dayAmount > 0.001;
@@ -1100,8 +1100,8 @@ export default class Renderer {
       const moonViewDirection = vec3c.copy(sunViewDirection).negate();
       const moonMaterial = this._proceduralMoonMesh.material as SquareSunMaterial;
       const moonAmount = Math.max(0, Math.min(1, (moonViewDirection.y + 0.1) / 0.32)) * (1 - this._proceduralSkySettings.storminess * 0.5);
-      const moonDistance = 3900;
-      const moonSize = 340 + moonAmount * 72;
+      const moonDistance = 840;
+      const moonSize = 100 + moonAmount * 20;
 
       moonMaterial.dayAmount = moonAmount;
       moonMaterial.haloAmount = 0.42;

@@ -316,8 +316,8 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
 
           vec3 zenithNight = vec3(0.025, 0.045, 0.14);
           vec3 horizonNight = vec3(0.055, 0.072, 0.15);
-          vec3 zenithDayBase = mix(vec3(0.05, 0.22, 0.82), vec3(0.32, 0.36, 0.48), ${UNIFORM_STORMINESS});
-          vec3 horizonDayBase = mix(vec3(0.22, 0.46, 0.82), vec3(0.44, 0.48, 0.58), ${UNIFORM_STORMINESS});
+          vec3 zenithDayBase = mix(vec3(0.04, 0.28, 0.95), vec3(0.32, 0.36, 0.48), ${UNIFORM_STORMINESS});
+          vec3 horizonDayBase = mix(vec3(0.20, 0.50, 0.94), vec3(0.44, 0.48, 0.58), ${UNIFORM_STORMINESS});
           vec3 zenithDay = zenithDayBase * (1.0 + ${UNIFORM_SKY_INTENSITY} * 0.02);
           vec3 horizonDay = mix(horizonDayBase, ${UNIFORM_FOG_COLOR}, 0.04) * (1.0 + ${UNIFORM_SKY_INTENSITY} * 0.01);
           vec3 nadir = mix(vec3(0.01, 0.014, 0.028), ${UNIFORM_FOG_COLOR} * 0.24, dayAmount);
@@ -507,8 +507,8 @@ export class SquareSunMaterial extends ShaderMaterial {
           }
 
           float intensity = min(${UNIFORM_SUN_INTENSITY}, 5.0);
-          vec3 baseSunColor = mix(${UNIFORM_SUN_COLOR}, vec3(1.0, 0.92, 0.52), 0.68);
-          vec3 coreColor = mix(baseSunColor, vec3(1.0, 1.0, 0.88), 0.18);
+          vec3 baseSunColor = mix(${UNIFORM_SUN_COLOR}, vec3(1.0, 0.97, 0.90), 0.42);
+          vec3 coreColor = mix(baseSunColor, vec3(1.0, 1.0, 0.96), 0.35);
           vec3 glowColor = mix(baseSunColor, vec3(1.0, 0.82, 0.38), 0.36);
           vec3 color = coreColor * (core * (2.4 + intensity * 0.32) + rim * 0.36)
             + glowColor * (glow * (0.6 + intensity * 0.08) * halo + outerGlow * 0.42 * halo);
