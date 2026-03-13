@@ -603,6 +603,29 @@ The URI of the skybox cubemap for this world.
 </td></tr>
 <tr><td>
 
+[skySunDirection](./server.world.skysundirection.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+[Vector3Like](./server.vector3like.md) \| undefined
+
+
+</td><td>
+
+The procedural sky sun direction, if explicitly authored.
+
+\*\*Category:\*\* Core
+
+
+</td></tr>
+<tr><td>
+
 [tag](./server.world.tag.md)
 
 
@@ -797,6 +820,20 @@ Sets the intensity of the world's skybox brightness.
 </td><td>
 
 Sets the skybox URI for the world.
+
+
+</td></tr>
+<tr><td>
+
+[setSkySunDirection(direction)](./server.world.setskysundirection.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Sets the procedural sky sun direction used to render celestial bodies.
 
 
 </td></tr>

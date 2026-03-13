@@ -123,7 +123,7 @@ class MeshLiquidMaterial extends ShaderMaterial {
 
           // Wave animation calculations
           vec3 pos = position;
-          float slowTime = ${UNIFORM_TIME} * 0.5;
+          float slowTime = ${UNIFORM_TIME} * 0.7;
 
           // Optimize face checks by combining conditions
           float yOffset = ${WATER_SURFACE_Y_OFFSET};
@@ -144,15 +144,15 @@ class MeshLiquidMaterial extends ShaderMaterial {
           float wave = 0.0;
           if (vSurfaceFlag > 0.5) {
             vec2 corner = floor(worldPos.xz + 0.5);
-            wave = sin(dot(corner, vec2(0.5)) + slowTime) * cos(dot(corner, vec2(0.5)) + slowTime) * 0.04 +
-                   sin(dot(corner, vec2(0.8)) + slowTime * 1.2) * cos(dot(corner, vec2(0.8)) + slowTime * 0.8) * 0.02;
+            wave = sin(dot(corner, vec2(0.5)) + slowTime) * cos(dot(corner, vec2(0.5)) + slowTime) * 0.055 +
+                   sin(dot(corner, vec2(0.8)) + slowTime * 1.2) * cos(dot(corner, vec2(0.8)) + slowTime * 0.8) * 0.03;
 
             // Only apply negative waves
             wave = min(0.0, wave);
             pos.y += wave;
 
             // Apply inward depression only to the actual liquid surface block.
-            float depression = abs(wave) * 0.05;
+            float depression = abs(wave) * 0.08;
             if (absNormalX > 0.5) pos.x -= sign(normal.x) * depression;
             if (absNormalZ > 0.5) pos.z -= sign(normal.z) * depression;
           }
@@ -218,13 +218,13 @@ class MeshLiquidMaterial extends ShaderMaterial {
 
           // Only the top block in a liquid column should look like a surface.
           if (vSurfaceFlag > 0.5 && vNormal.y > 0.5) {
-              vec2 ripplePhase = vWorldPos.xz * vec2(0.24, 0.21) + vec2(${UNIFORM_TIME} * 0.18, -${UNIFORM_TIME} * 0.14);
-              vec2 detailPhase = vWorldPos.xz * vec2(0.58, 0.51) + vec2(-${UNIFORM_TIME} * 0.11, ${UNIFORM_TIME} * 0.09);
+              vec2 ripplePhase = vWorldPos.xz * vec2(0.24, 0.21) + vec2(${UNIFORM_TIME} * 0.24, -${UNIFORM_TIME} * 0.18);
+              vec2 detailPhase = vWorldPos.xz * vec2(0.58, 0.51) + vec2(-${UNIFORM_TIME} * 0.15, ${UNIFORM_TIME} * 0.12);
               vec2 rippleNormal = vec2(
-                sin(ripplePhase.x) * 0.028 + cos(ripplePhase.y * 1.18) * 0.018 + sin(detailPhase.x * 1.07) * 0.010,
-                cos(ripplePhase.x * 0.92) * 0.024 + sin(ripplePhase.y * 1.09) * 0.016 + cos(detailPhase.y * 0.96) * 0.010
+                sin(ripplePhase.x) * 0.042 + cos(ripplePhase.y * 1.18) * 0.026 + sin(detailPhase.x * 1.07) * 0.014,
+                cos(ripplePhase.x * 0.92) * 0.036 + sin(ripplePhase.y * 1.09) * 0.022 + cos(detailPhase.y * 0.96) * 0.014
               );
-              surfaceNormal = normalize(vec3(surfaceNormal.x + rippleNormal.x, surfaceNormal.y + 0.35, surfaceNormal.z + rippleNormal.y));
+              surfaceNormal = normalize(vec3(surfaceNormal.x + rippleNormal.x, surfaceNormal.y + 0.3, surfaceNormal.z + rippleNormal.y));
               // Reflection is only valid when viewing the water surface from above and when
               // the projected reflection sample is still inside the reflection viewport.
               if (gl_FrontFacing && ${UNIFORM_REFLECTION_ENABLED} > 0.5) {
@@ -237,15 +237,15 @@ class MeshLiquidMaterial extends ShaderMaterial {
                   min(1.0 - projectedReflectionUv.x, 1.0 - projectedReflectionUv.y)
                 );
                 float reflectionOffsetFade = smoothstep(0.0, 0.10, projectedEdgeDistance);
-                vec2 projectedReflectionOffset = rippleNormal * mix(0.010, 0.018, fresnel) * reflectionOffsetFade;
+                vec2 projectedReflectionOffset = rippleNormal * mix(0.014, 0.024, fresnel) * reflectionOffsetFade;
                 vec2 reflectionSampleUv = clamp(projectedReflectionUv + projectedReflectionOffset, 0.0, 1.0);
                 float inBounds = step(0.0, projectedReflectionUv.x) * step(projectedReflectionUv.x, 1.0)
                   * step(0.0, projectedReflectionUv.y) * step(projectedReflectionUv.y, 1.0)
                   * step(0.0, reflectionUv.w);
                 float reflectionEdgeFade = smoothstep(0.015, 0.10, projectedEdgeDistance);
                 vec3 sceneReflection = texture2D(${UNIFORM_REFLECTION_TEXTURE}, clamp(reflectionSampleUv, 0.0, 1.0)).rgb;
-                vec3 reflectionTinted = mix(color, sceneReflection, 0.62 + fresnel * 0.16);
-                float reflectionStrength = clamp(0.24 + fresnel * 0.38, 0.0, 0.60) * inBounds * reflectionEdgeFade;
+                vec3 reflectionTinted = mix(color, sceneReflection, 0.7 + fresnel * 0.18);
+                float reflectionStrength = clamp(0.3 + fresnel * 0.42, 0.0, 0.68) * inBounds * reflectionEdgeFade;
 
                 color = mix(color, reflectionTinted, reflectionStrength);
               }

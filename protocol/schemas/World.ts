@@ -16,6 +16,7 @@ export type WorldSchema = {
   fn?: number;         // fog near
   n?: string;          // name
   s?: string;          // skyboxUri
+  sd?: VectorSchema | null; // procedural sky sun direction
   si?: number;         // skybox intensity
   t?: number;          // timestep (seconds)
 };
@@ -34,6 +35,7 @@ export const worldSchema: JSONSchemaType<WorldSchema> = {
     fn: { type: 'number', nullable: true },
     n: { type: 'string', nullable: true },
     s: { type: 'string', nullable: true },
+    sd: { ...vectorSchema, nullable: true },
     si: { type: 'number', nullable: true },
     t: { type: 'number', nullable: true },
   },

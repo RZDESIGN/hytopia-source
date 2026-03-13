@@ -3668,9 +3668,11 @@ export class World extends EventRouter implements protocol.Serializable {
     setFogNear(near: number): void;
     setSkyboxIntensity(intensity: number): void;
     setSkyboxUri(skyboxUri: string): void;
+    setSkySunDirection(direction: Vector3Like | undefined): void;
     get simulation(): Simulation;
     get skyboxIntensity(): number;
     get skyboxUri(): string;
+    get skySunDirection(): Vector3Like | undefined;
     start(): void;
     stop(): void;
     get tag(): string | undefined;
@@ -3694,6 +3696,8 @@ export enum WorldEvent {
     SET_FOG_FAR = "WORLD.SET_FOG_FAR",
     // (undocumented)
     SET_FOG_NEAR = "WORLD.SET_FOG_NEAR",
+    // (undocumented)
+    SET_SKY_SUN_DIRECTION = "WORLD.SET_SKY_SUN_DIRECTION",
     // (undocumented)
     SET_SKYBOX_INTENSITY = "WORLD.SET_SKYBOX_INTENSITY",
     // (undocumented)
@@ -3737,6 +3741,10 @@ export interface WorldEventPayloads {
     [WorldEvent.SET_FOG_NEAR]: {
         world: World;
         near: number;
+    };
+    [WorldEvent.SET_SKY_SUN_DIRECTION]: {
+        world: World;
+        direction: Vector3Like | undefined;
     };
     [WorldEvent.SET_SKYBOX_INTENSITY]: {
         world: World;

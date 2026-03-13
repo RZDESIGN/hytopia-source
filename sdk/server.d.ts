@@ -12790,6 +12790,7 @@ export declare class World extends EventRouter implements protocol.Serializable 
 
 
 
+
     /**
      * Creates a world instance with the provided options.
      *
@@ -12928,6 +12929,12 @@ export declare class World extends EventRouter implements protocol.Serializable 
      */
     get skyboxIntensity(): number;
     /**
+     * The procedural sky sun direction, if explicitly authored.
+     *
+     * **Category:** Core
+     */
+    get skySunDirection(): Vector3Like | undefined;
+    /**
      * The URI of the skybox cubemap for this world.
      *
      * **Category:** Core
@@ -13054,6 +13061,16 @@ export declare class World extends EventRouter implements protocol.Serializable 
      */
     setSkyboxIntensity(intensity: number): void;
     /**
+     * Sets the procedural sky sun direction used to render celestial bodies.
+     *
+     * @param direction - The normalized incoming sunlight direction, or undefined to clear it.
+     *
+     * **Side effects:** Emits `WorldEvent.SET_SKY_SUN_DIRECTION`.
+     *
+     * **Category:** Core
+     */
+    setSkySunDirection(direction: Vector3Like | undefined): void;
+    /**
      * Sets the skybox URI for the world.
      *
      * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the dynamic sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain`.
@@ -13106,6 +13123,7 @@ export declare enum WorldEvent {
     SET_FOG_FAR = "WORLD.SET_FOG_FAR",
     SET_FOG_NEAR = "WORLD.SET_FOG_NEAR",
     SET_SKYBOX_INTENSITY = "WORLD.SET_SKYBOX_INTENSITY",
+    SET_SKY_SUN_DIRECTION = "WORLD.SET_SKY_SUN_DIRECTION",
     SET_SKYBOX_URI = "WORLD.SET_SKYBOX_URI",
     START = "WORLD.START",
     STOP = "WORLD.STOP"
@@ -13162,6 +13180,11 @@ export declare interface WorldEventPayloads {
     [WorldEvent.SET_SKYBOX_INTENSITY]: {
         world: World;
         intensity: number;
+    };
+    /** Emitted when the procedural sky's sun direction is set. */
+    [WorldEvent.SET_SKY_SUN_DIRECTION]: {
+        world: World;
+        direction: Vector3Like | undefined;
     };
     /** Emitted when the URI of the world's skybox is set. */
     [WorldEvent.SET_SKYBOX_URI]: {
@@ -13531,6 +13554,7 @@ declare type WorldSchema = {
     fn?: number;
     n?: string;
     s?: string;
+    sd?: VectorSchema | null;
     si?: number;
     t?: number;
 };

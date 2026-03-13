@@ -284,6 +284,7 @@ export default class Renderer {
   private _directionalSceneLight: DirectionalLight;
   private _directionalViewModelLight: DirectionalLight;
   private _sunDirection: Vector3 = new Vector3(0.3, -1, 0.2).normalize();
+  private _skySunDirection: Vector3 | null = null;
   private _targetFogColor: Color = new Color();
   private _targetFogFar: number = 100000;
   private _targetFogNear: number = 100000;
@@ -301,6 +302,7 @@ export default class Renderer {
   private _lightningFlashQuad: Mesh;
   private _underWaterEffectQuad: Mesh;
   private _worldTickTimestepS: number = 1 / 60;
+  private _worldId: number | null = null;
   private _skyboxIntensity: number = 1;
   private _skyboxMesh: Mesh | null = null;
   private _waterReflectionRenderTarget: WebGLRenderTarget;
@@ -896,6 +898,11 @@ export default class Renderer {
 
     let needsTargetColorsUpdate = false;
 
+    if (this._worldId !== deserializedWorld.id) {
+      this._worldId = deserializedWorld.id;
+      this._skySunDirection = null;
+    }
+
     if (deserializedWorld.timestep !== undefined) {
       this._worldTickTimestepS = deserializedWorld.timestep;
     }
@@ -940,6 +947,25 @@ export default class Renderer {
         if (this._sunDirection.distanceToSquared(vec3) > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
           this._sunDirection.copy(vec3);
           this._markDirectionalShadowDirty();
+        }
+      }
+    }
+
+    if (deserializedWorld.skySunDirection !== undefined) {
+      if (deserializedWorld.skySunDirection === null) {
+        this._skySunDirection = null;
+      } else {
+        vec3.set(
+          deserializedWorld.skySunDirection.x,
+          deserializedWorld.skySunDirection.y,
+          deserializedWorld.skySunDirection.z,
+        );
+        if (vec3.lengthSq() > 0.0001) {
+          vec3.normalize();
+          if (this._skySunDirection === null) {
+            this._skySunDirection = new Vector3();
+          }
+          this._skySunDirection.copy(vec3);
         }
       }
     }
@@ -1027,7 +1053,8 @@ export default class Renderer {
     material.ambientColor.copy(this._ambientLight.color).multiplyScalar(this._ambientLight.intensity);
     material.fogColor.copy(fogColor);
     material.sunColor.copy(this._directionalSceneLight.color);
-    material.sunDirection.copy(this._sunDirection);
+    const skySunDirection = this._skySunDirection ?? this._sunDirection;
+    material.sunDirection.copy(skySunDirection);
     material.lightning = lightningIntensity;
     material.skyIntensity = this._skyboxIntensity;
     material.cloudCoverage = this._proceduralSkySettings.cloudCoverage;
@@ -1049,16 +1076,16 @@ export default class Renderer {
       return;
     }
 
-    const sunViewDirection = vec3b.copy(this._sunDirection).negate();
+    const sunViewDirection = vec3b.copy(skySunDirection).negate();
     const sunMaterial = this._proceduralSunMesh.material as SquareSunMaterial;
     const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24)) * (1 - this._proceduralSkySettings.storminess * 0.65);
     const sunDistance = 4200;
-    const sunSize = 500 + (1 - Math.max(0, sunViewDirection.y)) * 180;
+    const sunSize = 960 + (1 - Math.max(0, sunViewDirection.y)) * 320;
 
     sunMaterial.dayAmount = dayAmount;
-    sunMaterial.haloAmount = 0.9 - this._proceduralSkySettings.storminess * 0.35;
-    sunMaterial.sunColor.copy(this._directionalSceneLight.color);
-    sunMaterial.sunIntensity = Math.min(this._directionalSceneLight.intensity, 2.5);
+    sunMaterial.haloAmount = 1.0 - this._proceduralSkySettings.storminess * 0.16;
+    sunMaterial.sunColor.setRGB(1.0, 0.86, 0.42);
+    sunMaterial.sunIntensity = Math.max(3.6, Math.min(this._directionalSceneLight.intensity + 1.2, 4.8));
 
     this._proceduralSunMesh.visible = dayAmount > 0.001;
     if (this._proceduralSunMesh.visible) {
@@ -1074,12 +1101,12 @@ export default class Renderer {
       const moonMaterial = this._proceduralMoonMesh.material as SquareSunMaterial;
       const moonAmount = Math.max(0, Math.min(1, (moonViewDirection.y + 0.1) / 0.32)) * (1 - this._proceduralSkySettings.storminess * 0.5);
       const moonDistance = 3900;
-      const moonSize = 250 + moonAmount * 56;
+      const moonSize = 340 + moonAmount * 72;
 
       moonMaterial.dayAmount = moonAmount;
-      moonMaterial.haloAmount = 0.3;
+      moonMaterial.haloAmount = 0.42;
       moonMaterial.sunColor.setRGB(0.7, 0.78, 0.94);
-      moonMaterial.sunIntensity = 0.75;
+      moonMaterial.sunIntensity = 0.92;
 
       this._proceduralMoonMesh.visible = moonAmount > 0.001;
       if (this._proceduralMoonMesh.visible) {

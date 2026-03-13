@@ -191,6 +191,25 @@ Emitted when the density of the world's fog is set.
 </td></tr>
 <tr><td>
 
+["WORLD.SET\_SKY\_SUN\_DIRECTION"](./server.worldeventpayloads._world.set_sky_sun_direction_.md)
+
+
+</td><td>
+
+
+</td><td>
+
+{ world: [World](./server.world.md)<!-- -->; direction: [Vector3Like](./server.vector3like.md) \| undefined; }
+
+
+</td><td>
+
+Emitted when the procedural sky's sun direction is set.
+
+
+</td></tr>
+<tr><td>
+
 ["WORLD.SET\_SKYBOX\_INTENSITY"](./server.worldeventpayloads._world.set_skybox_intensity_.md)
 
 

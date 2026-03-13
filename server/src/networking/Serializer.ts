@@ -499,6 +499,7 @@ export default class Serializer {
       fn: world.fogNear,
       n: world.name,
       s: world.skyboxUri,
+      sd: world.skySunDirection ? this.serializeVector(world.skySunDirection) : null,
       si: world.skyboxIntensity,
       t: world.loop.timestepS,
     };

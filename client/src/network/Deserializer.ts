@@ -335,6 +335,7 @@ export type DeserializedWorld = {
   fogNear?: number;
   name?: string;
   skyboxUri?: string;
+  skySunDirection?: THREE.Vector3Like | null;
   skyboxIntensity?: number;
   timestep?: number;
 }
@@ -893,6 +894,7 @@ export default class Deserializer {
       fogNear: world.fn,
       name: world.n,
       skyboxUri: world.s,
+      skySunDirection: 'sd' in world ? (world.sd ? this.deserializeVector(world.sd) : null) : undefined,
       skyboxIntensity: world.si,
       timestep: world.t,
     };

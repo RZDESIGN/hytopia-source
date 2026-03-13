@@ -139,6 +139,7 @@ export enum WorldEvent {
   SET_FOG_FAR                     = 'WORLD.SET_FOG_FAR',
   SET_FOG_NEAR                    = 'WORLD.SET_FOG_NEAR',
   SET_SKYBOX_INTENSITY            = 'WORLD.SET_SKYBOX_INTENSITY',
+  SET_SKY_SUN_DIRECTION           = 'WORLD.SET_SKY_SUN_DIRECTION',
   SET_SKYBOX_URI                  = 'WORLD.SET_SKYBOX_URI',
   START                           = 'WORLD.START',
   STOP                            = 'WORLD.STOP',
@@ -177,6 +178,9 @@ export interface WorldEventPayloads {
 
   /** Emitted when the intensity of the world's skybox brightness is set. */
   [WorldEvent.SET_SKYBOX_INTENSITY]:            { world: World, intensity: number }
+
+  /** Emitted when the procedural sky's sun direction is set. */
+  [WorldEvent.SET_SKY_SUN_DIRECTION]:           { world: World, direction: Vector3Like | undefined }
 
   /** Emitted when the URI of the world's skybox is set. */
   [WorldEvent.SET_SKYBOX_URI]:                   { world: World, uri: string }
@@ -290,6 +294,9 @@ export default class World extends EventRouter implements protocol.Serializable 
   private _skyboxIntensity: number;
 
   /** @internal */
+  private _skySunDirection: Vector3Like | undefined;
+
+  /** @internal */
   private _skyboxUri: string;
 
   /** @internal */
@@ -321,6 +328,7 @@ export default class World extends EventRouter implements protocol.Serializable 
     this._fogNear = options.fogNear ?? 500;
     this._name = options.name;
     this._skyboxIntensity = options.skyboxIntensity ?? 1;
+    this._skySunDirection = undefined;
     this._skyboxUri = options.skyboxUri;
     this._tag = options.tag;
   
@@ -495,6 +503,13 @@ export default class World extends EventRouter implements protocol.Serializable 
    * **Category:** Core
    */
   public get skyboxIntensity(): number { return this._skyboxIntensity; }
+
+  /**
+   * The procedural sky sun direction, if explicitly authored.
+   *
+   * **Category:** Core
+   */
+  public get skySunDirection(): Vector3Like | undefined { return this._skySunDirection; }
 
   /**
    * The URI of the skybox cubemap for this world.
@@ -769,6 +784,25 @@ export default class World extends EventRouter implements protocol.Serializable 
     this.emit(WorldEvent.SET_SKYBOX_INTENSITY, {
       world: this,
       intensity,
+    });
+  }
+
+  /**
+   * Sets the procedural sky sun direction used to render celestial bodies.
+   *
+   * @param direction - The normalized incoming sunlight direction, or undefined to clear it.
+   *
+   * **Side effects:** Emits `WorldEvent.SET_SKY_SUN_DIRECTION`.
+   *
+   * **Category:** Core
+   */
+  public setSkySunDirection(direction: Vector3Like | undefined) {
+    this._skySunDirection = direction;
+    this._serialized = undefined;
+
+    this.emit(WorldEvent.SET_SKY_SUN_DIRECTION, {
+      world: this,
+      direction,
     });
   }
 

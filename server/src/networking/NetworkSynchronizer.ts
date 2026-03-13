@@ -525,6 +525,7 @@ export default class NetworkSynchronizer {
     this._world.final(WorldEvent.SET_FOG_FAR, this._onWorldSetFogFar);
     this._world.final(WorldEvent.SET_FOG_NEAR, this._onWorldSetFogNear);
     this._world.final(WorldEvent.SET_SKYBOX_INTENSITY, this._onWorldSetSkyboxIntensity);
+    this._world.final(WorldEvent.SET_SKY_SUN_DIRECTION, this._onWorldSetSkySunDirection);
     this._world.final(WorldEvent.SET_SKYBOX_URI, this._onWorldSetSkyboxUri);
   }
 
@@ -2200,6 +2201,18 @@ export default class NetworkSynchronizer {
 
     const worldSync = this._createOrGetQueuedWorldSync(payload.world);
     worldSync.dp = Serializer.serializeVector(payload.position);
+  };
+
+  private _onWorldSetSkySunDirection = (payload: EventPayloads[WorldEvent.SET_SKY_SUN_DIRECTION]) => {
+    if (this._mirrorWorldStatePatch({
+      i: payload.world.id,
+      sd: payload.direction ? Serializer.serializeVector(payload.direction) : null,
+    })) {
+      return;
+    }
+
+    const worldSync = this._createOrGetQueuedWorldSync(payload.world);
+    worldSync.sd = payload.direction ? Serializer.serializeVector(payload.direction) : null;
   };
 
   private _onWorldSetFogColor = (payload: EventPayloads[WorldEvent.SET_FOG_COLOR]) => {

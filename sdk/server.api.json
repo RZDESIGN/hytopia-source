@@ -65350,6 +65350,59 @@
               "name": "setSkyboxUri"
             },
             {
+              "kind": "Method",
+              "canonicalReference": "server!World#setSkySunDirection:member(1)",
+              "docComment": "/**\n * Sets the procedural sky sun direction used to render celestial bodies.\n *\n * @param direction - The normalized incoming sunlight direction, or undefined to clear it.\n *\n * **Side effects:** Emits `WorldEvent.SET_SKY_SUN_DIRECTION`.\n *\n * **Category:** Core\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setSkySunDirection(direction: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": " | undefined"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 4,
+                "endIndex": 5
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "direction",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 3
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setSkySunDirection"
+            },
+            {
               "kind": "Property",
               "canonicalReference": "server!World#simulation:member",
               "docComment": "/**\n * The physics simulation for this world.\n *\n * **Category:** Core\n */\n",
@@ -65435,6 +65488,41 @@
               "propertyTypeTokenRange": {
                 "startIndex": 1,
                 "endIndex": 2
+              },
+              "isStatic": false,
+              "isProtected": false,
+              "isAbstract": false
+            },
+            {
+              "kind": "Property",
+              "canonicalReference": "server!World#skySunDirection:member",
+              "docComment": "/**\n * The procedural sky sun direction, if explicitly authored.\n *\n * **Category:** Core\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "get skySunDirection(): "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": " | undefined"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": true,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "skySunDirection",
+              "propertyTypeTokenRange": {
+                "startIndex": 1,
+                "endIndex": 3
               },
               "isStatic": false,
               "isProtected": false,
@@ -65726,6 +65814,27 @@
               },
               "releaseTag": "Public",
               "name": "SET_FOG_NEAR"
+            },
+            {
+              "kind": "EnumMember",
+              "canonicalReference": "server!WorldEvent.SET_SKY_SUN_DIRECTION:member",
+              "docComment": "",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "SET_SKY_SUN_DIRECTION = "
+                },
+                {
+                  "kind": "Content",
+                  "text": "\"WORLD.SET_SKY_SUN_DIRECTION\""
+                }
+              ],
+              "initializerTokenRange": {
+                "startIndex": 1,
+                "endIndex": 2
+              },
+              "releaseTag": "Public",
+              "name": "SET_SKY_SUN_DIRECTION"
             },
             {
               "kind": "EnumMember",
@@ -66222,6 +66331,60 @@
               "propertyTypeTokenRange": {
                 "startIndex": 3,
                 "endIndex": 6
+              }
+            },
+            {
+              "kind": "PropertySignature",
+              "canonicalReference": "server!WorldEventPayloads#\"WORLD.SET_SKY_SUN_DIRECTION\":member",
+              "docComment": "/**\n * Emitted when the procedural sky's sun direction is set.\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "["
+                },
+                {
+                  "kind": "Reference",
+                  "text": "WorldEvent.SET_SKY_SUN_DIRECTION",
+                  "canonicalReference": "server!WorldEvent.SET_SKY_SUN_DIRECTION:member"
+                },
+                {
+                  "kind": "Content",
+                  "text": "]: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "{\n        world: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "World",
+                  "canonicalReference": "server!World:class"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";\n        direction: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "Vector3Like",
+                  "canonicalReference": "server!Vector3Like:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": " | undefined;\n    }"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isReadonly": false,
+              "isOptional": false,
+              "releaseTag": "Public",
+              "name": "\"WORLD.SET_SKY_SUN_DIRECTION\"",
+              "propertyTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 8
               }
             },
             {

@@ -53,9 +53,9 @@ const UNIFORM_SUN_INTENSITY = 'sunIntensity';
 
 const PROCEDURAL_SKY_PRESET_DEFAULTS: Record<ProceduralSkyPreset, Omit<ProceduralSkySettings, 'preset'>> = {
   clear: {
-    cloudCoverage: 0.2,
-    cloudOpacity: 0.26,
-    cloudScale: 0.19,
+    cloudCoverage: 0.18,
+    cloudOpacity: 0.44,
+    cloudScale: 0.38,
     cloudSpeed: 0.018,
     precipitation: 'none',
     precipitationIntensity: 0,
@@ -63,29 +63,29 @@ const PROCEDURAL_SKY_PRESET_DEFAULTS: Record<ProceduralSkyPreset, Omit<Procedura
     windDirection: new Vector2(1, 0.16),
   },
   cloudy: {
-    cloudCoverage: 0.48,
-    cloudOpacity: 0.38,
-    cloudScale: 0.21,
+    cloudCoverage: 0.34,
+    cloudOpacity: 0.52,
+    cloudScale: 0.42,
     cloudSpeed: 0.022,
     precipitation: 'none',
     precipitationIntensity: 0,
-    storminess: 0.18,
+    storminess: 0.06,
     windDirection: new Vector2(1, 0.2),
   },
   overcast: {
-    cloudCoverage: 0.76,
-    cloudOpacity: 0.54,
-    cloudScale: 0.225,
+    cloudCoverage: 0.52,
+    cloudOpacity: 0.62,
+    cloudScale: 0.44,
     cloudSpeed: 0.02,
     precipitation: 'none',
     precipitationIntensity: 0,
-    storminess: 0.5,
+    storminess: 0.24,
     windDirection: new Vector2(1, 0.24),
   },
   storm: {
-    cloudCoverage: 0.92,
-    cloudOpacity: 0.68,
-    cloudScale: 0.24,
+    cloudCoverage: 0.78,
+    cloudOpacity: 0.8,
+    cloudScale: 0.46,
     cloudSpeed: 0.028,
     precipitation: 'rain',
     precipitationIntensity: 1,
@@ -97,9 +97,17 @@ const PROCEDURAL_SKY_PRESET_DEFAULTS: Record<ProceduralSkyPreset, Omit<Procedura
 const precipitationMatrix = new Matrix4();
 const precipitationPosition = new Vector3();
 const precipitationQuaternion = new Quaternion();
+const precipitationRotationMatrix = new Matrix4();
 const precipitationScale = new Vector3();
+const precipitationFallDirection = new Vector3();
+const precipitationPlaneNormal = new Vector3();
+const precipitationPlaneRight = new Vector3();
+const precipitationPlaneUp = new Vector3();
+const precipitationToCamera = new Vector3();
 const precipitationLightningColor = new Color(0xf6fbff);
 const precipitationGridAnchor = new Vector2();
+const precipitationFallbackAxisA = new Vector3(1, 0, 0);
+const precipitationFallbackAxisB = new Vector3(0, 0, 1);
 const STORM_LIGHTNING_BUCKET_S = 4;
 
 function clamp01(value: number): number {
@@ -291,13 +299,13 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
         }
 
         float cloudDensityAt(vec2 p) {
-          vec2 macroUv = floor(p * 10.0) / 10.0;
-          vec2 voxelUv = floor(p * 18.0) / 18.0;
-          float largeShape = fbm(macroUv * 0.84 + vec2(${UNIFORM_WORLD_SEED} * 0.37, ${UNIFORM_WORLD_SEED} * 0.21));
-          float mediumShape = fbm(voxelUv * 1.76 - vec2(${UNIFORM_WORLD_SEED} * 0.13, ${UNIFORM_WORLD_SEED} * 0.29));
-          float detailShape = noise(voxelUv * 3.9 + vec2(4.0, -6.0));
-          float microShape = noise(voxelUv * 7.2 + vec2(-9.0, 3.0));
-          return largeShape * 0.5 + mediumShape * 0.28 + detailShape * 0.14 + microShape * 0.08;
+          vec2 macroUv = floor(p * 14.0) / 14.0;
+          vec2 voxelUv = floor(p * 28.0) / 28.0;
+          float largeShape = fbm(macroUv * 0.92 + vec2(${UNIFORM_WORLD_SEED} * 0.37, ${UNIFORM_WORLD_SEED} * 0.21));
+          float mediumShape = fbm(voxelUv * 2.05 - vec2(${UNIFORM_WORLD_SEED} * 0.13, ${UNIFORM_WORLD_SEED} * 0.29));
+          float detailShape = noise(voxelUv * 4.8 + vec2(4.0, -6.0));
+          float microShape = noise(voxelUv * 9.0 + vec2(-9.0, 3.0));
+          return largeShape * 0.42 + mediumShape * 0.28 + detailShape * 0.18 + microShape * 0.12;
         }
 
         void main() {
@@ -306,33 +314,43 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
           float dayAmount = smoothstep(-0.18, 0.06, sunViewDirection.y);
           float up = saturate(direction.y * 0.5 + 0.5);
 
-          vec3 zenithNight = vec3(0.018, 0.032, 0.085);
-          vec3 horizonNight = vec3(0.05, 0.068, 0.125);
-          vec3 zenithDayBase = mix(vec3(0.22, 0.56, 1.0), vec3(0.13, 0.34, 0.8), ${UNIFORM_STORMINESS});
-          vec3 horizonDayBase = mix(vec3(0.74, 0.89, 1.0), vec3(0.44, 0.6, 0.8), ${UNIFORM_STORMINESS});
-          vec3 zenithDay = zenithDayBase * (0.94 + ${UNIFORM_SKY_INTENSITY} * 0.1) + ${UNIFORM_AMBIENT_COLOR} * 0.1 + ${UNIFORM_SUN_COLOR} * 0.022;
-          vec3 horizonDay = mix(horizonDayBase, ${UNIFORM_FOG_COLOR}, 0.32) * (0.94 + ${UNIFORM_SKY_INTENSITY} * 0.055) + ${UNIFORM_SUN_COLOR} * 0.02;
+          vec3 zenithNight = vec3(0.025, 0.045, 0.14);
+          vec3 horizonNight = vec3(0.055, 0.072, 0.15);
+          vec3 zenithDayBase = mix(vec3(0.05, 0.22, 0.82), vec3(0.32, 0.36, 0.48), ${UNIFORM_STORMINESS});
+          vec3 horizonDayBase = mix(vec3(0.22, 0.46, 0.82), vec3(0.44, 0.48, 0.58), ${UNIFORM_STORMINESS});
+          vec3 zenithDay = zenithDayBase * (1.0 + ${UNIFORM_SKY_INTENSITY} * 0.02);
+          vec3 horizonDay = mix(horizonDayBase, ${UNIFORM_FOG_COLOR}, 0.04) * (1.0 + ${UNIFORM_SKY_INTENSITY} * 0.01);
           vec3 nadir = mix(vec3(0.01, 0.014, 0.028), ${UNIFORM_FOG_COLOR} * 0.24, dayAmount);
 
           vec3 zenith = mix(zenithNight, zenithDay, dayAmount);
           vec3 horizon = mix(horizonNight, horizonDay, dayAmount);
 
-          vec3 sky = mix(horizon, zenith, smoothstep(0.04, 0.98, up));
+          vec3 sky = mix(horizon, zenith, smoothstep(0.0, 0.82, up));
           sky = mix(nadir, sky, smoothstep(-0.12, 0.04, direction.y));
 
-          float sunsetWindow = 1.0 - smoothstep(0.04, 0.33, abs(sunViewDirection.y));
-          float sunsetBand = exp(-abs(direction.y - max(sunViewDirection.y, -0.04)) * mix(9.0, 16.0, dayAmount));
-          float facingSun = pow(saturate(dot(direction, sunViewDirection)), 4.2);
-          vec3 sunsetTint = mix(vec3(1.0, 0.5, 0.3), ${UNIFORM_SUN_COLOR}, 0.38);
-          sky += sunsetTint * sunsetBand * sunsetWindow * (0.1 + 0.18 * facingSun) * (1.0 - ${UNIFORM_STORMINESS} * 0.35);
+          float sunsetWindow = 1.0 - smoothstep(0.02, 0.36, abs(sunViewDirection.y));
+          float sunsetBand = exp(-abs(direction.y - max(sunViewDirection.y, -0.06)) * mix(4.5, 10.0, dayAmount));
+          float facingSun = pow(saturate(dot(direction, sunViewDirection)), 3.0);
+          vec3 sunsetTint = mix(vec3(1.0, 0.34, 0.08), vec3(1.0, 0.62, 0.22), facingSun);
+          sky += sunsetTint * sunsetBand * sunsetWindow * (0.34 + 0.42 * facingSun) * (1.0 - ${UNIFORM_STORMINESS} * 0.5);
+          float horizonGlow = exp(-abs(direction.y + 0.02) * 6.0) * sunsetWindow;
+          sky += vec3(0.82, 0.18, 0.04) * horizonGlow * (0.22 + 0.16 * facingSun) * (1.0 - ${UNIFORM_STORMINESS} * 0.6);
 
           if (dayAmount < 0.5 && direction.y > 0.0) {
             vec2 starUv = direction.xz / max(direction.y + 0.26, 0.12);
-            vec2 starCell = floor(starUv * 30.0) / 30.0;
+            float starGridSize = 54.0;
+            vec2 starGridPos = starUv * starGridSize;
+            vec2 starCell = floor(starGridPos);
+            vec2 starFrac = fract(starGridPos) - 0.5;
             float starNoise = hash(starCell * 31.0 + vec2(13.7, 41.3));
-            float starMask = step(0.9925, starNoise);
-            float starBrightness = smoothstep(0.5, 0.08, dayAmount) * smoothstep(0.02, 0.28, direction.y) * (1.0 - ${UNIFORM_STORMINESS});
-            sky += vec3(0.72, 0.84, 1.0) * starMask * starBrightness * (0.7 + 0.3 * hash(starCell * 53.0));
+            float starMask = step(0.984, starNoise);
+            float starBrightness = smoothstep(0.5, 0.04, dayAmount) * smoothstep(0.01, 0.22, direction.y) * (1.0 - ${UNIFORM_STORMINESS});
+            float starDist = max(abs(starFrac.x), abs(starFrac.y));
+            float starCore = 1.0 - smoothstep(0.0, 0.06, starDist);
+            float starGlow = (1.0 - smoothstep(0.0, 0.3, starDist)) * 0.32;
+            float starVariation = 0.55 + 0.45 * hash(starCell * 53.0);
+            vec3 starColor = mix(vec3(0.72, 0.84, 1.0), vec3(1.0, 0.96, 0.84), hash(starCell * 71.0));
+            sky += starColor * (starCore + starGlow) * starMask * starBrightness * starVariation;
           }
 
           if (direction.y > -0.02) {
@@ -340,8 +358,8 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
             vec2 cloudUv = direction.xz / max(direction.y + 0.24, 0.08);
             cloudUv = cloudUv * ${UNIFORM_CLOUD_SCALE} + windDirection * ${UNIFORM_TIME} * ${UNIFORM_CLOUD_SPEED};
 
-            float cloudThreshold = mix(0.82, 0.36, ${UNIFORM_CLOUD_COVERAGE});
-            float cloudBand = smoothstep(-0.02, 0.17, direction.y) * (1.0 - smoothstep(0.75, 0.98, direction.y));
+            float cloudThreshold = mix(0.79, 0.28, ${UNIFORM_CLOUD_COVERAGE});
+            float cloudBand = smoothstep(-0.03, 0.1, direction.y) * mix(1.0, 0.72, smoothstep(0.82, 1.0, direction.y));
             float density0 = cloudDensityAt(cloudUv);
             float density1 = cloudDensityAt(cloudUv * 1.05 + vec2(1.9, -2.6));
             float density2 = cloudDensityAt(cloudUv * 1.11 + vec2(-3.8, 4.7));
@@ -357,13 +375,13 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
             float cloudEdgeHighlight = saturate((density0 - cloudThreshold) * 7.5) * (1.0 - cloudMask1 * 0.48);
 
             vec3 cloudDirection = normalize(vec3(direction.x, max(direction.y, 0.0) + 0.22, direction.z));
-            float cloudLight = 0.38 + 0.62 * saturate(dot(cloudDirection, sunViewDirection));
-            vec3 cloudBase = mix(vec3(0.28, 0.31, 0.38), vec3(0.96, 0.98, 1.0), dayAmount);
-            vec3 cloudColor = mix(cloudBase * 0.52, cloudBase, cloudLight);
-            cloudColor *= 0.82 + cloudVolume * 0.24;
-            cloudColor *= 1.0 - undersideShadow * 0.22;
+            float cloudLight = 0.46 + 0.54 * saturate(dot(cloudDirection, sunViewDirection));
+            vec3 cloudBase = mix(vec3(0.32, 0.34, 0.4), vec3(0.997, 0.998, 1.0), dayAmount);
+            vec3 cloudColor = mix(cloudBase * 0.76, cloudBase, cloudLight);
+            cloudColor *= 0.88 + cloudVolume * 0.14;
+            cloudColor *= 1.0 - undersideShadow * 0.10;
             cloudColor += vec3(1.0, 0.99, 0.98) * cloudEdgeHighlight * (0.08 + dayAmount * 0.08) * cloudLight;
-            cloudColor = mix(cloudColor, cloudColor * 0.62, ${UNIFORM_STORMINESS});
+            cloudColor = mix(cloudColor, cloudColor * 0.56, smoothstep(0.35, 0.92, ${UNIFORM_STORMINESS}));
             cloudColor += vec3(0.78, 0.84, 1.0) * ${UNIFORM_LIGHTNING} * (0.2 + cloudMask0 * 0.62);
 
             sky = mix(sky, cloudColor, cloudAlpha);
@@ -372,7 +390,9 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
           vec3 lightningColor = mix(vec3(0.68, 0.76, 1.0), vec3(0.92, 0.95, 1.0), dayAmount);
           sky += lightningColor * ${UNIFORM_LIGHTNING} * (0.38 + up * 0.5);
 
-          gl_FragColor = vec4(max(sky * max(${UNIFORM_SKY_INTENSITY}, 0.02), vec3(0.0)), 1.0);
+          float nightPreserve = (1.0 - dayAmount) * 0.62;
+          float skyMul = max(max(${UNIFORM_SKY_INTENSITY}, 0.02), nightPreserve);
+          gl_FragColor = vec4(max(sky * skyMul, vec3(0.0)), 1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }
@@ -472,24 +492,26 @@ export class SquareSunMaterial extends ShaderMaterial {
 
         void main() {
           float d = squareDistance(vUv);
-          float core = 1.0 - smoothstep(0.11, 0.34, d);
-          float glow = 1.0 - smoothstep(0.2, 0.8, d);
-          glow = pow(glow, 2.6);
-          float outerGlow = 1.0 - smoothstep(0.34, 1.0, d);
-          outerGlow = pow(outerGlow, 4.8);
-          float rim = 1.0 - smoothstep(0.28, 0.54, d);
-          rim = pow(rim, 4.4);
+          float core = 1.0 - smoothstep(0.02, 0.30, d);
+          float glow = 1.0 - smoothstep(0.08, 0.85, d);
+          glow = pow(glow, 1.9);
+          float outerGlow = 1.0 - smoothstep(0.22, 1.0, d);
+          outerGlow = pow(outerGlow, 3.6);
+          float rim = 1.0 - smoothstep(0.18, 0.6, d);
+          rim = pow(rim, 3.1);
           float halo = ${UNIFORM_HALO_AMOUNT};
-          float alpha = (core * 0.98 + glow * 0.22 * halo + outerGlow * 0.08 * halo) * ${UNIFORM_DAY_AMOUNT};
+          float alpha = (core * 1.0 + glow * 0.34 * halo + outerGlow * 0.14 * halo) * ${UNIFORM_DAY_AMOUNT};
 
           if (alpha <= 0.001) {
             discard;
           }
 
-          float intensity = min(${UNIFORM_SUN_INTENSITY}, 2.6);
-          vec3 glowColor = mix(${UNIFORM_SUN_COLOR}, vec3(1.0, 0.88, 0.68), 0.24);
-          vec3 color = ${UNIFORM_SUN_COLOR} * (core * (0.92 + intensity * 0.05) + rim * 0.12)
-            + glowColor * (glow * (0.18 + intensity * 0.018) * halo + outerGlow * 0.12 * halo);
+          float intensity = min(${UNIFORM_SUN_INTENSITY}, 5.0);
+          vec3 baseSunColor = mix(${UNIFORM_SUN_COLOR}, vec3(1.0, 0.92, 0.52), 0.68);
+          vec3 coreColor = mix(baseSunColor, vec3(1.0, 1.0, 0.88), 0.18);
+          vec3 glowColor = mix(baseSunColor, vec3(1.0, 0.82, 0.38), 0.36);
+          vec3 color = coreColor * (core * (2.4 + intensity * 0.32) + rim * 0.36)
+            + glowColor * (glow * (0.6 + intensity * 0.08) * halo + outerGlow * 0.42 * halo);
           gl_FragColor = vec4(color, alpha);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -529,7 +551,7 @@ export class WeatherPrecipitationSystem {
   private _lengths: Float32Array;
   private _widths: Float32Array;
 
-  constructor(maxParticles: number = 220) {
+  constructor(maxParticles: number = 360) {
     this._maxParticles = maxParticles;
     this._offsetsX = new Float32Array(maxParticles);
     this._offsetsZ = new Float32Array(maxParticles);
@@ -542,16 +564,16 @@ export class WeatherPrecipitationSystem {
       this._offsetsX[i] = Math.random();
       this._offsetsZ[i] = Math.random();
       this._offsetsY[i] = Math.random();
-      this._speeds[i] = 12 + Math.random() * 8;
-      this._lengths[i] = 0.8 + Math.random() * 1.05;
-      this._widths[i] = 0.016 + Math.random() * 0.02;
+      this._speeds[i] = 13 + Math.random() * 9;
+      this._lengths[i] = 0.42 + Math.random() * 0.52;
+      this._widths[i] = 0.008 + Math.random() * 0.012;
     }
 
     const geometry = new PlaneGeometry(1, 1);
     const material = new MeshBasicMaterial({
       color: new Color(0xd8ecff),
       depthWrite: false,
-      opacity: 0.28,
+      opacity: 0.22,
       side: DoubleSide,
       transparent: true,
     });
@@ -578,7 +600,7 @@ export class WeatherPrecipitationSystem {
 
   public update(
     cameraPosition: Vector3,
-    cameraQuaternion: Quaternion,
+    _cameraQuaternion: Quaternion,
     timeS: number,
     windDirection: Vector2,
     color: Color,
@@ -598,19 +620,19 @@ export class WeatherPrecipitationSystem {
     this._mesh.visible = true;
     material.color.copy(color);
     material.color.lerp(precipitationLightningColor, flashIntensity * 0.55);
-    material.opacity = 0.08 + visibleIntensity * 0.2 + flashIntensity * 0.06;
+    material.opacity = 0.05 + visibleIntensity * 0.15 + flashIntensity * 0.05;
 
-    const radius = 14 + visibleIntensity * 8;
+    const radius = 12 + visibleIntensity * 7;
     const diameter = radius * 2;
-    const verticalSpan = 14 + visibleIntensity * 10;
-    const activeCount = Math.max(16, Math.floor(this._maxParticles * (0.28 + visibleIntensity * 0.72)));
+    const verticalSpan = 16 + visibleIntensity * 12;
+    const activeCount = Math.max(52, Math.floor(this._maxParticles * (0.44 + visibleIntensity * 0.56)));
     const normalizedWind = windDirection.clone();
     if (normalizedWind.lengthSq() < 0.0001) {
       normalizedWind.set(1, 0);
     } else {
       normalizedWind.normalize();
     }
-    const windDrift = 2.2 + visibleIntensity * 3.2;
+    const windDrift = 0.06 + visibleIntensity * 0.05;
     const anchorStep = 5;
 
     precipitationGridAnchor.set(
@@ -618,15 +640,45 @@ export class WeatherPrecipitationSystem {
       Math.round(cameraPosition.z / anchorStep) * anchorStep,
     );
 
-    precipitationQuaternion.copy(cameraQuaternion);
+    precipitationFallDirection.set(
+      normalizedWind.x * (0.22 + visibleIntensity * 0.12),
+      -1,
+      normalizedWind.y * (0.22 + visibleIntensity * 0.12),
+    ).normalize();
+    precipitationPlaneUp.copy(precipitationFallDirection);
 
     for (let i = 0; i < activeCount; i++) {
-      const x = wrapCentered((this._offsetsX[i] - 0.5) * diameter + normalizedWind.x * timeS * windDrift, diameter);
-      const z = wrapCentered((this._offsetsZ[i] - 0.5) * diameter + normalizedWind.y * timeS * windDrift, diameter);
-      const y = 5.5 + visibleIntensity * 4.5 - ((timeS * this._speeds[i] + this._offsetsY[i] * verticalSpan) % verticalSpan);
+      const fallPhase = timeS * this._speeds[i] + this._offsetsY[i] * verticalSpan;
+      const x = wrapCentered((this._offsetsX[i] - 0.5) * diameter + fallPhase * normalizedWind.x * windDrift, diameter);
+      const z = wrapCentered((this._offsetsZ[i] - 0.5) * diameter + fallPhase * normalizedWind.y * windDrift, diameter);
+      const y = 6 + visibleIntensity * 4.5 - (fallPhase % verticalSpan);
 
       precipitationPosition.set(precipitationGridAnchor.x + x, cameraPosition.y + y, precipitationGridAnchor.y + z);
-      precipitationScale.set(this._widths[i], this._lengths[i] * (0.9 + visibleIntensity * 0.5), 1);
+      precipitationToCamera.copy(cameraPosition).sub(precipitationPosition);
+      precipitationPlaneNormal.copy(precipitationToCamera).addScaledVector(
+        precipitationPlaneUp,
+        -precipitationToCamera.dot(precipitationPlaneUp),
+      );
+
+      if (precipitationPlaneNormal.lengthSq() < 0.0001) {
+        precipitationPlaneNormal.copy(
+          Math.abs(precipitationPlaneUp.dot(precipitationFallbackAxisA)) > 0.92
+            ? precipitationFallbackAxisB
+            : precipitationFallbackAxisA,
+        );
+        precipitationPlaneNormal.addScaledVector(
+          precipitationPlaneUp,
+          -precipitationPlaneNormal.dot(precipitationPlaneUp),
+        );
+      }
+
+      precipitationPlaneNormal.normalize();
+      precipitationPlaneRight.crossVectors(precipitationPlaneUp, precipitationPlaneNormal).normalize();
+      precipitationPlaneNormal.crossVectors(precipitationPlaneRight, precipitationPlaneUp).normalize();
+      precipitationRotationMatrix.makeBasis(precipitationPlaneRight, precipitationPlaneUp, precipitationPlaneNormal);
+      precipitationQuaternion.setFromRotationMatrix(precipitationRotationMatrix);
+
+      precipitationScale.set(this._widths[i], this._lengths[i] * (0.92 + visibleIntensity * 0.36), 1);
       precipitationMatrix.compose(precipitationPosition, precipitationQuaternion, precipitationScale);
       this._mesh.setMatrixAt(i, precipitationMatrix);
     }

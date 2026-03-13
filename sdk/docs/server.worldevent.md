@@ -148,6 +148,20 @@ SET\_FOG\_NEAR
 </td></tr>
 <tr><td>
 
+SET\_SKY\_SUN\_DIRECTION
+
+
+</td><td>
+
+`"WORLD.SET_SKY_SUN_DIRECTION"`
+
+
+</td><td>
+
+
+</td></tr>
+<tr><td>
+
 SET\_SKYBOX\_INTENSITY
 
 

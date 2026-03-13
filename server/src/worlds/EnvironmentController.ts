@@ -72,6 +72,15 @@ function smoothstep(min: number, max: number, value: number): number {
   return t * t * (3 - 2 * t);
 }
 
+function normalizeDirection(x: number, y: number, z: number): { x: number, y: number, z: number } {
+  const length = Math.hypot(x, y, z) || 1;
+  return { x: x / length, y: y / length, z: z / length };
+}
+
+function wrapHour24(hour: number): number {
+  return ((hour % 24) + 24) % 24;
+}
+
 function parseWeatherPresetFromSkyboxUri(skyboxUri: string): EnvironmentWeatherPreset | null {
   if (!skyboxUri.startsWith(PROCEDURAL_SKY_PREFIX)) {
     return null;
@@ -228,6 +237,11 @@ export default class EnvironmentController {
   private _applyTimeOfDay(): void {
     const timeProgress = this._timeMs / this._cycleDurationMs;
     const dayDurationRatio = Math.max(0.01, Math.min(0.99, this._dayDurationRatio));
+    const clockHour = wrapHour24(timeProgress * 24 + this._cycleOffsetHours);
+    const daylightHours = 24 * dayDurationRatio;
+    const nightHours = 24 - daylightHours;
+    const sunriseHour = 12 - daylightHours * 0.5;
+    const sunsetHour = 12 + daylightHours * 0.5;
     const dayDirectionalColor = { r: 255, g: 244, b: 226 };
     const dayAmbientColor = { r: 196, g: 220, b: 255 };
     const moonDirectionalColor = { r: 118, g: 146, b: 210 };
@@ -236,16 +250,20 @@ export default class EnvironmentController {
     const sunsetAmbientColor = { r: 186, g: 122, b: 118 };
 
     let sunAngle: number;
-    if (timeProgress < dayDurationRatio) {
-      sunAngle = (timeProgress / dayDurationRatio) * Math.PI;
+    if (clockHour >= sunriseHour && clockHour < sunsetHour) {
+      const daylightProgress = (clockHour - sunriseHour) / daylightHours;
+      sunAngle = daylightProgress * Math.PI;
     } else {
-      sunAngle = Math.PI + ((timeProgress - dayDurationRatio) / (1 - dayDurationRatio)) * Math.PI;
+      const wrappedNightHour = clockHour < sunriseHour ? clockHour + 24 : clockHour;
+      const nightProgress = (wrappedNightHour - sunsetHour) / Math.max(nightHours, 0.01);
+      sunAngle = Math.PI + nightProgress * Math.PI;
     }
 
     const sunHeight = this._sunBaseHeight + Math.sin(sunAngle) * this._sunHeightRange;
     const sunX = Math.cos(sunAngle) * this._sunRadius;
     const sunZ = Math.sin(sunAngle) * this._sunRadius;
     const sunAltitude = Math.sin(sunAngle);
+    const skySunDirection = normalizeDirection(-sunX, -sunHeight, -sunZ);
     const daylightAmount = smoothstep(-0.16, 0.14, sunAltitude);
     const moonlightAmount = smoothstep(-0.06, 0.38, -sunAltitude);
     const twilightAmount = 1 - smoothstep(0.08, 0.46, Math.abs(sunAltitude));
@@ -279,6 +297,7 @@ export default class EnvironmentController {
     this._world.setDirectionalLightIntensity(directionalIntensity);
     this._world.setAmbientLightColor(ambientColor);
     this._world.setAmbientLightIntensity(ambientIntensity);
+    this._world.setSkySunDirection(skySunDirection);
     this._world.setSkyboxIntensity(skyboxIntensity);
 
     if (this._fogColor) {
