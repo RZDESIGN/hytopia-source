@@ -126,11 +126,10 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializeBlockTypeRegistry(blockTypeRegistry: BlockTypeRegistry): protocol.BlockTypesSchema {
-    const blockTypes = blockTypeRegistry.getAllBlockTypes();
-    const serializedBlockTypes = new Array<protocol.BlockTypeSchema>(blockTypes.length);
+    const serializedBlockTypes: protocol.BlockTypeSchema[] = [];
 
-    for (let i = 0; i < blockTypes.length; i++) {
-      serializedBlockTypes[i] = this.serializeBlockType(blockTypes[i]);
+    for (const blockType of blockTypeRegistry.getAllBlockTypes()) {
+      serializedBlockTypes.push(this.serializeBlockType(blockType));
     }
 
     return serializedBlockTypes;
@@ -144,10 +143,7 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializeChunk(chunk: Chunk): protocol.ChunkSchema {
-    const blocks = new Array<number>(chunk.blocks.length);
-    for (let i = 0; i < chunk.blocks.length; i++) {
-      blocks[i] = chunk.blocks[i];
-    }
+    const blocks = Array.from(chunk.blocks);
 
     const blockRotations = new Array<number>(chunk.blockRotations.size * 2);
     let blockRotationIndex = 0;

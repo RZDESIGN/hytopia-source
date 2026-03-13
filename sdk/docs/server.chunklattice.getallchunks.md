@@ -9,11 +9,11 @@ Gets all chunks in the lattice.
 **Signature:**
 
 ```typescript
-getAllChunks(): Chunk[];
+getAllChunks(): IterableIterator<Chunk>;
 ```
 **Returns:**
 
-[Chunk](./server.chunk.md)<!-- -->\[\]
+IterableIterator&lt;[Chunk](./server.chunk.md)<!-- -->&gt;
 
 An array of all chunks in the lattice.
 

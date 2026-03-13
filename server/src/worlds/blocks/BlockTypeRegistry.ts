@@ -82,8 +82,8 @@ export default class BlockTypeRegistry extends EventRouter implements protocol.S
    *
    * **Category:** Blocks
    */
-  public getAllBlockTypes(): BlockType[] {
-    return Array.from(this._blockTypes.values());
+  public getAllBlockTypes(): IterableIterator<BlockType> {
+    return this._blockTypes.values();
   }
 
   /**

@@ -1540,7 +1540,7 @@ export declare class BlockTypeRegistry extends EventRouter implements protocol.S
      *
      * **Category:** Blocks
      */
-    getAllBlockTypes(): BlockType[];
+    getAllBlockTypes(): IterableIterator<BlockType>;
     /**
      * Get a registered block type by its id.
      *
@@ -2088,7 +2088,7 @@ export declare class ChunkLattice extends EventRouter {
      *
      * **Category:** Blocks
      */
-    getAllChunks(): Chunk[];
+    getAllChunks(): IterableIterator<Chunk>;
     /**
      * Checks if a block exists at a specific global coordinate.
      *
@@ -2635,7 +2635,6 @@ export declare class Collider extends EventRouter {
      * **Category:** Physics
      */
     enableContactForceEvents(enabled: boolean): void;
-
     /**
      * Removes the collider from the simulation.
      *

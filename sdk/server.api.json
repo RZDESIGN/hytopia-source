@@ -6767,12 +6767,21 @@
                 },
                 {
                   "kind": "Reference",
+                  "text": "IterableIterator",
+                  "canonicalReference": "!IterableIterator:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
                   "text": "BlockType",
                   "canonicalReference": "server!BlockType:class"
                 },
                 {
                   "kind": "Content",
-                  "text": "[]"
+                  "text": ">"
                 },
                 {
                   "kind": "Content",
@@ -6782,7 +6791,7 @@
               "isStatic": false,
               "returnTypeTokenRange": {
                 "startIndex": 1,
-                "endIndex": 3
+                "endIndex": 5
               },
               "releaseTag": "Public",
               "isProtected": false,
@@ -8350,12 +8359,21 @@
                 },
                 {
                   "kind": "Reference",
+                  "text": "IterableIterator",
+                  "canonicalReference": "!IterableIterator:interface"
+                },
+                {
+                  "kind": "Content",
+                  "text": "<"
+                },
+                {
+                  "kind": "Reference",
                   "text": "Chunk",
                   "canonicalReference": "server!Chunk:class"
                 },
                 {
                   "kind": "Content",
-                  "text": "[]"
+                  "text": ">"
                 },
                 {
                   "kind": "Content",
@@ -8365,7 +8383,7 @@
               "isStatic": false,
               "returnTypeTokenRange": {
                 "startIndex": 1,
-                "endIndex": 3
+                "endIndex": 5
               },
               "releaseTag": "Public",
               "isProtected": false,

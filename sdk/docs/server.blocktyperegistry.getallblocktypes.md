@@ -9,11 +9,11 @@ Get all registered block types.
 **Signature:**
 
 ```typescript
-getAllBlockTypes(): BlockType[];
+getAllBlockTypes(): IterableIterator<BlockType>;
 ```
 **Returns:**
 
-[BlockType](./server.blocktype.md)<!-- -->\[\]
+IterableIterator&lt;[BlockType](./server.blocktype.md)<!-- -->&gt;
 
 An array of all registered block types.
 

@@ -519,7 +519,7 @@ export interface BlockTypeOptions {
 export class BlockTypeRegistry extends EventRouter implements protocol.Serializable {
     // @internal
     constructor(world: World);
-    getAllBlockTypes(): BlockType[];
+    getAllBlockTypes(): IterableIterator<BlockType>;
     getBlockType(id: number): BlockType;
     registerBlockType(blockType: BlockType): void;
     registerGenericBlockType(blockTypeOptions: BlockTypeOptions): BlockType;
@@ -617,7 +617,7 @@ export class ChunkLattice extends EventRouter {
     clear(): void;
     // @internal (undocumented)
     flushPendingColliderUpdates(): void;
-    getAllChunks(): Chunk[];
+    getAllChunks(): IterableIterator<Chunk>;
     getBlockId(globalCoordinate: Vector3Like): number;
     getBlockType(globalCoordinate: Vector3Like): BlockType | null;
     // @internal (undocumented)
@@ -713,8 +713,6 @@ export class Collider extends EventRouter {
     static optionsFromBlockHalfExtents(halfExtents: Vector3Like): ColliderOptions;
     static optionsFromModelUri(modelUri: string, scale?: Vector3Like | number, preferredShape?: ColliderShape): ColliderOptions;
     get parentRigidBody(): RigidBody | undefined;
-    // @internal (undocumented)
-    propagateVoxelChange(otherVoxelsCollider: Collider, coordinate: Vector3Like): void;
     get rawCollider(): RawCollider | undefined;
     get rawShape(): RawShape | undefined;
     get relativePosition(): Vector3Like;

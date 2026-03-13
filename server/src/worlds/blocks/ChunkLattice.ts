@@ -284,8 +284,8 @@ export default class ChunkLattice extends EventRouter {
    *
    * **Category:** Blocks
    */
-  public getAllChunks(): Chunk[] {
-    return Array.from(this._chunks.values());
+  public getAllChunks(): IterableIterator<Chunk> {
+    return this._chunks.values();
   }
 
   /**
@@ -590,11 +590,6 @@ export default class ChunkLattice extends EventRouter {
     }
   }
 
-  // NOTE: _propagateVoxelChange has been intentionally removed.
-  // It smoothed internal edges between different block-type colliders (cosmetic),
-  // but was the #1 server-side bottleneck during gameplay block changes.
-  // The setVoxel() calls in _applyPendingVoxelChanges already update the
-  // collision shape correctly for gameplay purposes.
 
   /** @internal */
   private _recreateTrimeshCollider(blockTypeId: number): void {

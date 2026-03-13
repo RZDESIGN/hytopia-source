@@ -1369,30 +1369,7 @@ export default class Collider extends EventRouter {
     this._setActiveCollisionTypes();
   }
 
-  /**
-   * @internal
-   */
-  public propagateVoxelChange(otherVoxelsCollider: Collider, coordinate: Vector3Like): void {
-    if (!this._requireNotRemoved('propagateVoxelChange')) { return; }
-    if (!this._requireSimulated('propagateVoxelChange')) { return; }
-    
-    if (!otherVoxelsCollider.isSimulated) {
-      return ErrorHandler.error('Collider.propagateVoxelChange(): Other collider is not simulated!');
-    }
 
-    if (this.shape !== ColliderShape.VOXELS) {
-      return ErrorHandler.error('Collider.propagateVoxelChange(): Collider is not a voxels collider!');
-    }
-
-    if (otherVoxelsCollider.shape !== ColliderShape.VOXELS) {
-      return ErrorHandler.error('Collider.propagateVoxelChange(): Other collider is not a voxels collider!');
-    }
-
-    // This updates other voxel collider states in the same intersecting domain as the source collider.
-    // This is required to prevent internal edges of transitioning faces between blocks from being an issue.
-    // We should only call propagateVoxelChange when the source collider has been modified via collider.setVoxel().
-    this._collider!.propagateVoxelChange(otherVoxelsCollider.rawCollider!, coordinate.x, coordinate.y, coordinate.z, 0, 0, 0);
-  }
 
   /**
    * Removes the collider from the simulation.

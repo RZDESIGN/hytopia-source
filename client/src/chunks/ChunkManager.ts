@@ -96,6 +96,7 @@ export default class ChunkManager {
   private _promotingBatchPendingChunkIds: Map<BatchId, Set<ChunkId>> = new Map();
   private _predictedBlocks: Map<string, PredictedBlockEntry> = new Map();
   private _predictionCoordinateKeysById: Map<string, Set<string>> = new Map();
+  private _predictedBlockKeysByChunk: Map<ChunkId, Set<string>> = new Map();
   private _nextPredictionId: number = 1;
   private _visibleBatchIds: Set<BatchId> = new Set();
   private _lastVisibilityCellX: number | null = null;
@@ -705,6 +706,9 @@ export default class ChunkManager {
       baseline.layers.push(layer);
       this._predictedBlocks.set(key, baseline);
       this._linkPredictionIdToCoordinate(predictionId, key);
+      if (!existing) {
+        this._linkCoordinateKeyToChunk(key, update.globalCoordinate);
+      }
       didApplyPrediction = true;
 
       const effectiveState = this._getEffectivePredictedState(baseline);
@@ -791,6 +795,7 @@ export default class ChunkManager {
 
       if (prediction.layers.length === 0) {
         this._predictedBlocks.delete(key);
+        this._unlinkCoordinateKeyFromChunk(key, prediction.globalCoordinate);
       }
     }
 
@@ -835,6 +840,7 @@ export default class ChunkManager {
 
       if (prediction.layers.length === 0) {
         this._predictedBlocks.delete(key);
+        this._unlinkCoordinateKeyFromChunk(key, prediction.globalCoordinate);
       }
     }
 
@@ -1036,13 +1042,19 @@ export default class ChunkManager {
   }
 
   private _discardPredictedBlocksForChunk(chunkId: ChunkId): void {
-    for (const [key, prediction] of this._predictedBlocks) {
-      if (Chunk.globalCoordinateToChunkId(prediction.globalCoordinate) !== chunkId) {
-        continue;
-      }
-
-      this._clearPredictionEntry(key, prediction);
+    const keys = this._predictedBlockKeysByChunk.get(chunkId);
+    if (!keys) {
+      return;
     }
+
+    for (const key of Array.from(keys)) {
+      const prediction = this._predictedBlocks.get(key);
+      if (prediction) {
+        this._clearPredictionEntry(key, prediction);
+      }
+    }
+
+    this._predictedBlockKeysByChunk.delete(chunkId);
   }
 
   private _expirePredictedBlocks(nowMs: number): void {
@@ -1062,10 +1074,16 @@ export default class ChunkManager {
   }
 
   private _getPredictedBlockUpdatesForChunk(chunkId: ChunkId): ChunkBlockUpdate[] {
+    const keys = this._predictedBlockKeysByChunk.get(chunkId);
+    if (!keys || keys.size === 0) {
+      return [];
+    }
+
     const updates: ChunkBlockUpdate[] = [];
 
-    for (const prediction of this._predictedBlocks.values()) {
-      if (Chunk.globalCoordinateToChunkId(prediction.globalCoordinate) !== chunkId) {
+    for (const key of keys) {
+      const prediction = this._predictedBlocks.get(key);
+      if (!prediction) {
         continue;
       }
 
@@ -1096,6 +1114,7 @@ export default class ChunkManager {
     }
 
     this._predictedBlocks.delete(key);
+    this._unlinkCoordinateKeyFromChunk(key, prediction.globalCoordinate);
   }
 
   private _createPredictionEntry(globalCoordinate: Vector3Like): PredictedBlockEntry | undefined {
@@ -1160,6 +1179,31 @@ export default class ChunkManager {
     }
 
     coordinateKeys.add(coordinateKey);
+  }
+
+  private _linkCoordinateKeyToChunk(coordinateKey: string, globalCoordinate: Vector3Like): void {
+    const chunkId = Chunk.globalCoordinateToChunkId(globalCoordinate);
+    let keys = this._predictedBlockKeysByChunk.get(chunkId);
+
+    if (!keys) {
+      keys = new Set();
+      this._predictedBlockKeysByChunk.set(chunkId, keys);
+    }
+
+    keys.add(coordinateKey);
+  }
+
+  private _unlinkCoordinateKeyFromChunk(coordinateKey: string, globalCoordinate: Vector3Like): void {
+    const chunkId = Chunk.globalCoordinateToChunkId(globalCoordinate);
+    const keys = this._predictedBlockKeysByChunk.get(chunkId);
+    if (!keys) {
+      return;
+    }
+
+    keys.delete(coordinateKey);
+    if (keys.size === 0) {
+      this._predictedBlockKeysByChunk.delete(chunkId);
+    }
   }
 
   private _unlinkPredictionIdFromCoordinate(predictionId: string, coordinateKey: string): void {
