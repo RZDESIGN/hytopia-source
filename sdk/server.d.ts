@@ -1882,6 +1882,7 @@ export declare class Chunk implements protocol.Serializable {
 
 
 
+
     /**
      * Creates a new chunk instance.
      */
@@ -1904,6 +1905,7 @@ export declare class Chunk implements protocol.Serializable {
      * **Category:** Blocks
      */
     get originCoordinate(): Vector3Like;
+
     /**
      * Converts a block index to a local coordinate.
      *
@@ -1964,6 +1966,7 @@ export declare class Chunk implements protocol.Serializable {
      * **Category:** Blocks
      */
     hasBlock(localCoordinate: Vector3Like): boolean;
+
 
 
 
@@ -6910,6 +6913,8 @@ export declare interface NoneColliderOptions extends BaseColliderOptions {
     shape: ColliderShape.NONE;
 }
 
+declare function normalizePacketDataForValidation<T>(value: T): T;
+
 export declare const normalizeRollbackPredictedInputs: (inputs: readonly (keyof InputSchema)[] | undefined) => RollbackPredictableInput[];
 
 declare type NotificationPermissionRequestPacket = IPacket<typeof PacketId.NOTIFICATION_PERMISSION_REQUEST, NotificationPermissionRequestSchema> & [WorldTick];
@@ -9869,6 +9874,7 @@ declare namespace protocol {
         uiDatasPacketDefinition,
         WorldPacket,
         worldPacketDefinition,
+        normalizePacketDataForValidation,
         createPacket,
         createPacketBufferUnframer,
         definePacket,

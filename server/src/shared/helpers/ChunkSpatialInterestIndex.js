@@ -35,16 +35,22 @@ export class ChunkSpatialInterestIndex {
   }
 
   update(id, position, attachedEntityId = undefined) {
-    this._setAttachedEntity(id, attachedEntityId);
-    this.updatePosition(id, position);
+    const attachedEntityChanged = this._setAttachedEntity(id, attachedEntityId);
+    const chunkChanged = this.updatePosition(id, position);
+    return attachedEntityChanged || chunkChanged;
   }
 
   updatePosition(id, position) {
-    this._deleteIndexEntry(id);
-
     const chunkKey = this._chunkKeyForGlobalCoordinate(position);
+    const previousChunkKey = this._chunkKeyById.get(id);
+    if (previousChunkKey === chunkKey) {
+      return false;
+    }
+
+    this._deleteIndexEntry(id, previousChunkKey);
+
     if (!chunkKey) {
-      return;
+      return previousChunkKey !== undefined;
     }
 
     let ids = this._idsByChunkKey.get(chunkKey);
@@ -55,11 +61,13 @@ export class ChunkSpatialInterestIndex {
 
     ids.add(id);
     this._chunkKeyById.set(id, chunkKey);
+    return true;
   }
 
   remove(id) {
-    this._setAttachedEntity(id, undefined);
-    this._deleteIndexEntry(id);
+    const attachedEntityChanged = this._setAttachedEntity(id, undefined);
+    const chunkChanged = this.updatePosition(id, undefined);
+    return attachedEntityChanged || chunkChanged;
   }
 
   hasAttachedIds(entityId) {
@@ -104,6 +112,27 @@ export class ChunkSpatialInterestIndex {
     return ids;
   }
 
+  collectIdsForChunkKeys(chunkKeys) {
+    const ids = new Set();
+
+    if (!chunkKeys) {
+      return ids;
+    }
+
+    for (const chunkKey of chunkKeys) {
+      const chunkIds = this._idsByChunkKey.get(chunkKey);
+      if (!chunkIds) {
+        continue;
+      }
+
+      for (const id of chunkIds) {
+        ids.add(id);
+      }
+    }
+
+    return ids;
+  }
+
   _chunkKeyForGlobalCoordinate(position) {
     const x = axisComponent(position, 0);
     const y = axisComponent(position, 1);
@@ -116,8 +145,7 @@ export class ChunkSpatialInterestIndex {
     return `${(x | 0) - (x & this._chunkAxesRange)},${(y | 0) - (y & this._chunkAxesRange)},${(z | 0) - (z & this._chunkAxesRange)}`;
   }
 
-  _deleteIndexEntry(id) {
-    const chunkKey = this._chunkKeyById.get(id);
+  _deleteIndexEntry(id, chunkKey = this._chunkKeyById.get(id)) {
     if (!chunkKey) {
       return;
     }
@@ -136,6 +164,10 @@ export class ChunkSpatialInterestIndex {
 
   _setAttachedEntity(id, attachedEntityId) {
     const previousAttachedEntityId = this._attachedEntityIdById.get(id);
+    if (previousAttachedEntityId === attachedEntityId) {
+      return false;
+    }
+
     if (previousAttachedEntityId !== undefined) {
       this._attachedEntityIdById.delete(id);
       const previousIds = this._idsByAttachedEntityId.get(previousAttachedEntityId);
@@ -148,7 +180,7 @@ export class ChunkSpatialInterestIndex {
     }
 
     if (!Number.isFinite(attachedEntityId)) {
-      return;
+      return previousAttachedEntityId !== undefined;
     }
 
     this._attachedEntityIdById.set(id, attachedEntityId);
@@ -159,5 +191,6 @@ export class ChunkSpatialInterestIndex {
     }
 
     attachedIds.add(id);
+    return true;
   }
 }

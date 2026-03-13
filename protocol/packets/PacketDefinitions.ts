@@ -1,6 +1,7 @@
 import * as bidirectionalPackets from './bidirectional';
 import * as inboundPackets from './inbound';
 import * as outboundPackets from './outbound';
+import { normalizePacketDataForValidation } from './PacketCore';
 import type { PacketId, AnyPacket, AnyPacketDefinition, IPacket } from './PacketCore';
 
 export { bidirectionalPackets, inboundPackets, outboundPackets };
@@ -33,5 +34,8 @@ export function isValidPacket(packet: IPacket<PacketId, unknown>): packet is Any
   }
 
   const packetDef = registeredPackets.get(packet[0]);
-  return !!packetDef && packetDef.validate(packet[1]);
+  return !!packetDef && (
+    packetDef.validate(packet[1]) ||
+    packetDef.validate(normalizePacketDataForValidation(packet[1]))
+  );
 }

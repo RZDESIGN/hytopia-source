@@ -599,6 +599,8 @@ export class Chunk implements protocol.Serializable {
     static globalCoordinateToLocalCoordinate(globalCoordinate: Vector3Like): Vector3Like;
     static globalCoordinateToOriginCoordinate(globalCoordinate: Vector3Like): Vector3Like;
     hasBlock(localCoordinate: Vector3Like): boolean;
+    // @internal (undocumented)
+    get isEmpty(): boolean;
     // @internal
     static localCoordinateToBlockIndex(localCoordinate: Vector3Like): number;
     get originCoordinate(): Vector3Like;

@@ -22,6 +22,8 @@ const CAMERA_TRACKED_POSITION_LERP_TIME_S = 0.08;
 const CAMERA_TRACKED_POSITION_SNAP_DISTANCE_SQ = 4;
 const CAMERA_ATTACHED_POSITION_LERP_TIME_S = 0.06;
 const CAMERA_ATTACHED_POSITION_SNAP_DISTANCE_SQ = 9;
+const CAMERA_LOCAL_ATTACHMENT_POSITION_LERP_TIME_S = 0.04;
+const CAMERA_LOCAL_ATTACHMENT_POSITION_SNAP_DISTANCE_SQ = 4;
 const CAMERA_POSITION_DEADZONE_SQ = 0.0004; // 2cm
 const CAMERA_LOOK_AT_MIN_DISTANCE_SQ = 0.0004;
 const ORTHOGRAPHIC_HALF_HEIGHT = 7.5;
@@ -34,7 +36,6 @@ const vec3 = new Vector3();
 const vec3b = new Vector3();
 const vec3c = new Vector3();
 const vec3d = new Vector3();
-const vec3e = new Vector3();
 const vec3f = new Vector3();
 const modelViewEuler = new Euler(0, 0, 0, 'YXZ');
 const yawOnlyEuler = new Euler(0, 0, 0, 'YXZ');
@@ -122,6 +123,8 @@ export default class Camera {
   private _gameCameraCollisionRaycastOrigin: Vector3 = new Vector3();
   private _gameCameraCollisionRaycastDirection: Vector3 = new Vector3();
   private _gameCameraShoulderPositionOffset: Vector3 = new Vector3();
+  private _gameCameraLocalAttachmentPosition: Vector3 | undefined;
+  private _gameCameraLocalAttachmentSourceKey: string | undefined;
 
   private _spectatorCamera: PerspectiveCamera;
   private _spectatorCameraPitch: number = 0;
@@ -845,6 +848,100 @@ export default class Camera {
     return target.copy(followEntity.position).add(focusOffset);
   }
 
+  private _resetLocalAttachmentCameraSmoothing(): void {
+    this._gameCameraLocalAttachmentPosition = undefined;
+    this._gameCameraLocalAttachmentSourceKey = undefined;
+  }
+
+  private _getThirdPersonLocalAttachmentSourceKey(): string | undefined {
+    if (this._gameCameraMode !== CameraMode.THIRD_PERSON) {
+      return undefined;
+    }
+
+    const localPredictedEntity = this._game.entityManager.localPredictedEntity;
+    if (!localPredictedEntity) {
+      return undefined;
+    }
+
+    if (this._gameCameraAttachedEntity?.id === localPredictedEntity.id) {
+      return `entity:${localPredictedEntity.id}`;
+    }
+
+    if (
+      this._gameCameraDynamicFollowEntityId === localPredictedEntity.id &&
+      this._gameCameraDynamicFollowOffset
+    ) {
+      return `dynamic:${localPredictedEntity.id}`;
+    }
+
+    return undefined;
+  }
+
+  private _smoothLocalAttachmentCameraPosition(
+    target: Vector3,
+    frameDeltaS: number,
+    sourceKey: string | undefined,
+  ): Vector3 {
+    if (!sourceKey) {
+      this._resetLocalAttachmentCameraSmoothing();
+      return target;
+    }
+
+    if (
+      !this._gameCameraLocalAttachmentPosition ||
+      this._gameCameraLocalAttachmentSourceKey !== sourceKey
+    ) {
+      this._gameCameraLocalAttachmentSourceKey = sourceKey;
+      this._gameCameraLocalAttachmentPosition = new Vector3().copy(target);
+      return this._gameCameraLocalAttachmentPosition;
+    }
+
+    if (
+      this._gameCameraLocalAttachmentPosition.distanceToSquared(target)
+      > CAMERA_LOCAL_ATTACHMENT_POSITION_SNAP_DISTANCE_SQ
+    ) {
+      this._gameCameraLocalAttachmentPosition.copy(target);
+      return this._gameCameraLocalAttachmentPosition;
+    }
+
+    const lerpT = smoothingAlpha(frameDeltaS, CAMERA_LOCAL_ATTACHMENT_POSITION_LERP_TIME_S);
+    this._gameCameraLocalAttachmentPosition.lerp(target, lerpT);
+
+    if (
+      this._gameCameraLocalAttachmentPosition.distanceToSquared(target)
+      <= CAMERA_POSITION_DEADZONE_SQ
+    ) {
+      this._gameCameraLocalAttachmentPosition.copy(target);
+    }
+
+    return this._gameCameraLocalAttachmentPosition;
+  }
+
+  private _resolveGameCameraAttachmentPosition(frameDeltaS: number, target: Vector3): Vector3 {
+    const localAttachmentSourceKey = this._getThirdPersonLocalAttachmentSourceKey();
+
+    if (this._gameCameraAttachedEntity) {
+      this._gameCameraAttachedEntity.getWorldPosition(target);
+      return this._smoothLocalAttachmentCameraPosition(
+        target,
+        frameDeltaS,
+        localAttachmentSourceKey,
+      );
+    }
+
+    const dynamicFollowAttachment = this._resolveDynamicFollowAttachmentPosition(target);
+    if (dynamicFollowAttachment) {
+      return this._smoothLocalAttachmentCameraPosition(
+        dynamicFollowAttachment,
+        frameDeltaS,
+        localAttachmentSourceKey,
+      );
+    }
+
+    this._resetLocalAttachmentCameraSmoothing();
+    return this._gameCameraAttachedPosition!;
+  }
+
   private _updateGameCamera(frameDeltaS: number): void {
     if (!this._gameCameraAttachedEntity && !this._gameCameraAttachedPosition) {
       return console.warn(`Camera._updateGameCamera(): No camera attachment or position set for game camera.`);
@@ -883,9 +980,7 @@ export default class Camera {
     }
 
     // Get base positions for camera calculations.
-    const attachedPosition = this._gameCameraAttachedEntity?.getWorldPosition(vec3)
-      || this._resolveDynamicFollowAttachmentPosition(vec3e)
-      || this._gameCameraAttachedPosition!;
+    const attachedPosition = this._resolveGameCameraAttachmentPosition(frameDeltaS, vec3);
     const trackedPosition = this._resolveDynamicFollowTargetPosition(vec3f) || this._gameCameraTrackedPosition;
     const lookAtPosition = this._gameCameraLookAtPosition || this._gameCameraTrackedEntity?.position || trackedPosition;
     let lookAtDirection: Vector3 | undefined;

@@ -241,41 +241,36 @@ class ChunkWorker {
     // (e.g., mixing updates from before and after chunk-level changes)
     switch (message.type) {
       case 'chunk_update':
-        this._lastBlocksUpdateMessage.delete(Chunk.originCoordinateToChunkId(message.originCoordinate));
+        this._dropQueuedBlockUpdatesForChunkIds([ Chunk.originCoordinateToChunkId(message.originCoordinate) ]);
         break;
 
       case 'chunks_update':
-        for (let i = 0; i < message.updates.length; i++) {
-          this._lastBlocksUpdateMessage.delete(
-            Chunk.originCoordinateToChunkId(message.updates[i].originCoordinate),
-          );
-        }
+        this._dropQueuedBlockUpdatesForChunkIds(
+          message.updates.map(update => Chunk.originCoordinateToChunkId(update.originCoordinate)),
+        );
         break;
 
       case 'chunk_remove':
-        this._lastBlocksUpdateMessage.delete(message.chunkId);
+        this._dropQueuedBlockUpdatesForChunkIds([ message.chunkId ]);
         break;
 
       case 'block_type_update':
-        this._lastBlocksUpdateMessage.clear();
+        this._dropQueuedBlockUpdatesForChunkIds();
         break;
     }
 
     if (message.type === 'blocks_update') {
       // Merge processing for blocks_update messages to allow combining multiple block updates for the same
       // chunk to reduce geometry rebuilds
-      const filteredUpdate: Record<ChunkId, Array<{localCoordinate: Vector3Like, blockId: BlockId}>> = {};
+      const filteredUpdate: Record<ChunkId, Array<{ localCoordinate: Vector3Like, blockId: BlockId, blockRotationIndex?: number }>> = {};
       let hasNewChunks = false;
 
       for (const chunkId in message.update) {
         const lastMessage = this._lastBlocksUpdateMessage.get(chunkId as ChunkId);
 
         if (lastMessage) {
-          // Merge into existing message (simple append)
-          // NOTE: Directly modifying MessageEvent.data is technically possible but conceptually wrong.
-          // MessageEvent should represent immutable received messages. Consider refactoring to avoid this.
           const lastData = lastMessage.data as ChunkWorkerBlocksUpdateMessage;
-          lastData.update[chunkId as ChunkId].push(...message.update[chunkId as ChunkId]);
+          this._mergeBlockUpdates(lastData.update[chunkId as ChunkId], message.update[chunkId as ChunkId]);
         } else {
           // New message or already processed case
           filteredUpdate[chunkId as ChunkId] = message.update[chunkId as ChunkId];
@@ -298,6 +293,9 @@ class ChunkWorker {
 
       this._enqueueMessage(newEvent, true);
     } else if (
+      message.type === 'chunk_update' ||
+      message.type === 'chunks_update' ||
+      message.type === 'chunk_remove' ||
       message.type === 'chunk_build' ||
       message.type === 'batch_promotion_update' ||
       message.type === 'terrain_meshing_update'
@@ -323,7 +321,10 @@ class ChunkWorker {
     }
 
     const incomingMessage = event.data as ToChunkWorkerMessage;
-    const prioritizeBeforeChunkBuilds = incomingMessage.type === 'terrain_meshing_update';
+    const prioritizeBeforeChunkBuilds = incomingMessage.type === 'terrain_meshing_update' ||
+      incomingMessage.type === 'chunk_update' ||
+      incomingMessage.type === 'chunks_update' ||
+      incomingMessage.type === 'chunk_remove';
 
     // Keep chunk/chunks updates ahead of interactive block edits so the worker's
     // chunk registry stays coherent, but let block edits jump ahead of queued
@@ -714,21 +715,14 @@ class ChunkWorker {
   };
 
   private _onChunkRemove = (message: ChunkWorkerChunkRemoveMessage): void => {
-    this._chunkRegistry.deleteChunk(message.chunkId);
-
     this._clearNearbyLightSourceCache(message.chunkId);
+    this._chunkRegistry.deleteChunk(message.chunkId);
   };
 
   // Clear light source cache for a chunk and its neighbors that might be affected.
   // Called when chunks are updated or removed
   private _clearNearbyLightSourceCache(chunkId: ChunkId): void {
-    const chunk = this._chunkRegistry.getChunk(chunkId);
-
-    if (!chunk) {
-      return;
-    }
-
-    const coord = chunk.originCoordinate;
+    const coord = Chunk.chunkIdToOriginCoordinate(chunkId);
     const searchRadius = Math.ceil((MAX_LIGHT_LEVEL + 1) / CHUNK_SIZE);
 
     for (let dx = -searchRadius; dx <= searchRadius; dx++) {
@@ -791,6 +785,92 @@ class ChunkWorker {
       bitmap,
     };
     self.postMessage(message, [bitmap]);
+  }
+
+  private _mergeBlockUpdates(
+    existingUpdates: Array<{ localCoordinate: Vector3Like; blockId: BlockId; blockRotationIndex?: number }>,
+    incomingUpdates: Array<{ localCoordinate: Vector3Like; blockId: BlockId; blockRotationIndex?: number }>,
+  ): void {
+    for (let i = 0; i < incomingUpdates.length; i++) {
+      const incomingUpdate = incomingUpdates[i];
+      let replaced = false;
+
+      for (let j = existingUpdates.length - 1; j >= 0; j--) {
+        const existingUpdate = existingUpdates[j];
+        if (
+          existingUpdate.localCoordinate.x === incomingUpdate.localCoordinate.x &&
+          existingUpdate.localCoordinate.y === incomingUpdate.localCoordinate.y &&
+          existingUpdate.localCoordinate.z === incomingUpdate.localCoordinate.z
+        ) {
+          existingUpdates[j] = incomingUpdate;
+          replaced = true;
+          break;
+        }
+      }
+
+      if (!replaced) {
+        existingUpdates.push(incomingUpdate);
+      }
+    }
+  }
+
+  private _dropQueuedBlockUpdatesForChunkIds(chunkIds?: Iterable<ChunkId>): void {
+    const chunkIdSet = chunkIds ? new Set(chunkIds) : undefined;
+
+    if (this._receiveQueue.length === 0) {
+      this._lastBlocksUpdateMessage.clear();
+      return;
+    }
+
+    const nextQueue: MessageEvent[] = [];
+
+    for (let i = 0; i < this._receiveQueue.length; i++) {
+      const event = this._receiveQueue[i];
+      const data = event.data as ToChunkWorkerMessage;
+
+      if (data.type !== 'blocks_update') {
+        nextQueue.push(event);
+        continue;
+      }
+
+      if (!chunkIdSet) {
+        continue;
+      }
+
+      const nextUpdate: ChunkWorkerBlocksUpdateMessage['update'] = {};
+
+      for (const chunkId in data.update) {
+        if (!chunkIdSet.has(chunkId as ChunkId)) {
+          nextUpdate[chunkId as ChunkId] = data.update[chunkId as ChunkId];
+        }
+      }
+
+      if (Object.keys(nextUpdate).length === 0) {
+        continue;
+      }
+
+      nextQueue.push({ ...event, data: { ...data, update: nextUpdate } } as MessageEvent);
+    }
+
+    this._receiveQueue = nextQueue;
+    this._rebuildLastBlocksUpdateIndex();
+  }
+
+  private _rebuildLastBlocksUpdateIndex(): void {
+    this._lastBlocksUpdateMessage.clear();
+
+    for (let i = 0; i < this._receiveQueue.length; i++) {
+      const event = this._receiveQueue[i];
+      const data = event.data as ToChunkWorkerMessage;
+
+      if (data.type !== 'blocks_update') {
+        continue;
+      }
+
+      for (const chunkId in data.update) {
+        this._lastBlocksUpdateMessage.set(chunkId as ChunkId, event);
+      }
+    }
   }
 
   private _updateBlocks(update: Record<ChunkId, { localCoordinate: Vector3Like; blockId: BlockId; blockRotationIndex?: number }[]>): Set<ChunkId> {

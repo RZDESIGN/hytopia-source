@@ -51,6 +51,7 @@ const decodeWirePackets = wireBytes => {
 const createChildHarness = async t => {
   let stderrOutput = '';
   const child = spawn(process.execPath, [ WORLD_HOST_PROCESS_MAIN_PATH ], {
+    serialization: 'advanced',
     stdio: [ 'ignore', 'ignore', 'pipe', 'ipc' ],
   });
   const messages = [];
@@ -335,8 +336,8 @@ test('routes targeted entity batches only to the addressed player', async t => {
 test('streams nearby chunks and spatial state only after player camera interest is known', async t => {
   const harness = await createChildHarness(t);
   const worldId = 104;
-  const nearChunkBlocks = new Array(16 ** 3).fill(1);
-  const farChunkBlocks = new Array(16 ** 3).fill(2);
+  const nearChunkBlocks = new Uint8Array(16 ** 3).fill(1);
+  const farChunkBlocks = new Uint8Array(16 ** 3).fill(2);
 
   harness.send({
     options: createWorldBootOptions(worldId),
@@ -455,6 +456,8 @@ test('streams nearby chunks and spatial state only after player camera interest 
   const particleLoads = chunkLoadPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).flatMap(packet => packet[1]);
   const sceneUILoads = chunkLoadPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).flatMap(packet => packet[1]);
   assert.deepEqual(chunkLoads.map(chunk => chunk.c), [[0, 0, 0]]);
+  assert.equal(Array.isArray(chunkLoads[0].b) || ArrayBuffer.isView(chunkLoads[0].b), true);
+  assert.equal(chunkLoads[0].b[0], 1);
   assert.deepEqual(entityLoads.map(entity => entity.i), [7001]);
   assert.deepEqual(particleLoads.map(particleEmitter => particleEmitter.i), [8001]);
   assert.deepEqual(sceneUILoads.map(sceneUI => sceneUI.i), [9001]);
@@ -513,6 +516,57 @@ test('streams nearby chunks and spatial state only after player camera interest 
   const blockDeltaPackets = decodeWirePackets(blockDeltaMessage.wireBytes);
   assert.deepEqual(blockDeltaPackets.map(packet => packet[0]), [ BLOCKS_PACKET_ID ]);
   assert.deepEqual(blockDeltaPackets[0][1], [{ c: [160, 0, 1], i: 4 }]);
+});
+
+test('applies block deltas to mirrored typed-array chunk state for future chunk loads', async t => {
+  const harness = await createChildHarness(t);
+  const worldId = 107;
+  const initialBlocks = new Uint8Array(16 ** 3).fill(1);
+
+  harness.send({
+    options: createWorldBootOptions(worldId),
+    processId: 'shadow-test',
+    type: 'world_boot',
+    world: createWorldDescriptor(worldId),
+  });
+  await harness.waitForMessage(message => message.type === 'world_ready' && message.world?.id === worldId);
+
+  harness.send({
+    chunk: { b: initialBlocks, c: [0, 0, 0] },
+    type: 'chunk_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    block: { c: [1, 0, 1], i: 3 },
+    type: 'block_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    player: createPlayerDescriptor('player-h'),
+    type: 'player_attach',
+    worldId,
+  });
+  await harness.waitForMessage(message => message.type === 'player_packet_batch' && message.playerId === 'player-h');
+
+  harness.send({
+    camera: { e: null, p: [0, 2, 0] },
+    playerId: 'player-h',
+    type: 'player_camera',
+    worldId,
+    worldTick: 4,
+  });
+
+  const chunkLoadMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-h';
+  });
+  const chunkLoadPackets = decodeWirePackets(chunkLoadMessage.wireBytes);
+  const chunkLoads = chunkLoadPackets.filter(packet => packet[0] === CHUNKS_PACKET_ID).flatMap(packet => packet[1]);
+
+  assert.equal(chunkLoads.length, 1);
+  assert.equal(Array.isArray(chunkLoads[0].b) || ArrayBuffer.isView(chunkLoads[0].b), true);
+  assert.equal(chunkLoads[0].b[257], 3);
 });
 
 test('coalesces same-tick spatial interest loads with same-channel patches to latest state', async t => {

@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import RAPIER from '@dimforge/rapier3d-simd-compat';
 import protocol from '@hytopia.com/server-protocol';
 import Serializer from '@/networking/Serializer';
+import { BLOCK_ROTATIONS } from '@/worlds/blocks/Block';
 import Chunk from '@/worlds/blocks/Chunk';
 import ChunkLattice from '@/worlds/blocks/ChunkLattice';
 import { ChunkLatticeEvent } from '@/worlds/blocks/ChunkLattice';
@@ -75,14 +76,14 @@ function createDeferredVoxelLattice() {
   };
 }
 
-test('serializeChunk snapshots blocks as a packet-valid array', () => {
+test('serializeChunk snapshots blocks as a packet-valid typed array', () => {
   const chunk = new Chunk({ x: 0, y: 0, z: 0 });
 
   chunk.setBlock({ x: 0, y: 0, z: 0 }, 7);
 
   const serialized = Serializer.serializeChunk(chunk);
 
-  expect(Array.isArray(serialized.b)).toBe(true);
+  expect(serialized.b).toBeInstanceOf(Uint8Array);
   expect(serialized.b?.[0]).toBe(7);
   expect(protocol.createPacket(protocol.outboundPackets.chunksPacketDefinition, [ serialized ], 1)).toEqual([
     protocol.PacketId.CHUNKS,
@@ -93,6 +94,73 @@ test('serializeChunk snapshots blocks as a packet-valid array', () => {
   chunk.setBlock({ x: 0, y: 0, z: 0 }, 3);
 
   expect(serialized.b?.[0]).toBe(7);
+});
+
+test('setBlock does not create phantom air chunks and emits populated add/remove events', () => {
+  const world = {
+    blockTypeRegistry: {
+      getBlockType() {
+        return {
+          createCollider() {
+            return {
+              addToSimulation() {},
+              isSensor: false,
+              isTrimesh: false,
+              isVoxel: false,
+              removeFromSimulation() {},
+            };
+          },
+        };
+      },
+    },
+    emit() {
+      return false;
+    },
+    simulation: {
+      colliderMap: {
+        removeColliderBlockType() {},
+        setColliderBlockType() {},
+      },
+    },
+  } as any;
+  const lattice = new ChunkLattice(world);
+  (lattice as any)._rigidBody = {};
+
+  const events: string[] = [];
+  lattice.on(ChunkLatticeEvent.ADD_CHUNK, ({ chunk }) => {
+    events.push(`add:${chunk.getBlockId({ x: 0, y: 0, z: 0 })}`);
+  });
+  lattice.on(ChunkLatticeEvent.REMOVE_CHUNK, ({ chunk }) => {
+    events.push(`remove:${chunk.getBlockId({ x: 0, y: 0, z: 0 })}`);
+  });
+  lattice.on(ChunkLatticeEvent.SET_BLOCK, ({ chunk }) => {
+    events.push(`set:${chunk.getBlockId({ x: 0, y: 0, z: 0 })}`);
+  });
+
+  lattice.setBlock({ x: 0, y: 0, z: 0 }, 0);
+  expect(lattice.chunkCount).toBe(0);
+
+  lattice.setBlock({ x: 0, y: 0, z: 0 }, 1);
+  expect(lattice.chunkCount).toBe(1);
+
+  lattice.setBlock({ x: 0, y: 0, z: 0 }, 0);
+  expect(lattice.chunkCount).toBe(0);
+
+  expect(events).toEqual([
+    'add:1',
+    'set:1',
+    'remove:0',
+  ]);
+});
+
+test('setBlock can reset rotation back to identity without changing block type', () => {
+  const { lattice } = createDeferredVoxelLattice();
+
+  lattice.setBlock({ x: 0, y: 0, z: 0 }, 1, BLOCK_ROTATIONS.Y_90);
+  lattice.setBlock({ x: 0, y: 0, z: 0 }, 1);
+
+  const chunk = lattice.getChunk({ x: 0, y: 0, z: 0 });
+  expect(chunk?.getBlockRotation({ x: 0, y: 0, z: 0 }).enumIndex).toBe(0);
 });
 
 test('initializeBlockEntries emits completed chunks without per-block events', () => {

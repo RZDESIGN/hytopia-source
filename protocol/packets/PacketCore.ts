@@ -85,8 +85,32 @@ export type AnyPacketDefinition = IPacketDefinition<number, unknown>;
 
 export type AnySchema = unknown;
 
+type NumericArrayView = ArrayBufferView<ArrayBufferLike> & ArrayLike<number>;
+
 export interface Serializable {
   serialize(): AnySchema;
+}
+
+export function normalizePacketDataForValidation<T>(value: T): T {
+  if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+    return Array.from(value as unknown as NumericArrayView) as T;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(item => normalizePacketDataForValidation(item)) as T;
+  }
+
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, unknown> = {};
+
+    for (const [ key, nestedValue ] of Object.entries(value)) {
+      normalized[key] = normalizePacketDataForValidation(nestedValue);
+    }
+
+    return normalized as T;
+  }
+
+  return value;
 }
 
 export function createPacket<TId extends PacketId, TSchema>(
@@ -94,7 +118,12 @@ export function createPacket<TId extends PacketId, TSchema>(
   data: TSchema,
   worldTick?: WorldTick,
 ): IPacket<TId, TSchema> {
-  if (!packetDef.validate(data)) {
+  let valid = packetDef.validate(data);
+  if (!valid) {
+    valid = packetDef.validate(normalizePacketDataForValidation(data));
+  }
+
+  if (!valid) {
     throw new Error(`Invalid payload for packet with id ${packetDef.id}. Error: ${Ajv.instance.errorsText(packetDef.validate.errors)}`);
   }
 

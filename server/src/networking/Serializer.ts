@@ -143,7 +143,7 @@ export default class Serializer {
    * **Category:** Networking
    */
   public static serializeChunk(chunk: Chunk): protocol.ChunkSchema {
-    const blocks = Array.from(chunk.blocks);
+    const blocks = chunk.blocks.slice();
 
     const blockRotations = new Array<number>(chunk.blockRotations.size * 2);
     let blockRotationIndex = 0;

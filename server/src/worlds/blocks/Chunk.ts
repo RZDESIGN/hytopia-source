@@ -46,6 +46,9 @@ export default class Chunk implements protocol.Serializable {
   private _blockRotations: Map<number, BlockRotation> = new Map();
 
   /** @internal */
+  private _filledBlockCount: number = 0;
+
+  /** @internal */
   private _originCoordinate: Vector3Like;
 
   /** @internal */
@@ -79,6 +82,9 @@ export default class Chunk implements protocol.Serializable {
    * **Category:** Blocks
    */
   public get originCoordinate(): Vector3Like { return this._originCoordinate; }
+
+  /** @internal */
+  public get isEmpty(): boolean { return this._filledBlockCount === 0; }
 
   /**
    * Converts a block index to a local coordinate.
@@ -200,10 +206,12 @@ export default class Chunk implements protocol.Serializable {
     }
 
     const blockIndex = this._getIndex(localCoordinate);
+    const previousBlockTypeId = this._blocks[blockIndex];
     this._serialized = undefined;
 
     this._blocks[blockIndex] = blockTypeId;
     this._blockRotations.delete(blockIndex);
+    this._updateFilledBlockCount(previousBlockTypeId, blockTypeId);
 
     if (blockRotation && blockRotation !== BLOCK_ROTATIONS.Y_0) {
       this._blockRotations.set(blockIndex, blockRotation);
@@ -220,9 +228,11 @@ export default class Chunk implements protocol.Serializable {
       return ErrorHandler.error(`Chunk.setBlockByIndex(): Block type id ${blockTypeId} is out of bounds (expected 0-${MAX_BLOCK_TYPE_ID}).`);
     }
 
+    const previousBlockTypeId = this._blocks[blockIndex];
     this._serialized = undefined;
     this._blocks[blockIndex] = blockTypeId;
     this._blockRotations.delete(blockIndex);
+    this._updateFilledBlockCount(previousBlockTypeId, blockTypeId);
 
     if (blockRotation && blockRotation !== BLOCK_ROTATIONS.Y_0) {
       this._blockRotations.set(blockIndex, blockRotation);
@@ -245,5 +255,14 @@ export default class Chunk implements protocol.Serializable {
     return localCoordinate.x >= 0 && localCoordinate.x <= CHUNK_AXES_RANGE &&
            localCoordinate.y >= 0 && localCoordinate.y <= CHUNK_AXES_RANGE &&
            localCoordinate.z >= 0 && localCoordinate.z <= CHUNK_AXES_RANGE;
+  }
+
+  /** @internal */
+  private _updateFilledBlockCount(previousBlockTypeId: number, nextBlockTypeId: number): void {
+    if (previousBlockTypeId === 0 && nextBlockTypeId !== 0) {
+      this._filledBlockCount++;
+    } else if (previousBlockTypeId !== 0 && nextBlockTypeId === 0) {
+      this._filledBlockCount--;
+    }
   }
 }

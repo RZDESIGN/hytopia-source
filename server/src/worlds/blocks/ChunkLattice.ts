@@ -474,16 +474,25 @@ export default class ChunkLattice extends EventRouter {
     };
     const chunkKey = this._packCoordinateInts(x - localCoordinate.x, y - localCoordinate.y, z - localCoordinate.z);
     let chunk = this._chunks.get(chunkKey);
+    const targetBlockRotation = blockRotation ?? BLOCK_ROTATIONS.Y_0;
+    let createdChunk = false;
 
     if (!chunk) {
-      chunk = this._getOrCreateChunk({ x, y, z }, true);
+      if (blockTypeId === 0 && targetBlockRotation === BLOCK_ROTATIONS.Y_0) {
+        return;
+      }
+
+      chunk = this._getOrCreateChunk({ x, y, z }, false);
+      createdChunk = true;
     }
 
     const blockIndex = Chunk.localCoordinateToBlockIndex(localCoordinate);
     const previousBlockTypeId = chunk.getBlockIdByIndex(blockIndex);
     const previousBlockRotation = chunk.getBlockRotationByIndex(blockIndex);
 
-    if (previousBlockTypeId === blockTypeId && !blockRotation) return;
+    if (previousBlockTypeId === blockTypeId && previousBlockRotation === targetBlockRotation) {
+      return;
+    }
 
     chunk.setBlockByIndex(blockIndex, blockTypeId, blockRotation);
 
@@ -499,6 +508,22 @@ export default class ChunkLattice extends EventRouter {
 
     if (previousBlockTypeId === blockTypeId && previousBlockRotation !== (blockRotation ?? BLOCK_ROTATIONS.Y_0)) {
       this._dirtyColliderBlockTypeIds.add(blockTypeId);
+    }
+
+    if (createdChunk) {
+      this.emitWithWorld(this._world, ChunkLatticeEvent.ADD_CHUNK, {
+        chunkLattice: this,
+        chunk,
+      });
+    }
+
+    if (chunk.isEmpty) {
+      this._chunks.delete(chunkKey);
+      this.emitWithWorld(this._world, ChunkLatticeEvent.REMOVE_CHUNK, {
+        chunkLattice: this,
+        chunk,
+      });
+      return;
     }
 
     this.emitWithWorld(this._world, ChunkLatticeEvent.SET_BLOCK, {

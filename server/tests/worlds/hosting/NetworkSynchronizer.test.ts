@@ -203,3 +203,289 @@ test('chunk syncs are split into smaller reliable packet batches', () => {
   ]);
   expect(packets?.map(packet => (packet[1] as any[]).length)).toEqual([ 4, 4, 2 ]);
 });
+
+test('chunk add interest lookup uses indexed player centers', () => {
+  const synchronizer = new NetworkSynchronizer({
+    chunkLattice: {
+      getChunk() {
+        return undefined;
+      },
+    },
+    entityManager: {
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+  const playerNear = { id: 'near' };
+  const playerFar = { id: 'far' };
+  const originalGetConnectedPlayersByWorldSet = PlayerManager.instance.getConnectedPlayersByWorldSet;
+
+  try {
+    (PlayerManager.instance as any).getConnectedPlayersByWorldSet = () => {
+      throw new Error('should not scan all players');
+    };
+
+    const nearState = (synchronizer as any)._getOrCreatePlayerChunkInterestState(playerNear);
+    (synchronizer as any)._setPlayerChunkInterestCenterKey(playerNear, '0,0,0', nearState);
+
+    const farState = (synchronizer as any)._getOrCreatePlayerChunkInterestState(playerFar);
+    (synchronizer as any)._setPlayerChunkInterestCenterKey(playerFar, '160,0,0', farState);
+
+    const interestedPlayers = (synchronizer as any)._getPlayersInterestedInChunk({
+      originCoordinate: { x: 0, y: 0, z: 0 },
+    });
+
+    expect(interestedPlayers).toEqual([ playerNear ]);
+  } finally {
+    (PlayerManager.instance as any).getConnectedPlayersByWorldSet = originalGetConnectedPlayersByWorldSet;
+  }
+});
+
+test('chunk interest refresh incrementally adds and removes only edge chunks for adjacent movement', () => {
+  const queuedLoads: string[] = [];
+  const queuedRemovals: string[] = [];
+  const chunkMap = new Map<string, { originCoordinate: { x: number; y: number; z: number } }>();
+  const makeChunk = (x: number, y: number, z: number) => {
+    const chunk = { originCoordinate: { x, y, z } };
+    chunkMap.set(`${x},${y},${z}`, chunk);
+    return chunk;
+  };
+  makeChunk(0, 0, 0);
+  makeChunk(16, 0, 0);
+  makeChunk(112, 0, 0);
+
+  const player = {
+    camera: {
+      attachedToEntity: undefined,
+      attachedToPosition: { x: 0, y: 0, z: 0 },
+      targetEntity: undefined,
+      targetPosition: undefined,
+    },
+  };
+  const synchronizer = new NetworkSynchronizer({
+    chunkLattice: {
+      getChunk(originCoordinate: { x: number; y: number; z: number }) {
+        return chunkMap.get(`${originCoordinate.x},${originCoordinate.y},${originCoordinate.z}`);
+      },
+    },
+    entityManager: {
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+
+  (synchronizer as any)._queueChunkStateForPlayer = (chunk: { originCoordinate: { x: number; y: number; z: number } }) => {
+    queuedLoads.push(`${chunk.originCoordinate.x},${chunk.originCoordinate.y},${chunk.originCoordinate.z}`);
+  };
+  (synchronizer as any)._queueChunkRemovalForPlayer = (chunk: { originCoordinate: { x: number; y: number; z: number } }) => {
+    queuedRemovals.push(`${chunk.originCoordinate.x},${chunk.originCoordinate.y},${chunk.originCoordinate.z}`);
+  };
+
+  const state = (synchronizer as any)._getOrCreatePlayerChunkInterestState(player);
+  (synchronizer as any)._refreshPlayerChunkInterest(player);
+
+  expect(queuedLoads).toEqual([ '0,0,0', '16,0,0' ]);
+  expect(queuedRemovals).toEqual([]);
+  expect(Array.from((synchronizer as any)._getOrCreateLoadedChunkKeys(player)).sort()).toEqual([ '0,0,0', '16,0,0' ]);
+
+  queuedLoads.length = 0;
+  player.camera.attachedToPosition = { x: 16, y: 0, z: 0 };
+  state.needsRefresh = false;
+
+  (synchronizer as any)._refreshPlayerChunkInterest(player);
+
+  expect(queuedLoads).toEqual([ '112,0,0' ]);
+  expect(queuedRemovals).toEqual([]);
+  expect(Array.from((synchronizer as any)._getOrCreateLoadedChunkKeys(player)).sort()).toEqual([ '0,0,0', '112,0,0', '16,0,0' ]);
+});
+
+test('chunk interest refresh falls back to full recompute for teleports', () => {
+  const player = {
+    camera: {
+      attachedToEntity: undefined,
+      attachedToPosition: { x: 160, y: 0, z: 0 },
+      targetEntity: undefined,
+      targetPosition: undefined,
+    },
+  };
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+  const state = (synchronizer as any)._getOrCreatePlayerChunkInterestState(player);
+  state.centerChunkKey = '0,0,0';
+  state.needsRefresh = false;
+  const loadedChunkKeys = (synchronizer as any)._getOrCreateLoadedChunkKeys(player);
+  loadedChunkKeys.add('0,0,0');
+
+  let fullRefreshCalls = 0;
+  (synchronizer as any)._refreshPlayerChunkInterestFull = () => {
+    fullRefreshCalls++;
+  };
+  (synchronizer as any)._refreshPlayerChunkInterestIncremental = () => {
+    throw new Error('should not use incremental refresh for teleports');
+  };
+
+  (synchronizer as any)._refreshPlayerChunkInterest(player);
+
+  expect(fullRefreshCalls).toBe(1);
+});
+
+test('spatial interest refresh uses full recompute while player stays in the same chunk', () => {
+  const player = {
+    camera: {
+      attachedToEntity: undefined,
+      attachedToPosition: { x: 1, y: 0, z: 1 },
+      targetEntity: undefined,
+      targetPosition: undefined,
+    },
+  };
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+
+  let entityFullCalls = 0;
+  let particleFullCalls = 0;
+  let sceneUIFullCalls = 0;
+  (synchronizer as any)._refreshPlayerEntityInterestFull = () => { entityFullCalls++; };
+  (synchronizer as any)._refreshPlayerParticleEmitterInterestFull = () => { particleFullCalls++; };
+  (synchronizer as any)._refreshPlayerSceneUIInterestFull = () => { sceneUIFullCalls++; };
+  (synchronizer as any)._refreshPlayerEntityInterestIncremental = () => { throw new Error('should not use incremental entity refresh'); };
+  (synchronizer as any)._refreshPlayerParticleEmitterInterestIncremental = () => { throw new Error('should not use incremental particle refresh'); };
+  (synchronizer as any)._refreshPlayerSceneUIInterestIncremental = () => { throw new Error('should not use incremental scene UI refresh'); };
+
+  (synchronizer as any)._refreshPlayerSpatialInterest(player);
+  (synchronizer as any)._refreshPlayerSpatialInterest(player);
+
+  expect(entityFullCalls).toBe(2);
+  expect(particleFullCalls).toBe(2);
+  expect(sceneUIFullCalls).toBe(2);
+});
+
+test('spatial interest refresh uses incremental diffs for adjacent chunk movement', () => {
+  const player = {
+    camera: {
+      attachedToEntity: undefined,
+      attachedToPosition: { x: 0, y: 0, z: 0 },
+      targetEntity: undefined,
+      targetPosition: undefined,
+    },
+  };
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+
+  let entityIncrementalCalls = 0;
+  let particleIncrementalCalls = 0;
+  let sceneUIIncrementalCalls = 0;
+  (synchronizer as any)._refreshPlayerEntityInterestFull = () => {};
+  (synchronizer as any)._refreshPlayerParticleEmitterInterestFull = () => {};
+  (synchronizer as any)._refreshPlayerSceneUIInterestFull = () => {};
+  (synchronizer as any)._refreshPlayerEntityInterestIncremental = () => { entityIncrementalCalls++; };
+  (synchronizer as any)._refreshPlayerParticleEmitterInterestIncremental = () => { particleIncrementalCalls++; };
+  (synchronizer as any)._refreshPlayerSceneUIInterestIncremental = () => { sceneUIIncrementalCalls++; };
+
+  (synchronizer as any)._refreshPlayerSpatialInterest(player);
+  player.camera.attachedToPosition = { x: 16, y: 0, z: 0 };
+  (synchronizer as any)._refreshPlayerSpatialInterest(player);
+
+  expect(entityIncrementalCalls).toBe(1);
+  expect(particleIncrementalCalls).toBe(1);
+  expect(sceneUIIncrementalCalls).toBe(1);
+});
+
+test('spatial interest refresh falls back to full recompute for teleports', () => {
+  const player = {
+    camera: {
+      attachedToEntity: undefined,
+      attachedToPosition: { x: 0, y: 0, z: 0 },
+      targetEntity: undefined,
+      targetPosition: undefined,
+    },
+  };
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+
+  let entityFullCalls = 0;
+  let particleFullCalls = 0;
+  let sceneUIFullCalls = 0;
+  (synchronizer as any)._refreshPlayerEntityInterestFull = () => { entityFullCalls++; };
+  (synchronizer as any)._refreshPlayerParticleEmitterInterestFull = () => { particleFullCalls++; };
+  (synchronizer as any)._refreshPlayerSceneUIInterestFull = () => { sceneUIFullCalls++; };
+  (synchronizer as any)._refreshPlayerEntityInterestIncremental = () => { throw new Error('should not use incremental entity refresh'); };
+  (synchronizer as any)._refreshPlayerParticleEmitterInterestIncremental = () => { throw new Error('should not use incremental particle refresh'); };
+  (synchronizer as any)._refreshPlayerSceneUIInterestIncremental = () => { throw new Error('should not use incremental scene UI refresh'); };
+
+  (synchronizer as any)._refreshPlayerSpatialInterest(player);
+  player.camera.attachedToPosition = { x: 160, y: 0, z: 0 };
+  (synchronizer as any)._refreshPlayerSpatialInterest(player);
+
+  expect(entityFullCalls).toBe(2);
+  expect(particleFullCalls).toBe(2);
+  expect(sceneUIFullCalls).toBe(2);
+});
+
+test('entity spatial interest only refreshes attached indexes when the entity changes chunks', () => {
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getAllEntities() {
+        return [];
+      },
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    particleEmitterManager: {
+      getAllParticleEmitters() {
+        return [];
+      },
+    },
+    sceneUIManager: {
+      getAllSceneUIs() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+  const entity = {
+    id: 77,
+    position: { x: 1, y: 2, z: 3 },
+  };
+
+  let attachedRefreshCalls = 0;
+  (synchronizer as any)._refreshAttachedSpatialInterestForEntity = () => {
+    attachedRefreshCalls++;
+  };
+
+  (synchronizer as any)._updateEntitySpatialInterest(entity);
+  entity.position = { x: 15, y: 2, z: 3 };
+  (synchronizer as any)._updateEntitySpatialInterest(entity);
+  entity.position = { x: 16, y: 2, z: 3 };
+  (synchronizer as any)._updateEntitySpatialInterest(entity);
+
+  expect(attachedRefreshCalls).toBe(2);
+});

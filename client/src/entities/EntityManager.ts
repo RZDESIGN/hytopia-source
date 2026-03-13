@@ -1859,7 +1859,7 @@ export default class EntityManager {
         ? 0
         : intrinsicVerticalVelocity;
 
-    if (locomotion.isActivelyMoving || controllerState.predictedFacesCameraWhenIdle) {
+    if (locomotion.hasMovementIntent || controllerState.predictedFacesCameraWhenIdle) {
       const finalYaw = locomotion.facingYaw ?? yaw;
       const halfMovementYaw = finalYaw * 0.5;
       this._localPredictionState.predictedRotation.set(0, Math.sin(halfMovementYaw), 0, Math.cos(halfMovementYaw));
