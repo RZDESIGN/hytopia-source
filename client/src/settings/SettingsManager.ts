@@ -205,7 +205,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     // of setting antialias to false.
     antialias: true,
     blobShadows: {
-      enabled: false,
+      enabled: true,
     },
     terrainMeshing: {
       mode: 'fast',
@@ -243,7 +243,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
   POWER_SAVING: {
     antialias: true,
     blobShadows: {
-      enabled: false,
+      enabled: true,
     },
     terrainMeshing: {
       mode: 'fast',
@@ -379,7 +379,10 @@ export default class SettingsManager {
 
   constructor(game: Game) {
     this._game = game;
-    this._clientSettings = { ...DEFAULT_CLIENT_SETTINGS };
+    this._clientSettings = {
+      ...DEFAULT_CLIENT_SETTINGS,
+      qualityPerfTradeoff: this._applyMobileOverrides({ ...DEFAULT_CLIENT_SETTINGS.qualityPerfTradeoff }),
+    };
   }
 
   public get clientSettings(): ClientSettings { return this._clientSettings; }
@@ -401,6 +404,50 @@ export default class SettingsManager {
 
   private _emitUpdateEvent(): void {
     EventRouter.instance.emit(ClientSettingsEventType.Update, {});
+  }
+
+  private _applyMobileOverrides(tradeoff: QualityPerfTradeoff): QualityPerfTradeoff {
+    if (!MobileManager.isMobile) return tradeoff;
+
+    const result = { ...tradeoff };
+
+    // Cap shadow map sizes to save fill rate on mobile GPUs while keeping
+    // real-time shadows active (PCF at 512 still looks good on small screens).
+    if (result.shadows?.enabled) {
+      result.shadows = {
+        ...result.shadows,
+        directionalMapSize: Math.min(result.shadows.directionalMapSize, 512),
+        spotlightMapSize: Math.min(result.shadows.spotlightMapSize, 256),
+        maxSpotlightShadows: Math.min(result.shadows.maxSpotlightShadows, 1),
+      };
+    }
+
+    // Blob shadows as cheap fallback when real shadow maps are off.
+    if (!result.shadows?.enabled) {
+      result.blobShadows = { enabled: true };
+    }
+
+    // Bloom is a full-screen post-processing pass that is expensive on mobile
+    // tile-based GPUs due to extra render target resolve/load cycles.
+    if (result.postProcessing?.bloom) {
+      result.postProcessing = { ...result.postProcessing, bloom: false };
+    }
+
+    // Pull in view distance on mobile to reduce draw calls and chunk geometry.
+    if (result.viewDistance.enabled && result.viewDistance.distance > 130) {
+      const ratio = 130 / result.viewDistance.distance;
+      result.viewDistance = {
+        ...result.viewDistance,
+        distance: 130,
+        fog: {
+          ...result.viewDistance.fog,
+          near: Math.round(result.viewDistance.fog.near * ratio),
+          far: Math.round(result.viewDistance.fog.far * ratio),
+        },
+      };
+    }
+
+    return result;
   }
 
   private _changeQualityIfNeeded(condition: boolean, deltaTime: number, stats: PerformanceStats, change: QualityChange): void {
@@ -481,7 +528,7 @@ export default class SettingsManager {
     }
 
     this._autoAdjustment = false;
-    this._clientSettings.qualityPerfTradeoff = { ...QUALITY_PRESETS[preset] };
+    this._clientSettings.qualityPerfTradeoff = this._applyMobileOverrides({ ...QUALITY_PRESETS[preset] });
     this._currentPresetLevel = preset;
 
     // Reset stats for auto adjust ment in case auto adjust ment will be enabled again
@@ -536,7 +583,7 @@ export default class SettingsManager {
 
     const preset = QUALITY_PRESETS[nextLevel];
 
-    this._clientSettings.qualityPerfTradeoff = { ...preset };
+    this._clientSettings.qualityPerfTradeoff = this._applyMobileOverrides({ ...preset });
     this._currentPresetLevel = nextLevel;
 
     this._emitUpdateEvent();

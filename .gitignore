@@ -1,2 +1,4 @@
 node_modules/
 _examples/
+# Local Netlify folder
+.netlify

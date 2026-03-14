@@ -2,6 +2,8 @@
  * Simple modal system to replace browser alert() and prompt() calls.
  * Returns Promises to handle async user interactions properly.
  */
+import logoSquareSvg from '../img/logo-square.svg';
+
 let container: HTMLDivElement | null = null;
 const DEFAULT_LOCAL_SERVER_HOSTNAMES = [ 'local.hytopiahosting.com:8080' ];
 const DEFAULT_LOCAL_SERVER_PORT = 8080;
@@ -429,7 +431,7 @@ export function modalPrompt(message: string, defaultValue = '', options: ModalPr
 
       const logo = document.createElement('img');
       logo.className = 'hytopia-local-corner-logo';
-      logo.src = '/src/img/logo-square.svg';
+      logo.src = logoSquareSvg;
 
       overlay.append(logo, searchContainer, modal, cornerButton);
       getContainer().appendChild(overlay);

@@ -61,16 +61,18 @@ import {
   SquareSunMaterial,
   WeatherPrecipitationSystem,
 } from './ProceduralSky';
+import MobileManager from '../mobile/MobileManager';
 
 const MISSING_SKYBOX_TEXTURE_PATH = '/textures/missing-skybox';
 // Cap internal render target pixel count to avoid severe fullscreen slowdowns on
-// high-DPI displays (e.g. Retina). Windowed mode remains sharper because viewport
-// area is smaller and usually falls below this budget.
-const MAX_RENDER_TARGET_PIXELS = 2560 * 1440;
+// high-DPI displays (e.g. Retina). Mobile devices use a tighter 1080p budget
+// since phone screens are small enough that higher resolution is imperceptible,
+// and mobile GPUs are heavily fill-rate constrained.
+const MAX_RENDER_TARGET_PIXELS = MobileManager.isMobile ? 1920 * 1080 : 2560 * 1440;
 const MIN_RENDER_PIXEL_RATIO = 0.5;
-const MIN_ADAPTIVE_RESOLUTION_SCALE = 0.67;
+const MIN_ADAPTIVE_RESOLUTION_SCALE = MobileManager.isMobile ? 0.5 : 0.67;
 const MAX_ADAPTIVE_RESOLUTION_SCALE = 1.0;
-const ADAPTIVE_RESOLUTION_DOWN_STEP = 0.08;
+const ADAPTIVE_RESOLUTION_DOWN_STEP = MobileManager.isMobile ? 0.12 : 0.08;
 const ADAPTIVE_RESOLUTION_UP_STEP = 0.04;
 const ADAPTIVE_RESOLUTION_DOWN_THRESHOLD_RATIO = 1.08;
 const ADAPTIVE_RESOLUTION_UP_THRESHOLD_RATIO = 0.92;
@@ -78,9 +80,9 @@ const ADAPTIVE_RESOLUTION_DOWN_HOLD_S = 0.2;
 const ADAPTIVE_RESOLUTION_UP_HOLD_S = 1.5;
 const SCENE_UI_LIGHT_LOAD_MAX = 4;
 const SCENE_UI_MEDIUM_LOAD_MAX = 12;
-const SCENE_UI_LIGHT_RENDER_INTERVAL_S = 1 / 60;
-const SCENE_UI_MEDIUM_RENDER_INTERVAL_S = 1 / 30;
-const SCENE_UI_HEAVY_RENDER_INTERVAL_S = 1 / 20;
+const SCENE_UI_LIGHT_RENDER_INTERVAL_S = MobileManager.isMobile ? 1 / 30 : 1 / 60;
+const SCENE_UI_MEDIUM_RENDER_INTERVAL_S = MobileManager.isMobile ? 1 / 20 : 1 / 30;
+const SCENE_UI_HEAVY_RENDER_INTERVAL_S = MobileManager.isMobile ? 1 / 15 : 1 / 20;
 const DIRECTIONAL_LIGHT_SHADOW_BIAS = -0.0002;
 const DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS = 0.02;
 const DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER = 1.5;
@@ -93,9 +95,9 @@ const DIRECTIONAL_LIGHT_SHADOW_VIEW_DIR_DOT_THRESHOLD = 0.999996;
 const DIRECTIONAL_LIGHT_SHADOW_CONTINUOUS_UPDATE_HOLD_S = 0.12;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_PARALLEL_THRESHOLD = 0.95;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ = 0.000001;
-const WATER_REFLECTION_TEXTURE_SIZE_HIGH = 512;
-const WATER_REFLECTION_TEXTURE_SIZE_MEDIUM = 384;
-const WATER_REFLECTION_TEXTURE_SIZE_LOW = 256;
+const WATER_REFLECTION_TEXTURE_SIZE_HIGH = MobileManager.isMobile ? 384 : 512;
+const WATER_REFLECTION_TEXTURE_SIZE_MEDIUM = MobileManager.isMobile ? 256 : 384;
+const WATER_REFLECTION_TEXTURE_SIZE_LOW = MobileManager.isMobile ? 192 : 256;
 const WATER_REFLECTION_CLIP_BIAS = 0.01;
 const WATER_REFLECTION_UPDATE_INTERVAL_HIGH_S = 1 / 24;
 const WATER_REFLECTION_UPDATE_INTERVAL_MEDIUM_S = 1 / 12;
@@ -1280,16 +1282,22 @@ export default class Renderer {
     }
 
     const forceRender = uiManager.consumeSceneUIRefreshRequest();
+    let shouldUpdatePositions = forceRender;
+
     if (!forceRender) {
       this._sceneUIRenderCooldownRemainingS = Math.max(0, this._sceneUIRenderCooldownRemainingS - frameDeltaS);
-      if (this._sceneUIRenderCooldownRemainingS > 0) {
-        return;
+      if (this._sceneUIRenderCooldownRemainingS <= 0) {
+        shouldUpdatePositions = true;
       }
     }
 
-    uiManager.update();
+    if (shouldUpdatePositions) {
+      uiManager.update();
+      this._sceneUIRenderCooldownRemainingS = this._getSceneUIRenderInterval(sceneUICount);
+    }
+
+    // Always re-project with the current camera so UI tracks smoothly during camera movement
     this._sceneUiRenderer.render(this._uiScene, this._game.camera.activeCamera);
-    this._sceneUIRenderCooldownRemainingS = this._getSceneUIRenderInterval(sceneUICount);
   }
 
   private _getSceneUIRenderInterval(sceneUICount: number): number {
