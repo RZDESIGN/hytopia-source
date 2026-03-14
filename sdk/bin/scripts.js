@@ -79,7 +79,7 @@ async function start() {
   const inputFile = process.argv[3] || 'index.ts';
   const outputFile = inputFile.replace(/\.ts$/, '.mjs');
   const entryFile = path.join(projectRoot, outputFile);
-  const buildCmd = `hammy-hytopia build-dev ${inputFile}`;
+  const buildCmd = `hytopia build-dev ${inputFile}`;
   const runCmd = `"${process.execPath}" --enable-source-maps "${entryFile}"`;
 
   // Start nodemon to watch for changes, rebuild, then run the server
@@ -188,10 +188,10 @@ function installProjectDependencies() {
   execSync('npm init -y --silent --loglevel silent', { stdio: ['ignore', 'ignore', 'inherit'] });
   
   // Add various common scripts to the package.json
-  execSync('npm pkg set scripts.build="hammy-hytopia build"', { stdio: 'ignore' });
-  execSync('npm pkg set scripts.package="hammy-hytopia package"', { stdio: 'ignore' });
-  execSync('npm pkg set scripts.upgrade-assets-library="hammy-hytopia upgrade-assets-library"', { stdio: 'ignore' });
-  execSync('npm pkg set scripts.upgrade-project="hammy-hytopia upgrade-project"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.build="hytopia build"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.package="hytopia package"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.upgrade-assets-library="hytopia upgrade-assets-library"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.upgrade-project="hytopia upgrade-project"', { stdio: 'ignore' });
 
   // create tsconfig.json, used by build
   fs.writeFileSync('tsconfig.json', JSON.stringify({
@@ -646,10 +646,10 @@ function migrate() {
 
   // Update package.json scripts to use hammy-hytopia CLI
   const scriptsToUpdate = {
-    'build': 'hammy-hytopia build',
-    'package': 'hammy-hytopia package',
-    'upgrade-assets-library': 'hammy-hytopia upgrade-assets-library',
-    'upgrade-project': 'hammy-hytopia upgrade-project',
+    'build': 'hytopia build',
+    'package': 'hytopia package',
+    'upgrade-assets-library': 'hytopia upgrade-assets-library',
+    'upgrade-project': 'hytopia upgrade-project',
   };
 
   const updatedPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));

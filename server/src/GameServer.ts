@@ -206,7 +206,7 @@ export default class GameServer {
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('---');
-      console.log('🟢 Server Running: You can test & play it at: https://hytopia.com/play');
+      console.log('🟢 Server Running: You can test & play it at: https://hammyhytopia.com/?join=local.hytopiahosting.com:8080');
     }
 
     ErrorHandler.enableCrashProtection();

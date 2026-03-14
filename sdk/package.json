@@ -1,6 +1,6 @@
 {
   "name": "hammy-hytopia",
-  "version": "0.15.3",
+  "version": "0.15.5",
   "description": "Hammy fork of the HYTOPIA SDK - create massively multiplayer games using JavaScript or TypeScript. Uses custom client at hammyhytopia.com.",
   "type": "module",
   "main": "./server.mjs",
@@ -11,6 +11,7 @@
     }
   },
   "bin": {
+    "hytopia": "bin/scripts.js",
     "hammy-hytopia": "bin/scripts.js",
     "hammy": "bin/scripts.js"
   },
