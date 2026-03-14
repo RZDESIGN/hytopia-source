@@ -379,8 +379,10 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
             float cloudAlpha = saturate(cloudAlpha0 + (1.0 - cloudAlpha0) * cloudAlpha1 + (1.0 - max(cloudAlpha0, cloudAlpha1)) * cloudAlpha2);
 
             float cloudThickness = saturate(cloudMask0 * 0.55 + cloudMask1 * 0.30 + cloudMask2 * 0.22);
-            float depthOcclusion = saturate(cloudMask1 * 0.55 + cloudMask2 * 0.35);
-            float undersideDark = depthOcclusion * (1.0 - cloudMask0 * 0.3);
+            float depthOcclusion = saturate(cloudMask1 * 0.58 + cloudMask2 * 0.38);
+
+            float viewUndersideAmount = 1.0 - smoothstep(0.06, 0.50, direction.y);
+            float undersideStrength = saturate(depthOcclusion * 0.6 + viewUndersideAmount * cloudThickness * 0.45);
 
             float edgeDist = saturate((density0 - cloudThreshold) * 7.0);
             float cloudEdge = edgeDist * (1.0 - smoothstep(0.0, 0.6, edgeDist));
@@ -391,15 +393,14 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
             float forwardScatter = pow(viewSunDot, 5.0) * (1.0 - cloudThickness * 0.6) * 0.22;
 
             vec3 cloudBase = mix(vec3(0.32, 0.34, 0.42), vec3(1.0), dayAmount);
-            float topLight = 0.58 + 0.42 * cloudSunDot;
-            vec3 cloudLit = cloudBase * topLight;
-            vec3 shadowTint = mix(vec3(0.62, 0.66, 0.78), vec3(0.76, 0.78, 0.84), dayAmount);
-            vec3 cloudShadow = cloudBase * shadowTint * 0.68;
+            vec3 cloudLit = cloudBase * (0.92 + 0.12 * cloudSunDot);
+            vec3 shadowTint = mix(vec3(0.48, 0.52, 0.68), vec3(0.54, 0.58, 0.72), dayAmount);
+            vec3 cloudShadow = cloudBase * shadowTint;
 
-            float shadowAmount = undersideDark * (0.42 + (1.0 - cloudSunDot) * 0.28);
-            vec3 cloudColor = mix(cloudLit, cloudShadow, shadowAmount);
-            cloudColor *= 0.90 + cloudThickness * 0.14;
-            cloudColor += vec3(1.0, 0.99, 0.96) * cloudEdge * (0.14 + dayAmount * 0.16) * topLight;
+            float shadowBlend = saturate(undersideStrength + (1.0 - cloudSunDot) * depthOcclusion * 0.3);
+            vec3 cloudColor = mix(cloudLit, cloudShadow, shadowBlend);
+            cloudColor *= 0.88 + cloudThickness * 0.18;
+            cloudColor += vec3(1.0, 0.99, 0.96) * cloudEdge * (0.16 + dayAmount * 0.18) * (0.7 + 0.3 * cloudSunDot);
             cloudColor += vec3(1.0, 0.96, 0.88) * forwardScatter * dayAmount;
             cloudColor += sunsetTint * sunsetWindow * saturate(cloudSunDot + 0.2) * cloudMask0 * 0.10;
             cloudColor = mix(cloudColor, cloudColor * 0.48, smoothstep(0.35, 0.92, ${UNIFORM_STORMINESS}));
@@ -540,7 +541,7 @@ export class SquareSunMaterial extends ShaderMaterial {
       `,
       transparent: true,
       depthWrite: false,
-      depthTest: false,
+      depthTest: true,
       blending: NormalBlending,
     });
   }
