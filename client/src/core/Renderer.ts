@@ -1101,12 +1101,12 @@ export default class Renderer {
       const moonMaterial = this._proceduralMoonMesh.material as SquareSunMaterial;
       const moonAmount = Math.max(0, Math.min(1, (moonViewDirection.y + 0.1) / 0.32)) * (1 - this._proceduralSkySettings.storminess * 0.5);
       const moonDistance = 840;
-      const moonSize = 100 + moonAmount * 20;
+      const moonSize = 120 + moonAmount * 24;
 
       moonMaterial.dayAmount = moonAmount;
-      moonMaterial.haloAmount = 0.42;
-      moonMaterial.sunColor.setRGB(0.7, 0.78, 0.94);
-      moonMaterial.sunIntensity = 0.92;
+      moonMaterial.haloAmount = 0.62;
+      moonMaterial.sunColor.setRGB(0.86, 0.90, 1.0);
+      moonMaterial.sunIntensity = 2.4;
 
       this._proceduralMoonMesh.visible = moonAmount > 0.001;
       if (this._proceduralMoonMesh.visible) {

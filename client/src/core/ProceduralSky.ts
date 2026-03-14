@@ -53,8 +53,8 @@ const UNIFORM_SUN_INTENSITY = 'sunIntensity';
 
 const PROCEDURAL_SKY_PRESET_DEFAULTS: Record<ProceduralSkyPreset, Omit<ProceduralSkySettings, 'preset'>> = {
   clear: {
-    cloudCoverage: 0.18,
-    cloudOpacity: 0.44,
+    cloudCoverage: 0.28,
+    cloudOpacity: 0.64,
     cloudScale: 0.38,
     cloudSpeed: 0.018,
     precipitation: 'none',
@@ -63,8 +63,8 @@ const PROCEDURAL_SKY_PRESET_DEFAULTS: Record<ProceduralSkyPreset, Omit<Procedura
     windDirection: new Vector2(1, 0.16),
   },
   cloudy: {
-    cloudCoverage: 0.34,
-    cloudOpacity: 0.52,
+    cloudCoverage: 0.44,
+    cloudOpacity: 0.70,
     cloudScale: 0.42,
     cloudSpeed: 0.022,
     precipitation: 'none',
@@ -73,8 +73,8 @@ const PROCEDURAL_SKY_PRESET_DEFAULTS: Record<ProceduralSkyPreset, Omit<Procedura
     windDirection: new Vector2(1, 0.2),
   },
   overcast: {
-    cloudCoverage: 0.52,
-    cloudOpacity: 0.62,
+    cloudCoverage: 0.58,
+    cloudOpacity: 0.76,
     cloudScale: 0.44,
     cloudSpeed: 0.02,
     precipitation: 'none',
@@ -83,8 +83,8 @@ const PROCEDURAL_SKY_PRESET_DEFAULTS: Record<ProceduralSkyPreset, Omit<Procedura
     windDirection: new Vector2(1, 0.24),
   },
   storm: {
-    cloudCoverage: 0.78,
-    cloudOpacity: 0.8,
+    cloudCoverage: 0.82,
+    cloudOpacity: 0.88,
     cloudScale: 0.46,
     cloudSpeed: 0.028,
     precipitation: 'rain',
@@ -287,7 +287,7 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
 
         float fbm(vec2 p) {
           float value = 0.0;
-          float amplitude = 0.55;
+          float amplitude = 0.50;
           value += noise(p) * amplitude;
           p = p * 2.02 + vec2(8.7, -3.1);
           amplitude *= 0.5;
@@ -295,17 +295,22 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
           p = p * 2.03 + vec2(-4.2, 7.5);
           amplitude *= 0.5;
           value += noise(p) * amplitude;
+          p = p * 2.01 + vec2(5.3, -1.8);
+          amplitude *= 0.5;
+          value += noise(p) * amplitude;
           return value;
         }
 
         float cloudDensityAt(vec2 p) {
-          vec2 macroUv = floor(p * 14.0) / 14.0;
-          vec2 voxelUv = floor(p * 28.0) / 28.0;
-          float largeShape = fbm(macroUv * 0.92 + vec2(${UNIFORM_WORLD_SEED} * 0.37, ${UNIFORM_WORLD_SEED} * 0.21));
-          float mediumShape = fbm(voxelUv * 2.05 - vec2(${UNIFORM_WORLD_SEED} * 0.13, ${UNIFORM_WORLD_SEED} * 0.29));
-          float detailShape = noise(voxelUv * 4.8 + vec2(4.0, -6.0));
-          float microShape = noise(voxelUv * 9.0 + vec2(-9.0, 3.0));
-          return largeShape * 0.42 + mediumShape * 0.28 + detailShape * 0.18 + microShape * 0.12;
+          vec2 blockP = floor(p * 32.0) / 32.0;
+          vec2 shapeP = mix(blockP, p, 0.44);
+          vec2 medBlockP = floor(p * 48.0) / 48.0;
+          vec2 medP = mix(medBlockP, p, 0.52);
+          float largeShape = fbm(shapeP * 0.92 + vec2(${UNIFORM_WORLD_SEED} * 0.37, ${UNIFORM_WORLD_SEED} * 0.21));
+          float mediumShape = fbm(medP * 2.1 - vec2(${UNIFORM_WORLD_SEED} * 0.13, ${UNIFORM_WORLD_SEED} * 0.29));
+          float detailShape = noise(p * 5.0 + vec2(4.0, -6.0));
+          float microShape = noise(p * 9.5 + vec2(-9.0, 3.0));
+          return largeShape * 0.40 + mediumShape * 0.28 + detailShape * 0.19 + microShape * 0.13;
         }
 
         void main() {
@@ -316,25 +321,26 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
 
           vec3 zenithNight = vec3(0.025, 0.045, 0.14);
           vec3 horizonNight = vec3(0.055, 0.072, 0.15);
-          vec3 zenithDayBase = mix(vec3(0.04, 0.28, 0.95), vec3(0.32, 0.36, 0.48), ${UNIFORM_STORMINESS});
-          vec3 horizonDayBase = mix(vec3(0.20, 0.50, 0.94), vec3(0.44, 0.48, 0.58), ${UNIFORM_STORMINESS});
+          vec3 zenithDayBase = mix(vec3(0.03, 0.24, 0.96), vec3(0.32, 0.36, 0.48), ${UNIFORM_STORMINESS});
+          vec3 horizonDayBase = mix(vec3(0.05, 0.60, 0.76), vec3(0.42, 0.48, 0.56), ${UNIFORM_STORMINESS});
           vec3 zenithDay = zenithDayBase * (1.0 + ${UNIFORM_SKY_INTENSITY} * 0.02);
           vec3 horizonDay = mix(horizonDayBase, ${UNIFORM_FOG_COLOR}, 0.04) * (1.0 + ${UNIFORM_SKY_INTENSITY} * 0.01);
-          vec3 nadir = mix(vec3(0.01, 0.014, 0.028), ${UNIFORM_FOG_COLOR} * 0.24, dayAmount);
+          vec3 nadirDay = mix(vec3(0.84, 0.87, 0.92), vec3(0.46, 0.48, 0.54), ${UNIFORM_STORMINESS});
+          vec3 nadir = mix(vec3(0.012, 0.016, 0.032), nadirDay, dayAmount);
 
           vec3 zenith = mix(zenithNight, zenithDay, dayAmount);
           vec3 horizon = mix(horizonNight, horizonDay, dayAmount);
 
-          vec3 sky = mix(horizon, zenith, smoothstep(0.0, 0.82, up));
+          vec3 sky = mix(horizon, zenith, smoothstep(0.18, 0.92, up));
           sky = mix(nadir, sky, smoothstep(-0.12, 0.04, direction.y));
 
-          float sunsetWindow = 1.0 - smoothstep(0.02, 0.36, abs(sunViewDirection.y));
-          float sunsetBand = exp(-abs(direction.y - max(sunViewDirection.y, -0.06)) * mix(4.5, 10.0, dayAmount));
-          float facingSun = pow(saturate(dot(direction, sunViewDirection)), 3.0);
-          vec3 sunsetTint = mix(vec3(1.0, 0.34, 0.08), vec3(1.0, 0.62, 0.22), facingSun);
-          sky += sunsetTint * sunsetBand * sunsetWindow * (0.34 + 0.42 * facingSun) * (1.0 - ${UNIFORM_STORMINESS} * 0.5);
-          float horizonGlow = exp(-abs(direction.y + 0.02) * 6.0) * sunsetWindow;
-          sky += vec3(0.82, 0.18, 0.04) * horizonGlow * (0.22 + 0.16 * facingSun) * (1.0 - ${UNIFORM_STORMINESS} * 0.6);
+          float sunsetWindow = 1.0 - smoothstep(0.08, 0.52, abs(sunViewDirection.y));
+          float sunsetBand = exp(-abs(direction.y - max(sunViewDirection.y, -0.06)) * mix(3.8, 8.0, dayAmount));
+          float facingSun = pow(saturate(dot(direction, sunViewDirection)), 2.8);
+          vec3 sunsetTint = mix(vec3(1.0, 0.32, 0.06), vec3(1.0, 0.60, 0.20), facingSun);
+          sky += sunsetTint * sunsetBand * sunsetWindow * (0.38 + 0.48 * facingSun) * (1.0 - ${UNIFORM_STORMINESS} * 0.5);
+          float horizonGlow = exp(-abs(direction.y + 0.02) * 5.0) * sunsetWindow;
+          sky += vec3(0.85, 0.16, 0.03) * horizonGlow * (0.26 + 0.20 * facingSun) * (1.0 - ${UNIFORM_STORMINESS} * 0.6);
 
           if (dayAmount < 0.5 && direction.y > 0.0) {
             vec2 starUv = direction.xz / max(direction.y + 0.26, 0.12);
@@ -354,34 +360,49 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
           }
 
           if (direction.y > -0.02) {
-            vec2 windDirection = normalize(${UNIFORM_WIND_DIRECTION});
+            vec2 windDir = normalize(${UNIFORM_WIND_DIRECTION});
             vec2 cloudUv = direction.xz / max(direction.y + 0.24, 0.08);
-            cloudUv = cloudUv * ${UNIFORM_CLOUD_SCALE} + windDirection * ${UNIFORM_TIME} * ${UNIFORM_CLOUD_SPEED};
+            cloudUv = cloudUv * ${UNIFORM_CLOUD_SCALE} + windDir * ${UNIFORM_TIME} * ${UNIFORM_CLOUD_SPEED};
 
-            float cloudThreshold = mix(0.79, 0.28, ${UNIFORM_CLOUD_COVERAGE});
-            float cloudBand = smoothstep(-0.03, 0.1, direction.y) * mix(1.0, 0.72, smoothstep(0.82, 1.0, direction.y));
+            float cloudThreshold = mix(0.68, 0.20, ${UNIFORM_CLOUD_COVERAGE});
+            float cloudBand = smoothstep(-0.03, 0.12, direction.y) * mix(1.0, 0.68, smoothstep(0.78, 1.0, direction.y));
             float density0 = cloudDensityAt(cloudUv);
             float density1 = cloudDensityAt(cloudUv * 1.05 + vec2(1.9, -2.6));
             float density2 = cloudDensityAt(cloudUv * 1.11 + vec2(-3.8, 4.7));
-            float cloudMask0 = smoothstep(cloudThreshold, min(cloudThreshold + 0.095, 0.99), density0);
-            float cloudMask1 = smoothstep(cloudThreshold + 0.026, min(cloudThreshold + 0.125, 0.99), density1);
-            float cloudMask2 = smoothstep(cloudThreshold + 0.052, min(cloudThreshold + 0.15, 0.99), density2);
-            float cloudAlpha0 = cloudMask0 * cloudBand * ${UNIFORM_CLOUD_OPACITY} * 0.62;
-            float cloudAlpha1 = cloudMask1 * cloudBand * ${UNIFORM_CLOUD_OPACITY} * 0.28;
-            float cloudAlpha2 = cloudMask2 * cloudBand * ${UNIFORM_CLOUD_OPACITY} * 0.15;
-            float cloudAlpha = saturate(cloudAlpha0 + (1.0 - cloudAlpha0) * cloudAlpha1 + (1.0 - max(cloudAlpha0, cloudAlpha1)) * cloudAlpha2);
-            float cloudVolume = saturate(cloudMask0 * 0.68 + cloudMask1 * 0.28 + cloudMask2 * 0.2);
-            float undersideShadow = saturate(cloudMask0 * 0.7 - cloudMask1 * 0.4 + cloudMask2 * 0.18);
-            float cloudEdgeHighlight = saturate((density0 - cloudThreshold) * 7.5) * (1.0 - cloudMask1 * 0.48);
+            float cloudMask0 = smoothstep(cloudThreshold, min(cloudThreshold + 0.10, 0.99), density0);
+            float cloudMask1 = smoothstep(cloudThreshold + 0.02, min(cloudThreshold + 0.13, 0.99), density1);
+            float cloudMask2 = smoothstep(cloudThreshold + 0.04, min(cloudThreshold + 0.16, 0.99), density2);
 
-            vec3 cloudDirection = normalize(vec3(direction.x, max(direction.y, 0.0) + 0.22, direction.z));
-            float cloudLight = 0.46 + 0.54 * saturate(dot(cloudDirection, sunViewDirection));
-            vec3 cloudBase = mix(vec3(0.32, 0.34, 0.4), vec3(0.997, 0.998, 1.0), dayAmount);
-            vec3 cloudColor = mix(cloudBase * 0.76, cloudBase, cloudLight);
-            cloudColor *= 0.88 + cloudVolume * 0.14;
-            cloudColor *= 1.0 - undersideShadow * 0.10;
-            cloudColor += vec3(1.0, 0.99, 0.98) * cloudEdgeHighlight * (0.08 + dayAmount * 0.08) * cloudLight;
-            cloudColor = mix(cloudColor, cloudColor * 0.56, smoothstep(0.35, 0.92, ${UNIFORM_STORMINESS}));
+            float cloudAlpha0 = cloudMask0 * cloudBand * ${UNIFORM_CLOUD_OPACITY} * 0.78;
+            float cloudAlpha1 = cloudMask1 * cloudBand * ${UNIFORM_CLOUD_OPACITY} * 0.36;
+            float cloudAlpha2 = cloudMask2 * cloudBand * ${UNIFORM_CLOUD_OPACITY} * 0.20;
+            float cloudAlpha = saturate(cloudAlpha0 + (1.0 - cloudAlpha0) * cloudAlpha1 + (1.0 - max(cloudAlpha0, cloudAlpha1)) * cloudAlpha2);
+
+            float cloudThickness = saturate(cloudMask0 * 0.55 + cloudMask1 * 0.30 + cloudMask2 * 0.22);
+            float depthOcclusion = saturate(cloudMask1 * 0.55 + cloudMask2 * 0.35);
+            float undersideDark = depthOcclusion * (1.0 - cloudMask0 * 0.3);
+
+            float edgeDist = saturate((density0 - cloudThreshold) * 7.0);
+            float cloudEdge = edgeDist * (1.0 - smoothstep(0.0, 0.6, edgeDist));
+
+            vec3 cloudDir = normalize(vec3(direction.x, max(direction.y, 0.0) + 0.22, direction.z));
+            float cloudSunDot = saturate(dot(cloudDir, sunViewDirection));
+            float viewSunDot = saturate(dot(direction, sunViewDirection));
+            float forwardScatter = pow(viewSunDot, 5.0) * (1.0 - cloudThickness * 0.6) * 0.22;
+
+            vec3 cloudBase = mix(vec3(0.32, 0.34, 0.42), vec3(1.0), dayAmount);
+            float topLight = 0.58 + 0.42 * cloudSunDot;
+            vec3 cloudLit = cloudBase * topLight;
+            vec3 shadowTint = mix(vec3(0.62, 0.66, 0.78), vec3(0.76, 0.78, 0.84), dayAmount);
+            vec3 cloudShadow = cloudBase * shadowTint * 0.68;
+
+            float shadowAmount = undersideDark * (0.42 + (1.0 - cloudSunDot) * 0.28);
+            vec3 cloudColor = mix(cloudLit, cloudShadow, shadowAmount);
+            cloudColor *= 0.90 + cloudThickness * 0.14;
+            cloudColor += vec3(1.0, 0.99, 0.96) * cloudEdge * (0.14 + dayAmount * 0.16) * topLight;
+            cloudColor += vec3(1.0, 0.96, 0.88) * forwardScatter * dayAmount;
+            cloudColor += sunsetTint * sunsetWindow * saturate(cloudSunDot + 0.2) * cloudMask0 * 0.10;
+            cloudColor = mix(cloudColor, cloudColor * 0.48, smoothstep(0.35, 0.92, ${UNIFORM_STORMINESS}));
             cloudColor += vec3(0.78, 0.84, 1.0) * ${UNIFORM_LIGHTNING} * (0.2 + cloudMask0 * 0.62);
 
             sky = mix(sky, cloudColor, cloudAlpha);
