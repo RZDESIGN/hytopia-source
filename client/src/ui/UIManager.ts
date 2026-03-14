@@ -161,6 +161,14 @@ export default class UIManager {
     }
   }
 
+  public updateSceneUIsForEntity(entityId: number): void {
+    for (const sceneUI of this._sceneUIs.values()) {
+      if (sceneUI.attachedToEntityId === entityId) {
+        sceneUI.update();
+      }
+    }
+  }
+
   private _onSceneUIsPacket = (payload: NetworkManagerEventPayload.ISceneUIsPacket): void => {
     void this._ensureUIRuntimeReady().then(() => {
       for (const deserializedSceneUI of payload.deserializedSceneUIs) {

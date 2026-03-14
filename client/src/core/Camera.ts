@@ -174,6 +174,10 @@ export default class Camera {
     return this._gameCameraAttachedEntity;
   }
 
+  public get gameCameraSmoothedAttachmentPosition(): Vector3 | undefined {
+    return this._gameCameraLocalAttachmentPosition;
+  }
+
   public get gameCameraYaw(): number {
     return this._gameCameraYaw;
   }

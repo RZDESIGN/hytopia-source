@@ -1294,6 +1294,14 @@ export default class Renderer {
     if (shouldUpdatePositions) {
       uiManager.update();
       this._sceneUIRenderCooldownRemainingS = this._getSceneUIRenderInterval(sceneUICount);
+    } else {
+      // Always update the camera-attached entity's SceneUI to avoid stale positions
+      // from CSP movement. SceneUI uses the camera's smoothed attachment position for
+      // this entity, so there's no jitter from CSP reconciliation.
+      const attachedEntity = this._game.camera.gameCameraAttachedEntity;
+      if (attachedEntity) {
+        uiManager.updateSceneUIsForEntity(attachedEntity.id);
+      }
     }
 
     // Always re-project with the current camera so UI tracks smoothly during camera movement

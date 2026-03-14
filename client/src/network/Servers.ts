@@ -68,8 +68,12 @@ export default class Servers {
 
         for (const candidate of candidates) {
           try {
+            const targetAddressSpace = isLocal ? 'loopback'
+              : candidate.includes('.dns-is-boring-we-do-ip-addresses.') ? 'private'
+                : undefined;
+
             response = await fetchWithTimeout(`https://${candidate}`, {
-              targetAddressSpace: isLocal ? 'loopback' : undefined,
+              targetAddressSpace,
             } as RequestInit, SERVER_HEALTH_CHECK_TIMEOUT_MS);
           } catch { /* ignore network errors (including timeout); try next candidate */ }
 

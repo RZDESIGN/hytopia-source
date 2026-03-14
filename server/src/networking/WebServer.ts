@@ -126,7 +126,12 @@ export interface WebServerEventPayloads {
   [WebServerEvent.UPGRADE]: { req: http.IncomingMessage, socket: RawSocket, head: Buffer };
 }
 
-const CORS = { 'access-control-allow-origin': '*' };
+const CORS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, HEAD, POST, OPTIONS',
+  'access-control-allow-headers': '*',
+  'access-control-allow-private-network': 'true',
+};
 const PERF_ENDPOINTS_ENABLED = process.env.HYTOPIA_ENABLE_PERF_ENDPOINTS === 'true' || process.env.NODE_ENV !== 'production';
 const MIME: Record<string, string> = {
   '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.mjs': 'text/javascript',
@@ -248,6 +253,14 @@ export default class WebServer extends EventRouter {
     const respond = (status: number, hdrs: Record<string, string | number> = {}) => {
       res.writeHead(status, { ...hdrs, ...CORS });
     };
+
+    // CORS / Private Network Access preflight
+    if (method === 'OPTIONS') {
+      respond(204);
+      res.end();
+
+      return;
+    }
 
     // Health check
     if (reqPath === '/') {

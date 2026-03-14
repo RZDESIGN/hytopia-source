@@ -39,6 +39,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
     'help': displayHelp,
     'init': init,
     'init-mcp': initMcp,
+    'migrate': migrate,
     'package': packageProject,
     'run': run,
     'start': start,
@@ -78,7 +79,7 @@ async function start() {
   const inputFile = process.argv[3] || 'index.ts';
   const outputFile = inputFile.replace(/\.ts$/, '.mjs');
   const entryFile = path.join(projectRoot, outputFile);
-  const buildCmd = `hytopia build-dev ${inputFile}`;
+  const buildCmd = `hammy-hytopia build-dev ${inputFile}`;
   const runCmd = `"${process.execPath}" --enable-source-maps "${entryFile}"`;
 
   // Start nodemon to watch for changes, rebuild, then run the server
@@ -187,10 +188,10 @@ function installProjectDependencies() {
   execSync('npm init -y --silent --loglevel silent', { stdio: ['ignore', 'ignore', 'inherit'] });
   
   // Add various common scripts to the package.json
-  execSync('npm pkg set scripts.build="hytopia build"', { stdio: 'ignore' });
-  execSync('npm pkg set scripts.package="hytopia package"', { stdio: 'ignore' });
-  execSync('npm pkg set scripts.upgrade-assets-library="hytopia upgrade-assets-library"', { stdio: 'ignore' });
-  execSync('npm pkg set scripts.upgrade-project="hytopia upgrade-project"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.build="hammy-hytopia build"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.package="hammy-hytopia package"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.upgrade-assets-library="hammy-hytopia upgrade-assets-library"', { stdio: 'ignore' });
+  execSync('npm pkg set scripts.upgrade-project="hammy-hytopia upgrade-project"', { stdio: 'ignore' });
 
   // create tsconfig.json, used by build
   fs.writeFileSync('tsconfig.json', JSON.stringify({
@@ -209,7 +210,7 @@ function installProjectDependencies() {
   execSync('npm install --save-dev typescript', { stdio: 'inherit' });
 
   // install hytopia sdk and hytopia assets
-  execSync('npm install --force hytopia@latest', { stdio: 'inherit' });
+  execSync('npm install --force hammy-hytopia@latest', { stdio: 'inherit' });
   execSync('npm install --save-optional --force @hytopia.com/assets@latest', { stdio: 'inherit' });
 }
 
@@ -252,8 +253,8 @@ function displayInitSuccessMessage() {
   logDivider();
   console.log('✅ HYTOPIA PROJECT INITIALIZED SUCCESSFULLY!');
   console.log(' ');
-  console.log('💡 1. Start your development server by running the command `hytopia start`');
-  console.log('🎮 2. Play your game by opening: https://hytopia.com/play/?join=localhost:8080');
+  console.log('💡 1. Start your development server by running the command `hammy-hytopia start`');
+  console.log('🎮 2. Play your game by opening: https://hammyhytopia.com/?join=local.hytopiahosting.com:8080');
   logDivider();
 }
 
@@ -608,6 +609,76 @@ async function fetchLatestVersion(signal) {
   }
 }
 
+/**
+ * Migrate an existing HYTOPIA project to use the Hammy fork.
+ * Replaces the official 'hytopia' package with 'hammy-hytopia' aliased as 'hytopia',
+ * so all existing import statements continue to work without code changes.
+ */
+function migrate() {
+  const projectRoot = process.cwd();
+  const pkgPath = path.join(projectRoot, 'package.json');
+
+  if (!fs.existsSync(pkgPath)) {
+    console.error('❌ No package.json found in the current directory. Run this from your game project root.');
+    process.exit(1);
+  }
+
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  const currentDep = (pkg.dependencies || {})['hytopia'];
+
+  if (currentDep && currentDep.startsWith('npm:hammy-hytopia@')) {
+    console.log('✅ This project is already using the Hammy fork!');
+    return;
+  }
+
+  logDivider();
+  console.log('🔄 MIGRATING TO HAMMY HYTOPIA FORK');
+  console.log('');
+
+  if (currentDep) {
+    console.log(`   Found existing hytopia dependency: ${currentDep}`);
+    console.log('   Removing official hytopia package...');
+    execSync('npm uninstall hytopia', { stdio: 'inherit' });
+  }
+
+  console.log('   Installing hammy-hytopia (aliased as "hytopia" so your code stays the same)...');
+  execSync('npm install --force hytopia@npm:hammy-hytopia@latest', { stdio: 'inherit' });
+
+  // Update package.json scripts to use hammy-hytopia CLI
+  const scriptsToUpdate = {
+    'build': 'hammy-hytopia build',
+    'package': 'hammy-hytopia package',
+    'upgrade-assets-library': 'hammy-hytopia upgrade-assets-library',
+    'upgrade-project': 'hammy-hytopia upgrade-project',
+  };
+
+  const updatedPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+  let scriptsChanged = false;
+
+  for (const [key, value] of Object.entries(scriptsToUpdate)) {
+    if (updatedPkg.scripts && updatedPkg.scripts[key] && updatedPkg.scripts[key].startsWith('hytopia ')) {
+      updatedPkg.scripts[key] = value;
+      scriptsChanged = true;
+    }
+  }
+
+  if (scriptsChanged) {
+    fs.writeFileSync(pkgPath, JSON.stringify(updatedPkg, null, 2) + '\n');
+    console.log('   Updated package.json scripts to use hammy-hytopia CLI.');
+  }
+
+  logDivider();
+  console.log('✅ MIGRATION COMPLETE!');
+  console.log('');
+  console.log('   Your code stays exactly the same -- all imports from "hytopia" now use the Hammy fork.');
+  console.log('');
+  console.log('💡 Start your server:  hammy-hytopia start');
+  console.log('🎮 Play your game:    https://hammyhytopia.com/?join=local.hytopiahosting.com:8080');
+  console.log('');
+  console.log('   To switch back to official HYTOPIA:  npm install hytopia@latest');
+  logDivider();
+}
+
 function upgradeAssetsLibrary(versionArg = 'latest') {
   const version = versionArg.trim();
   console.log(`🔄 Upgrading @hytopia.com/assets package to: ${version} ...`);
@@ -618,14 +689,14 @@ function upgradeAssetsLibrary(versionArg = 'latest') {
 function upgradeCli(versionArg = 'latest') {
   const version = versionArg.trim();
   console.log(`🔄 Upgrading HYTOPIA CLI to: hytopia@${version} ...`);
-  execSync(`npm install -g --force hytopia@${version}`, { stdio: 'inherit' });
+  execSync(`npm install -g --force hammy-hytopia@${version}`, { stdio: 'inherit' });
   console.log('✅ Upgrade complete. You may need to restart your shell for changes to take effect.');
 }
 
 function upgradeProject(versionArg = 'latest') {
   const version = versionArg.trim();
-  const spec = `hytopia@${version}`;
-  console.log(`🔄 Upgrading project HYTOPIA SDK to: ${spec} ...`);
+  const spec = `hammy-hytopia@${version}`;
+  console.log(`🔄 Upgrading project Hammy HYTOPIA SDK to: ${spec} ...`);
   execSync(`npm install --force ${spec}`, { stdio: 'inherit' });
   console.log('✅ Project dependency upgraded.');
 }
@@ -635,10 +706,10 @@ function upgradeProject(versionArg = 'latest') {
 // ==============================================================================
 
 function displayHelp() {
-  console.log('HYTOPIA CLI');
+  console.log('Hammy HYTOPIA CLI (fork)');
   console.log('');
   console.log('Usage:');
-  console.log('  hytopia [command] [options]');
+  console.log('  hammy-hytopia [command] [options]');
   console.log('');
   console.log('Commands:');
   console.log('  help, -h, --help            Show this help');
@@ -649,13 +720,16 @@ function displayHelp() {
   console.log('  run [FILE]                  Run the project once without watching (default: index.ts)');
   console.log('  init [--template NAME]      Initialize a new project');
   console.log('  init-mcp                    Setup MCP integrations');
+  console.log('  migrate                     Migrate an existing hytopia project to use the Hammy fork');
   console.log('  package                     Create a zip of the project for uploading to the HYTOPIA create portal.');
   console.log('  upgrade-assets-library [VERSION]    Upgrade the @hytopia.com/assets package (default: latest)');
-  console.log('  upgrade-cli [VERSION]       Upgrade the HYTOPIA CLI (default: latest)');
+  console.log('  upgrade-cli [VERSION]       Upgrade the Hammy HYTOPIA CLI (default: latest)');
   console.log('  upgrade-project [VERSION]   Upgrade project SDK dependency (default: latest)');
   console.log('');
+  console.log('Client: https://hammyhytopia.com');
+  console.log('');
   console.log('Examples:');
-  console.log('  hytopia init --template zombies-fps');
-  console.log('  hytopia start playground.ts');
-  console.log('  hytopia upgrade-project 0.8.12');
+  console.log('  hammy-hytopia init --template zombies-fps');
+  console.log('  hammy-hytopia start playground.ts');
+  console.log('  hammy-hytopia upgrade-project 0.8.12');
 }

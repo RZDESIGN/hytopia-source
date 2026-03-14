@@ -58,6 +58,7 @@ export default class NetworkManager {
   private _wtUnreliableWriter: WritableStreamDefaultWriter<Uint8Array> | undefined;
   private _game: Game;
   private _connectionId: string | undefined;
+  private _hasConnected: boolean = false;
   private _lastPacketServerTick: number = 0;
   private _lastSendProtocol: 'wt' | 'ws' | 'none' = 'none';
   private _lastReceiveProtocol: 'wt' | 'ws' | 'none' = 'none';
@@ -499,6 +500,7 @@ export default class NetworkManager {
       this._connectionId = deserializedConnection.id;
     }
 
+    this._hasConnected = true;
     this._defaultBlockEditPredictionConfig = createDefaultBlockEditPredictionConfig();
     this._serverFeatures = connectionFeatureFlagsToFeatures(deserializedConnection.featureFlags);
 
@@ -527,6 +529,26 @@ export default class NetworkManager {
   }
 
   private async _reconnect(): Promise<void> {
+    // Guard against infinite reload loops: only auto-reconnect if we previously
+    // had a successful connection. If the initial connection never succeeded,
+    // strip the join param so the user gets the connection prompt instead of
+    // an endless page-reload cycle.
+    if (!this._hasConnected) {
+      console.error('NetworkManager._reconnect(): Connection failed before establishing. Clearing join target.');
+
+      const url = new URL(window.location.href);
+      url.searchParams.delete('join');
+      url.searchParams.delete('connectionId');
+
+      if (window.self !== window.top) {
+        this.game.bridgeManager.sendReconnect(url.toString());
+      } else {
+        window.location.href = url.toString();
+      }
+
+      return;
+    }
+
     // Probe server health for diagnostics; reconnect flow currently does not branch on this.
     const { default: Servers } = await import('./Servers');
     await Servers.isCurrentServerHealthy().catch(() => false);

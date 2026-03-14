@@ -95,7 +95,13 @@ export default class SceneUI {
         return;
       }
 
-      entity.getWorldPosition(this._position);
+      const camera = this._game.camera;
+      const smoothedPos = camera.gameCameraSmoothedAttachmentPosition;
+      if (smoothedPos && camera.gameCameraAttachedEntity?.id === this._attachedToEntityId) {
+        this._position.copy(smoothedPos);
+      } else {
+        entity.getWorldPosition(this._position);
+      }
 
       // Add offset, this only works with entity attachment.
       if (this._offset) {

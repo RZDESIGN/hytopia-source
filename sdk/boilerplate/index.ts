@@ -28,7 +28,7 @@ import {
   Audio,
   DefaultPlayerEntity,
   PlayerEvent,
-} from 'hytopia';
+} from 'hammy-hytopia';
 
 import worldMap from './assets/map.json';
 
