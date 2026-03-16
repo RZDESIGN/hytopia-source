@@ -330,6 +330,8 @@ export default class EnvironmentController {
           ?? DEFAULT_PROCEDURAL_SKY_URI);
     const parsedPresetFromProceduralSky = parseEnvironmentPresetFromSkyboxUri(sourceProceduralSkyUri);
     const parsedWeatherPresetFromProceduralSky = parseWeatherPresetFromSkyboxUri(sourceProceduralSkyUri);
+    const shouldPreserveSourceWeatherInPresetMode = legacySkyboxAlias?.preset === 'daytime'
+      || parsedPresetFromProceduralSky === null;
     this._clockIntervalMs = options.clockIntervalMs ?? DEFAULT_CLOCK_INTERVAL_MS;
     this._cycleDurationMs = options.cycleDurationMs ?? DEFAULT_CYCLE_DURATION_MS;
     this._cycleOffsetHours = options.cycleOffsetHours ?? DEFAULT_CYCLE_OFFSET_HOURS;
@@ -351,13 +353,7 @@ export default class EnvironmentController {
       ?? parsedPresetFromProceduralSky
       ?? 'daytime';
     this._presetWeatherOverride = options.preset === undefined
-      ? (
-        legacySkyboxAlias?.preset === 'daytime'
-          ? parsedWeatherPresetFromProceduralSky
-          : parsedPresetFromProceduralSky === null
-            ? parsedWeatherPresetFromProceduralSky
-            : null
-      )
+      ? (shouldPreserveSourceWeatherInPresetMode ? parsedWeatherPresetFromProceduralSky : null)
       : null;
     this._sunBaseHeight = options.sunBaseHeight ?? DEFAULT_SUN_BASE_HEIGHT;
     this._sunHeightRange = options.sunHeightRange ?? DEFAULT_SUN_HEIGHT_RANGE;
