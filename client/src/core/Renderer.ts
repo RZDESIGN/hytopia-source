@@ -526,6 +526,8 @@ export default class Renderer {
       intensity: 0,
       lut: createCinematicLut(),
     });
+    this._lutPass.material.toneMapped = false;
+    this._lutPass.material.needsUpdate = true;
 
     Assets.ktx2Loader.detectSupport(this._renderer);
 
@@ -678,9 +680,13 @@ export default class Renderer {
     this._effectComposer.addPass(this._bloomPass);
     this._effectComposer.addPass(this._temporalResolvePass);
     this._effectComposer.addPass(this._smaaPass);
-    this._effectComposer.addPass(this._outputPass);
     this._effectComposer.addPass(this._lutPass);
+    this._effectComposer.addPass(this._outputPass);
     this._resizePostProcessing();
+  }
+
+  private _supportsLutPass(): boolean {
+    return this._renderer.capabilities.isWebGL2;
   }
 
   private _resizePostProcessing(): void {
@@ -849,7 +855,9 @@ export default class Renderer {
     const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
     const hasAnalyticSunHalo = this._analyticSunHaloPass.enabled;
     const hasTemporalResolve = this._temporalResolvePass.enabled;
-    const hasLut = !!pp.lut?.enabled && runtimeTuning.lutIntensity > 0.001;
+    const hasLut = !!pp.lut?.enabled
+      && runtimeTuning.lutIntensity > 0.001
+      && this._supportsLutPass();
     const shouldUsePostProcessing = hasOutlineTargets
       || !!pp.bloom
       || !!pp.smaa
@@ -1241,8 +1249,8 @@ export default class Renderer {
 
     const lightingLevel = this._ambientLight.intensity * 0.68 + directionalIntensity * 0.32;
     this._renderer.toneMappingExposure = Math.max(
-      0.92,
-      Math.min(1.16, 1.06 - lightingLevel * 0.06 + flashIntensity * 0.03),
+      0.88,
+      Math.min(1.04, 0.98 - lightingLevel * 0.05 + flashIntensity * 0.02),
     );
   }
 
@@ -2472,6 +2480,7 @@ export default class Renderer {
     const taa = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.taa;
     return !!taa?.enabled
       && this._game.camera.isGameCameraActive
+      && this._game.camera.isFirstPersonGameCameraActive
       && !this._game.camera.isOrthographicGameCameraActive
       && !MobileManager.isMobile;
   }
@@ -2560,7 +2569,7 @@ export default class Renderer {
   private _shouldUseAtmospherePass(): boolean {
     const atmosphere = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.atmosphere;
     return !!atmosphere?.enabled
-      && this._game.camera.isGameCameraActive
+      && this._game.camera.isFirstPersonGameCameraActive
       && !this._game.camera.isOrthographicGameCameraActive
       && !this._game.chunkManager.inLiquidBlock(this._game.camera.activeCamera.position);
   }
@@ -2741,9 +2750,10 @@ export default class Renderer {
     const forwardness = Math.max(0, cameraForward.dot(sunViewDirection));
     const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24));
     const storminess = this._proceduralSkySettings?.storminess ?? 0;
+    const forwardVisibility = Math.pow(Math.max(0, Math.min(1, (forwardness - 0.18) / 0.72)), 1.6);
     const intensity = dayAmount
-      * Math.pow(forwardness, 0.38)
-      * (0.12 + this._directionalSceneLight.intensity * 0.12)
+      * forwardVisibility
+      * (0.035 + this._directionalSceneLight.intensity * 0.05)
       * (1 - storminess * 0.45);
 
     vec3c.copy(activeCamera.position).addScaledVector(sunViewDirection, 1000).project(activeCamera);
@@ -3105,8 +3115,8 @@ export default class Renderer {
 
     // Daytime directional light can otherwise cause broad scene bloom. Use only
     // the base world lights so transient lightning flashes still bloom.
-    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.36;
-    return Math.max(daytimeGuard + smoothWidth, 1.0 + smoothWidth);
+    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.48;
+    return Math.max(daytimeGuard + smoothWidth, 1.08 + smoothWidth);
   }
 
   private _clampTargetFogNearAndFar(): void {

@@ -58,9 +58,9 @@ class MeshBlockMaterial extends MeshStandardMaterial {
       vertexColors: true,
       transparent,
       alphaTest: ALPHA_TEST_THRESHOLD,
-      envMapIntensity: hasLightLevel ? 0.4 : 0.2,
-      metalness: hasLightLevel ? 0.05 : 0.0,
-      roughness: hasLightLevel ? 0.84 : 0.94,
+      envMapIntensity: hasLightLevel ? 0.04 : 0.015,
+      metalness: 0.0,
+      roughness: hasLightLevel ? 0.965 : 0.985,
     });
 
     this.name = hasLightLevel ? 'MeshBlockMaterial' : 'MeshBlockMaterialNonLit';

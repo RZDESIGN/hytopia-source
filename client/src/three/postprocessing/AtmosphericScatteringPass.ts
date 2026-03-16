@@ -62,6 +62,22 @@ const sharedDepthFunctions = `
     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
   }
 
+  vec2 safeNormalize2(vec2 v) {
+    float lenSq = dot(v, v);
+    if (lenSq <= 0.000001) {
+      return vec2(1.0, 0.0);
+    }
+    return v * inversesqrt(lenSq);
+  }
+
+  vec3 safeNormalize3(vec3 v) {
+    float lenSq = dot(v, v);
+    if (lenSq <= 0.000001) {
+      return vec3(0.0, 1.0, 0.0);
+    }
+    return v * inversesqrt(lenSq);
+  }
+
   float noise(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
@@ -149,12 +165,12 @@ const AtmosphericShader = {
     ${sharedDepthFunctions}
 
     float cloudShadowAt(vec3 worldPosition, vec3 surfaceNormal) {
-      vec3 sunViewDirection = normalize(-sunDirection);
+      vec3 sunViewDirection = safeNormalize3(-sunDirection);
       if (sunViewDirection.y <= 0.02) {
         return 0.0;
       }
 
-      vec2 windDir = normalize(windDirection);
+      vec2 windDir = safeNormalize2(windDirection);
       vec2 projected = worldPosition.xz - sunViewDirection.xz * (max(worldPosition.y, 0.0) / sunViewDirection.y);
       vec2 cloudUv = projected * cloudScale * 0.018 + windDir * time * cloudSpeed * 24.0;
       cloudUv += vec2(worldSeed * 0.13, worldSeed * 0.21);
@@ -180,8 +196,8 @@ const AtmosphericShader = {
       vec3 viewPosition = getViewPosition(tDepth, vUv, projectionMatrixInverse, isPerspectiveCamera, cameraNear, cameraFar);
       vec3 worldPosition = (inverseViewMatrix * vec4(viewPosition, 1.0)).xyz;
       vec3 surfaceNormal = getWorldNormal(tDepth, vUv, texelSize, projectionMatrixInverse, inverseViewMatrix, isPerspectiveCamera, cameraNear, cameraFar);
-      vec3 viewDirWorld = normalize(worldPosition - cameraPositionWorld);
-      vec3 sunViewDirection = normalize(-sunDirection);
+      vec3 viewDirWorld = safeNormalize3(worldPosition - cameraPositionWorld);
+      vec3 sunViewDirection = safeNormalize3(-sunDirection);
 
       float lowAltitude = smoothstep(18.0, -10.0, worldPosition.y - cameraPositionWorld.y);
       float heightDensity = exp(-max(worldPosition.y - cameraPositionWorld.y + 6.0, 0.0) * heightFogHeightFalloff);
@@ -195,6 +211,7 @@ const AtmosphericShader = {
       vec3 shaded = base.rgb * (1.0 - cloudShadow * cloudShadowStrength);
       vec3 fogged = mix(shaded, fogColor, fogAmount);
       fogged += sunColor * sunScatter;
+      fogged = clamp(fogged, vec3(0.0), vec3(64.0));
 
       gl_FragColor = vec4(fogged, base.a);
     }

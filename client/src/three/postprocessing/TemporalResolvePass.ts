@@ -119,12 +119,11 @@ const TemporalResolveShader = {
     void main() {
       vec4 currentSample = texture2D(tDiffuse, vUv);
       float currentDistance = getViewDistance(tDepth, vUv, isPerspectiveCamera, cameraNear, cameraFar);
-      float currentDistanceNorm = clamp(currentDistance / max(cameraFar, 0.0001), 0.0, 1.0);
       vec2 texelSize = 1.0 / resolution;
       vec3 currentColor = applyMildSharpen(texelSize, currentSample.rgb);
 
       if (useHistory < 0.5 || currentDistance <= 0.0 || currentDistance >= cameraFar) {
-        gl_FragColor = vec4(currentColor, currentDistanceNorm);
+        gl_FragColor = vec4(currentColor, currentSample.a);
         return;
       }
 
@@ -135,7 +134,7 @@ const TemporalResolveShader = {
       vec2 previousUv = previousClip.xy * previousInvW * 0.5 + 0.5;
 
       if (previousUv.x <= 0.0 || previousUv.x >= 1.0 || previousUv.y <= 0.0 || previousUv.y >= 1.0) {
-        gl_FragColor = vec4(currentColor, currentDistanceNorm);
+        gl_FragColor = vec4(currentColor, currentSample.a);
         return;
       }
 
@@ -144,15 +143,12 @@ const TemporalResolveShader = {
       vec3 neighborhoodMax = sampleNeighborhoodMax(tDiffuse, vUv, texelSize) + vec3(0.03);
       vec3 clampedHistory = clamp(historySample.rgb, neighborhoodMin, neighborhoodMax);
 
-      float previousDistance = -((previousViewMatrix * worldPosition).z);
-      float previousDistanceNorm = clamp(previousDistance / max(cameraFar, 0.0001), 0.0, 1.0);
-      float depthConfidence = 1.0 - smoothstep(0.003, 0.04, abs(historySample.a - previousDistanceNorm));
       float motion = length(previousUv - vUv);
       float motionConfidence = 1.0 - smoothstep(0.0015, 0.03, motion);
-      float blendWeight = historyWeight * depthConfidence * motionConfidence;
+      float blendWeight = historyWeight * motionConfidence;
 
       vec3 resolved = mix(currentColor, clampedHistory, clamp(blendWeight, 0.0, 0.94));
-      gl_FragColor = vec4(resolved, currentDistanceNorm);
+      gl_FragColor = vec4(resolved, currentSample.a);
     }
   `,
 };
