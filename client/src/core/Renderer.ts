@@ -991,6 +991,7 @@ export default class Renderer {
 
   private _applyDynamicLighting(lightningIntensity: number): void {
     const flashIntensity = Math.max(0, Math.min(1, lightningIntensity));
+    const useCascades = this._shouldUseDirectionalShadowCascades();
 
     this._ambientLight.color.copy(this._baseAmbientLightColor).lerp(LIGHTNING_FLASH_COLOR, flashIntensity * 0.28);
     this._ambientLight.intensity = this._baseAmbientLightIntensity + flashIntensity * 0.72;
@@ -1006,8 +1007,8 @@ export default class Renderer {
 
     const directionalIntensity = this._baseDirectionalLightIntensity + flashIntensity * 1.1;
     this._directionalSceneLight.intensity = directionalIntensity;
-    this._directionalShadowCascadeNearLight.intensity = 0;
-    this._directionalShadowCascadeFarLight.intensity = 0;
+    this._directionalShadowCascadeNearLight.intensity = useCascades ? directionalIntensity : 0;
+    this._directionalShadowCascadeFarLight.intensity = useCascades ? directionalIntensity : 0;
     this._directionalViewModelLight.intensity = directionalIntensity;
   }
 
@@ -2304,6 +2305,7 @@ export default class Renderer {
     const useCascades = this._shouldUseDirectionalShadowCascades();
     this._directionalSceneLight.shadow.mapSize.set(directionalMapSize, directionalMapSize);
     this._directionalSceneLight.shadow.autoUpdate = false;
+    this._directionalSceneLight.visible = !useCascades;
     this._directionalSceneLight.castShadow = (shadows?.enabled ?? false) && !useCascades;
     this._directionalShadowCascadeNearLight.castShadow = (shadows?.enabled ?? false) && useCascades;
     this._directionalShadowCascadeFarLight.castShadow = (shadows?.enabled ?? false) && useCascades;

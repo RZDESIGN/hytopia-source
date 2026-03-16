@@ -36,6 +36,11 @@ type EnvironmentPresetDefinition = {
   windDirection?: { x: number; y: number };
 };
 
+type LegacyEnvironmentSkyboxAlias = {
+  preset: EnvironmentPreset;
+  proceduralSkyUri: string;
+};
+
 const ENVIRONMENT_PRESET_DEFINITIONS: Record<EnvironmentPreset, EnvironmentPresetDefinition> = {
   daytime: {
     clockHour: 12,
@@ -75,6 +80,21 @@ const ENVIRONMENT_PRESET_DEFINITIONS: Record<EnvironmentPreset, EnvironmentPrese
     storminess: 0.88,
     weatherPreset: 'storm',
     windDirection: { x: 1, y: 0.3 },
+  },
+};
+
+const LEGACY_ENVIRONMENT_SKYBOX_ALIASES: Record<string, LegacyEnvironmentSkyboxAlias> = {
+  'skyboxes/night': {
+    preset: 'nighttime',
+    proceduralSkyUri: 'skyboxes/procedural?weather=clear',
+  },
+  'skyboxes/partly-cloudy': {
+    preset: 'daytime',
+    proceduralSkyUri: 'skyboxes/procedural?weather=cloudy',
+  },
+  'skyboxes/sunset': {
+    preset: 'sunset',
+    proceduralSkyUri: 'skyboxes/procedural?weather=clear',
   },
 };
 
@@ -143,6 +163,27 @@ function wrapHour24(hour: number): number {
   return ((hour % 24) + 24) % 24;
 }
 
+function normalizeSkyboxUriForAliasLookup(skyboxUri: string): string {
+  const queryIndex = skyboxUri.indexOf('?');
+  const baseUri = (queryIndex >= 0 ? skyboxUri.slice(0, queryIndex) : skyboxUri).replace(/^\/+/, '');
+
+  if (baseUri.startsWith('skyboxes/')) {
+    return baseUri;
+  }
+
+  return `skyboxes/${baseUri}`;
+}
+
+function getLegacyEnvironmentSkyboxAlias(skyboxUri: string): LegacyEnvironmentSkyboxAlias | null {
+  return LEGACY_ENVIRONMENT_SKYBOX_ALIASES[normalizeSkyboxUriForAliasLookup(skyboxUri)] ?? null;
+}
+
+function shouldDefaultToProceduralSky(worldSkyboxUri: string, proceduralSkyUri: string | undefined): boolean {
+  return proceduralSkyUri !== undefined
+    || worldSkyboxUri.startsWith(PROCEDURAL_SKY_PREFIX)
+    || getLegacyEnvironmentSkyboxAlias(worldSkyboxUri) !== null;
+}
+
 function getTimeMsForClockHour(clockHour: number, cycleDurationMs: number, cycleOffsetHours: number): number {
   return normalizeTimeMs((wrapHour24(clockHour - cycleOffsetHours) / 24) * cycleDurationMs, cycleDurationMs);
 }
@@ -199,14 +240,18 @@ function buildProceduralSkyUriWithWeather(baseSkyboxUri: string, weatherPreset: 
   return query ? `${baseUri}?${query}` : `${PROCEDURAL_SKY_PREFIX}?weather=${weatherPreset}`;
 }
 
-function buildProceduralSkyUriWithPreset(baseSkyboxUri: string, preset: EnvironmentPreset): string {
+function buildProceduralSkyUriWithPreset(
+  baseSkyboxUri: string,
+  preset: EnvironmentPreset,
+  weatherPresetOverride?: EnvironmentWeatherPreset | null,
+): string {
   const queryIndex = baseSkyboxUri.indexOf('?');
   const baseUri = queryIndex >= 0 ? baseSkyboxUri.slice(0, queryIndex) : baseSkyboxUri;
   const params = new URLSearchParams(queryIndex >= 0 ? baseSkyboxUri.slice(queryIndex + 1) : '');
   const definition = ENVIRONMENT_PRESET_DEFINITIONS[preset];
 
   params.delete('preset');
-  params.set('weather', definition.weatherPreset);
+  params.set('weather', weatherPresetOverride ?? definition.weatherPreset);
 
   if (definition.precipitation === 'none') {
     params.delete('precip');
@@ -260,6 +305,7 @@ export default class EnvironmentController {
   private _nightSkyboxIntensity: number;
   private _onWeatherPresetChange: ((world: World, weatherPreset: EnvironmentWeatherPreset) => void) | undefined;
   private _preset: EnvironmentPreset;
+  private _presetWeatherOverride: EnvironmentWeatherPreset | null = null;
   private _proceduralSkyUri: string;
   private _sunBaseHeight: number;
   private _sunHeightRange: number;
@@ -274,12 +320,23 @@ export default class EnvironmentController {
 
   public constructor(world: World, options: EnvironmentControllerOptions = {}) {
     this._world = world;
+    const legacySkyboxAlias = options.proceduralSkyUri === undefined
+      ? getLegacyEnvironmentSkyboxAlias(world.skyboxUri)
+      : null;
+    const sourceProceduralSkyUri = options.proceduralSkyUri
+      ?? (world.skyboxUri.startsWith(PROCEDURAL_SKY_PREFIX)
+        ? world.skyboxUri
+        : legacySkyboxAlias?.proceduralSkyUri
+          ?? DEFAULT_PROCEDURAL_SKY_URI);
+    const parsedPresetFromProceduralSky = parseEnvironmentPresetFromSkyboxUri(sourceProceduralSkyUri);
+    const parsedWeatherPresetFromProceduralSky = parseWeatherPresetFromSkyboxUri(sourceProceduralSkyUri);
     this._clockIntervalMs = options.clockIntervalMs ?? DEFAULT_CLOCK_INTERVAL_MS;
     this._cycleDurationMs = options.cycleDurationMs ?? DEFAULT_CYCLE_DURATION_MS;
     this._cycleOffsetHours = options.cycleOffsetHours ?? DEFAULT_CYCLE_OFFSET_HOURS;
     this._dayDurationRatio = clamp01(options.dayDurationRatio ?? DEFAULT_DAY_DURATION_RATIO);
     this._daySkyboxIntensity = options.daySkyboxIntensity ?? DEFAULT_DAY_SKYBOX_INTENSITY;
-    this._ensureProceduralSky = options.ensureProceduralSky ?? true;
+    this._ensureProceduralSky = options.ensureProceduralSky
+      ?? shouldDefaultToProceduralSky(world.skyboxUri, options.proceduralSkyUri);
     this._fogColor = options.fogColor;
     this._maxAmbientLightIntensity = options.maxAmbientLightIntensity ?? DEFAULT_MAX_AMBIENT_LIGHT_INTENSITY;
     this._maxDirectionalLightIntensity = options.maxDirectionalLightIntensity ?? DEFAULT_MAX_DIRECTIONAL_LIGHT_INTENSITY;
@@ -288,10 +345,20 @@ export default class EnvironmentController {
     this._mode = options.mode ?? 'preset';
     this._nightSkyboxIntensity = options.nightSkyboxIntensity ?? DEFAULT_NIGHT_SKYBOX_INTENSITY;
     this._onWeatherPresetChange = options.onWeatherPresetChange;
-    this._proceduralSkyUri = options.proceduralSkyUri ?? world.skyboxUri ?? DEFAULT_PROCEDURAL_SKY_URI;
+    this._proceduralSkyUri = sourceProceduralSkyUri;
     this._preset = options.preset
-      ?? parseEnvironmentPresetFromSkyboxUri(this._proceduralSkyUri)
+      ?? legacySkyboxAlias?.preset
+      ?? parsedPresetFromProceduralSky
       ?? 'daytime';
+    this._presetWeatherOverride = options.preset === undefined
+      ? (
+        legacySkyboxAlias?.preset === 'daytime'
+          ? parsedWeatherPresetFromProceduralSky
+          : parsedPresetFromProceduralSky === null
+            ? parsedWeatherPresetFromProceduralSky
+            : null
+      )
+      : null;
     this._sunBaseHeight = options.sunBaseHeight ?? DEFAULT_SUN_BASE_HEIGHT;
     this._sunHeightRange = options.sunHeightRange ?? DEFAULT_SUN_HEIGHT_RANGE;
     this._sunRadius = options.sunRadius ?? DEFAULT_SUN_RADIUS;
@@ -316,7 +383,7 @@ export default class EnvironmentController {
           ? this._calculateWeatherPreset()
           : parseWeatherPresetFromSkyboxUri(this._proceduralSkyUri) ?? 'cloudy'
       )
-      : ENVIRONMENT_PRESET_DEFINITIONS[this._preset].weatherPreset;
+      : this._presetWeatherOverride ?? ENVIRONMENT_PRESET_DEFINITIONS[this._preset].weatherPreset;
 
     if (options.autoStart !== false) {
       this.start();
@@ -370,6 +437,7 @@ export default class EnvironmentController {
     this.stop();
     this._mode = 'preset';
     this._preset = preset;
+    this._presetWeatherOverride = null;
     this._timeMs = getTimeMsForClockHour(
       ENVIRONMENT_PRESET_DEFINITIONS[preset].clockHour,
       this._cycleDurationMs,
@@ -499,7 +567,7 @@ export default class EnvironmentController {
           ? this._calculateWeatherPreset()
           : this._weatherPreset
       )
-      : ENVIRONMENT_PRESET_DEFINITIONS[this._preset].weatherPreset;
+      : this._presetWeatherOverride ?? ENVIRONMENT_PRESET_DEFINITIONS[this._preset].weatherPreset;
     const weatherChanged = !this._weatherPresetApplied || this._weatherPreset !== nextWeatherPreset;
 
     this._weatherPreset = nextWeatherPreset;
@@ -510,7 +578,7 @@ export default class EnvironmentController {
         : this._proceduralSkyUri;
       const nextSkyboxUri = this._mode === 'cycle'
         ? buildProceduralSkyUriWithWeather(baseSkyboxUri, this._weatherPreset)
-        : buildProceduralSkyUriWithPreset(baseSkyboxUri, this._preset);
+        : buildProceduralSkyUriWithPreset(baseSkyboxUri, this._preset, this._presetWeatherOverride);
 
       if (this._world.skyboxUri !== nextSkyboxUri) {
         this._world.setSkyboxUri(nextSkyboxUri);

@@ -137,7 +137,7 @@ export default class WorldManager {
     if (!this._defaultWorld) {
       this._defaultWorld = this.createWorld({ // Lazy init if none exist
         name: 'Default World',
-        skyboxUri: 'skyboxes/procedural?weather=cloudy',
+        skyboxUri: 'skyboxes/procedural?weather=clear',
       });
       WorldHostManager.instance.client.setDefaultWorld(this._defaultWorld);
     }

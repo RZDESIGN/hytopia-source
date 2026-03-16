@@ -24,6 +24,12 @@ export function applyDirectionalShadowEdgeFade(fragmentShader: string): string {
 			vec3 directionalShadowCoord = shadowCoord.xyz / max( shadowCoord.w, 0.0001 );
 			float directionalShadowEdge = max( abs( directionalShadowCoord.x * 2.0 - 1.0 ), abs( directionalShadowCoord.y * 2.0 - 1.0 ) );
 			return smoothstep( 0.72, 1.0, directionalShadowEdge );
+		}
+
+		float getDirectionalCascadeBlendAmount( vec4 shadowCoord ) {
+			vec3 directionalShadowCoord = shadowCoord.xyz / max( shadowCoord.w, 0.0001 );
+			float directionalCascadeEdge = max( abs( directionalShadowCoord.x * 2.0 - 1.0 ), abs( directionalShadowCoord.y * 2.0 - 1.0 ) );
+			return smoothstep( 0.58, 0.92, directionalCascadeEdge );
 		}`,
     )
     .replace(
@@ -34,7 +40,18 @@ export function applyDirectionalShadowEdgeFade(fragmentShader: string): string {
     )
     .replace(
       DIRECTIONAL_SHADOW_APPLY,
-      'directLight.color *= mix( directionalShadowSample, 1.0, directionalShadowEdgeFade );',
+      `#if defined( USE_SHADOWMAP ) && ( NUM_DIR_LIGHT_SHADOWS >= 2 ) && ( NUM_DIR_LIGHTS == NUM_DIR_LIGHT_SHADOWS )
+		float directionalCascadeBlend = getDirectionalCascadeBlendAmount( vDirectionalShadowCoord[ 0 ] );
+		#if ( UNROLLED_LOOP_INDEX == 0 )
+			directLight.color *= mix( directionalShadowSample, 1.0, directionalShadowEdgeFade ) * ( 1.0 - directionalCascadeBlend );
+		#elif ( UNROLLED_LOOP_INDEX == 1 )
+			directLight.color *= mix( directionalShadowSample, 1.0, directionalShadowEdgeFade ) * directionalCascadeBlend;
+		#else
+			directLight.color *= mix( directionalShadowSample, 1.0, directionalShadowEdgeFade );
+		#endif
+	#else
+		directLight.color *= mix( directionalShadowSample, 1.0, directionalShadowEdgeFade );
+	#endif`,
     )
     .replace(
       DIRECTIONAL_LIGHT_INFO,

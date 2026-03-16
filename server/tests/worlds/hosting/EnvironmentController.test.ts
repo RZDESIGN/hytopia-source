@@ -49,6 +49,85 @@ test('preset mode applies snowing once and remains static', async () => {
   }
 });
 
+test('preset mode preserves explicit procedural weather when no preset was requested', () => {
+  const world = createWorldStub('skyboxes/procedural?weather=cloudy');
+  const controller = new EnvironmentController(world as any, {
+    autoStart: false,
+  });
+
+  try {
+    controller.start();
+
+    expect(controller.preset).toBe('daytime');
+    expect(controller.weatherPreset).toBe('cloudy');
+    expect(world.skyboxUri).toContain('skyboxes/procedural');
+    expect(world.skyboxUri).toContain('weather=cloudy');
+  } finally {
+    controller.dispose();
+  }
+});
+
+test('custom non-procedural skyboxes stay unchanged unless procedural sky is explicitly requested', () => {
+  const world = createWorldStub('skyboxes/custom-evening');
+  const controller = new EnvironmentController(world as any, {
+    autoStart: false,
+  });
+
+  try {
+    controller.start();
+
+    expect(world.skyboxUri).toBe('skyboxes/custom-evening');
+    expect(world.skyboxUriCalls).toHaveLength(0);
+  } finally {
+    controller.dispose();
+  }
+});
+
+test('legacy skybox aliases upgrade to matching procedural sky presets', () => {
+  const world = createWorldStub('skyboxes/partly-cloudy');
+  const controller = new EnvironmentController(world as any, {
+    autoStart: false,
+  });
+
+  try {
+    controller.start();
+
+    expect(controller.preset).toBe('daytime');
+    expect(controller.weatherPreset).toBe('cloudy');
+    expect(world.skyboxUri).toContain('skyboxes/procedural');
+    expect(world.skyboxUri).toContain('weather=cloudy');
+  } finally {
+    controller.dispose();
+  }
+});
+
+test('sunset and night aliases keep their matching time-of-day presets', () => {
+  const sunsetWorld = createWorldStub('skyboxes/sunset');
+  const sunsetController = new EnvironmentController(sunsetWorld as any, {
+    autoStart: false,
+  });
+  const nightWorld = createWorldStub('skyboxes/night');
+  const nightController = new EnvironmentController(nightWorld as any, {
+    autoStart: false,
+  });
+
+  try {
+    sunsetController.start();
+    nightController.start();
+
+    expect(sunsetController.preset).toBe('sunset');
+    expect(sunsetWorld.skyboxUri).toContain('skyboxes/procedural');
+    expect(sunsetWorld.skyboxUri).toContain('weather=clear');
+
+    expect(nightController.preset).toBe('nighttime');
+    expect(nightWorld.skyboxUri).toContain('skyboxes/procedural');
+    expect(nightWorld.skyboxUri).toContain('weather=clear');
+  } finally {
+    sunsetController.dispose();
+    nightController.dispose();
+  }
+});
+
 test('cycle mode still performs repeated environment updates when requested', async () => {
   const world = createWorldStub();
   const controller = new EnvironmentController(world as any, {

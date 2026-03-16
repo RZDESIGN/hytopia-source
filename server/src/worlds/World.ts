@@ -20,6 +20,16 @@ import type RgbColor from '@/shared/types/RgbColor';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 import type { EnvironmentControllerOptions } from '@/worlds/EnvironmentController';
 
+function isLegacyEnvironmentSkyboxAlias(skyboxUri: string): boolean {
+  const queryIndex = skyboxUri.indexOf('?');
+  const baseUri = (queryIndex >= 0 ? skyboxUri.slice(0, queryIndex) : skyboxUri).replace(/^\/+/, '');
+  const normalizedUri = baseUri.startsWith('skyboxes/') ? baseUri : `skyboxes/${baseUri}`;
+
+  return normalizedUri === 'skyboxes/partly-cloudy'
+    || normalizedUri === 'skyboxes/sunset'
+    || normalizedUri === 'skyboxes/night';
+}
+
 /**
  * A map representation for initializing a world.
  *
@@ -105,7 +115,7 @@ export interface WorldOptions {
   /** The intensity of the skybox brightness for the world. 0 is black, 1 is full brightness, 1+ is brighter. */
   skyboxIntensity?: number;
 
-  /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`. */
+  /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`. Legacy aliases `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` are automatically upgraded to matching procedural sky presets. */
   skyboxUri: string;
 
   /** An arbitrary identifier tag of the world. Useful for your own logic */
@@ -117,7 +127,7 @@ export interface WorldOptions {
   /** The gravity vector for the world. */
   gravity?: Vector3Like;
 
-  /** Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds. */
+  /** Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds and the legacy `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` aliases. */
   environment?: boolean | EnvironmentControllerOptions;
 }
 
@@ -344,7 +354,9 @@ export default class World extends EventRouter implements protocol.Serializable 
     this._simulation = new Simulation(this, options.tickRate, options.gravity);
 
     const shouldEnableEnvironment = options.environment !== false
-      && (options.environment !== undefined || this._skyboxUri.startsWith('skyboxes/procedural'));
+      && (options.environment !== undefined
+        || this._skyboxUri.startsWith('skyboxes/procedural')
+        || isLegacyEnvironmentSkyboxAlias(this._skyboxUri));
     if (shouldEnableEnvironment) {
       const environmentOptions = typeof options.environment === 'object' ? options.environment : undefined;
       this._environmentController = new EnvironmentController(this, {
