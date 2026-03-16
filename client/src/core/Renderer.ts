@@ -516,8 +516,8 @@ export default class Renderer {
     // Question: Should parameters be configurable?
     this._bloomPass = new WhiteCoreBloomPass(
       vec2,
-      0.28, // strength
-      0.35, // radius
+      0.18, // strength
+      0.3,  // radius
       this._calculateBloomThreshold(), // threshold
     );
     this._temporalResolvePass = new TemporalResolvePass();
@@ -1188,9 +1188,9 @@ export default class Renderer {
     const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24)) * (1 - this._proceduralSkySettings.storminess * 0.65);
     const sunSize = (260 + (1 - Math.max(0, sunViewDirection.y)) * 60) * PROCEDURAL_SKY_ENVIRONMENT_SUN_SIZE_RATIO;
     sunMaterial.dayAmount = dayAmount;
-    sunMaterial.haloAmount = 1.0 - this._proceduralSkySettings.storminess * 0.16;
+    sunMaterial.haloAmount = 0.42 - this._proceduralSkySettings.storminess * 0.1;
     sunMaterial.sunColor.setRGB(1.0, 0.97, 0.92);
-    sunMaterial.sunIntensity = Math.max(3.6, Math.min(this._directionalSceneLight.intensity + 1.2, 4.8));
+    sunMaterial.sunIntensity = Math.max(1.25, Math.min(this._directionalSceneLight.intensity * 0.5 + 0.15, 1.95));
     this._proceduralSkyEnvironmentSunMesh.visible = dayAmount > 0.001;
     if (this._proceduralSkyEnvironmentSunMesh.visible) {
       this._proceduralSkyEnvironmentSunMesh.position.copy(sunViewDirection).multiplyScalar(PROCEDURAL_SKY_ENVIRONMENT_SUN_DISTANCE);
@@ -3127,8 +3127,8 @@ export default class Renderer {
 
     // Daytime directional light can otherwise cause broad scene bloom. Use only
     // the base world lights so transient lightning flashes still bloom.
-    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.58;
-    return Math.max(daytimeGuard + 0.04 + smoothWidth, 1.18 + smoothWidth);
+    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.68;
+    return Math.max(daytimeGuard + 0.08 + smoothWidth, 1.28 + smoothWidth);
   }
 
   private _clampTargetFogNearAndFar(): void {

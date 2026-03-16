@@ -431,9 +431,9 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
       material.copy(sourceMaterial);
 
       if (material instanceof EmissiveMeshHeroMaterial) {
-        material.envMapIntensity = Math.min(material.envMapIntensity, 0.22);
+        material.envMapIntensity = Math.min(material.envMapIntensity, 0.1);
       } else {
-        material.envMapIntensity = Math.min(material.envMapIntensity, 0.08);
+        material.envMapIntensity = Math.min(material.envMapIntensity, 0.03);
       }
     } else {
       material.alphaMap = sourceMaterial.alphaMap;
@@ -465,7 +465,7 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
       material.vertexColors = sourceMaterial.vertexColors;
       material.visible = sourceMaterial.visible;
       material.wireframe = sourceMaterial.wireframe;
-      material.envMapIntensity = 0.03;
+      material.envMapIntensity = 0.015;
     }
 
     // When Alpha Clipping (Alpha Test) is enabled, the glTF loader follows the

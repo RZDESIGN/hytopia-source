@@ -32,16 +32,16 @@ function applyBlockColorPunch(fragmentShader: string): string {
       return fragmentShader.replace(
         outgoingLightLine,
         `
-          vec3 outgoingLight = reflectedLight.directDiffuse * 1.06
-            + reflectedLight.indirectDiffuse * 0.9
-            + reflectedLight.directSpecular * 0.92
-            + reflectedLight.indirectSpecular * 0.85
+          vec3 outgoingLight = reflectedLight.directDiffuse * 1.02
+            + reflectedLight.indirectDiffuse * 0.86
+            + reflectedLight.directSpecular * 0.45
+            + reflectedLight.indirectSpecular * 0.34
             + totalEmissiveRadiance;
 
           float blockLuma = dot( outgoingLight, vec3( 0.2126, 0.7152, 0.0722 ) );
-          float blockHighlight = smoothstep( 0.24, 0.95, blockLuma );
-          outgoingLight = mix( vec3( blockLuma ), outgoingLight, 1.08 + blockHighlight * 0.06 );
-          outgoingLight *= 1.02 + blockHighlight * 0.05;
+          float blockHighlight = smoothstep( 0.3, 1.0, blockLuma );
+          outgoingLight = mix( vec3( blockLuma ), outgoingLight, 1.02 + blockHighlight * 0.03 );
+          outgoingLight *= 0.985 + blockHighlight * 0.015;
         `,
       );
     }
@@ -58,9 +58,9 @@ class MeshBlockMaterial extends MeshStandardMaterial {
       vertexColors: true,
       transparent,
       alphaTest: ALPHA_TEST_THRESHOLD,
-      envMapIntensity: hasLightLevel ? 0.04 : 0.015,
+      envMapIntensity: hasLightLevel ? 0.01 : 0.005,
       metalness: 0.0,
-      roughness: hasLightLevel ? 0.965 : 0.985,
+      roughness: hasLightLevel ? 0.985 : 0.992,
     });
 
     this.name = hasLightLevel ? 'MeshBlockMaterial' : 'MeshBlockMaterialNonLit';
