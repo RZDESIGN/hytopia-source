@@ -60,8 +60,10 @@ const HaloShader = {
       vec2 axisDir = axis / axisLength;
       vec2 axisPerp = vec2(-axisDir.y, axisDir.x);
 
-      float offscreenDistance = length((sunScreenUv - screenCenter) * aspect);
-      float visibility = smoothstep(1.8, 0.08, offscreenDistance);
+      vec2 edgeDelta = abs(sunScreenUv - screenCenter) * 2.0;
+      float edgeDistance = max(edgeDelta.x, edgeDelta.y);
+      float visibility = smoothstep(0.82, 1.04, edgeDistance);
+      visibility *= 1.0 - smoothstep(1.28, 1.9, edgeDistance);
 
       float core = radialGlow(vUv, sunScreenUv, aspect, 10.0, 1.45);
       float veil = radialGlow(vUv, sunScreenUv, aspect, 3.35, 1.05);
@@ -76,8 +78,8 @@ const HaloShader = {
       float streakAlong = exp(-abs(dot(streakDelta, axisDir)) * 7.0);
       float streak = streakAcross * streakAlong;
 
-      float halo = core * 0.7 + veil * 0.32 + ghostA * 0.18 + ghostB * 0.14 + ghostC * 0.09 + streak * 0.18;
-      halo *= intensity * visibility;
+      float halo = core * 0.18 + veil * 0.08 + ghostA * 0.06 + ghostB * 0.04 + ghostC * 0.025 + streak * 0.05;
+      halo = min(halo * intensity * visibility, 0.24);
 
       vec3 color = base.rgb + sunColor * halo;
       gl_FragColor = vec4(color, base.a);

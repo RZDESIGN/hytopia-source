@@ -150,7 +150,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       },
       lut: {
         enabled: true,
-        intensity: 0.7,
+        intensity: 0.28,
       },
       smaa: true,
       taa: {
@@ -170,7 +170,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     },
     localReflections: {
       enabled: !MobileManager.isMobile,
-      maxSkyExposure: 0.46,
+      maxSkyExposure: 0.18,
       positionDelta: 2.2,
       textureSize: 192,
       updateIntervalS: 1.6,
@@ -216,7 +216,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       },
       lut: {
         enabled: true,
-        intensity: 0.58,
+        intensity: 0.22,
       },
       smaa: true,
       taa: {
@@ -236,7 +236,7 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     },
     localReflections: {
       enabled: !MobileManager.isMobile,
-      maxSkyExposure: 0.36,
+      maxSkyExposure: 0.14,
       positionDelta: 2.8,
       textureSize: 128,
       updateIntervalS: 2.4,

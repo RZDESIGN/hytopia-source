@@ -516,8 +516,8 @@ export default class Renderer {
     // Question: Should parameters be configurable?
     this._bloomPass = new WhiteCoreBloomPass(
       vec2,
-      0.5,  // strength
-      0.4,  // radius
+      0.28, // strength
+      0.35, // radius
       this._calculateBloomThreshold(), // threshold
     );
     this._temporalResolvePass = new TemporalResolvePass();
@@ -708,7 +708,7 @@ export default class Renderer {
       gtaoMaxDistance: this._runtimeTuningOverrides.gtaoMaxDistance ?? gtao?.maxDistance ?? 52,
       gtaoStrength: this._runtimeTuningOverrides.gtaoStrength ?? gtao?.strength ?? 0.32,
       gtaoWorldRadius: this._runtimeTuningOverrides.gtaoWorldRadius ?? gtao?.worldRadius ?? 4.1,
-      localReflectionMaxSkyExposure: this._runtimeTuningOverrides.localReflectionMaxSkyExposure ?? localReflections?.maxSkyExposure ?? 0.36,
+      localReflectionMaxSkyExposure: this._runtimeTuningOverrides.localReflectionMaxSkyExposure ?? localReflections?.maxSkyExposure ?? 0.18,
       localReflectionPositionDelta: this._runtimeTuningOverrides.localReflectionPositionDelta ?? localReflections?.positionDelta ?? 2.8,
       localReflectionUpdateIntervalS: this._runtimeTuningOverrides.localReflectionUpdateIntervalS ?? localReflections?.updateIntervalS ?? 2.4,
       lutIntensity: this._runtimeTuningOverrides.lutIntensity ?? lut?.intensity ?? 0,
@@ -1227,7 +1227,6 @@ export default class Renderer {
 
   private _applyDynamicLighting(lightningIntensity: number): void {
     const flashIntensity = Math.max(0, Math.min(1, lightningIntensity));
-    const useCascades = this._shouldUseDirectionalShadowCascades();
 
     this._ambientLight.color.copy(this._baseAmbientLightColor).lerp(LIGHTNING_FLASH_COLOR, flashIntensity * 0.28);
     this._ambientLight.intensity = this._baseAmbientLightIntensity + flashIntensity * 0.72;
@@ -1243,14 +1242,16 @@ export default class Renderer {
 
     const directionalIntensity = this._baseDirectionalLightIntensity + flashIntensity * 1.1;
     this._directionalSceneLight.intensity = directionalIntensity;
-    this._directionalShadowCascadeNearLight.intensity = useCascades ? directionalIntensity : 0;
-    this._directionalShadowCascadeFarLight.intensity = useCascades ? directionalIntensity : 0;
+    // Keep cascades shadow-only. The visible sun light remains the single direct
+    // lighting source, and the material shader remaps the two shadow maps onto it.
+    this._directionalShadowCascadeNearLight.intensity = 0;
+    this._directionalShadowCascadeFarLight.intensity = 0;
     this._directionalViewModelLight.intensity = directionalIntensity;
 
     const lightingLevel = this._ambientLight.intensity * 0.68 + directionalIntensity * 0.32;
     this._renderer.toneMappingExposure = Math.max(
-      0.88,
-      Math.min(1.04, 0.98 - lightingLevel * 0.05 + flashIntensity * 0.02),
+      0.82,
+      Math.min(0.96, 0.94 - lightingLevel * 0.055 + flashIntensity * 0.02),
     );
   }
 
@@ -2647,7 +2648,8 @@ export default class Renderer {
 
     Chunk.worldPositionToGlobalCoordinate(activeCamera.position, vec3e);
     const openSkyAmount = this._game.skyDistanceVolumeManager.getSkyLightBrightnessByGlobalCoordinate(vec3e);
-    if (openSkyAmount > runtimeTuning.localReflectionMaxSkyExposure) {
+    const maxSkyExposure = Math.min(runtimeTuning.localReflectionMaxSkyExposure, 0.2);
+    if (openSkyAmount > maxSkyExposure) {
       this._setEnvironmentOverrideTexture(null);
       this._localReflectionUpdateCooldownS = 0;
       return;
@@ -2751,14 +2753,24 @@ export default class Renderer {
     const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24));
     const storminess = this._proceduralSkySettings?.storminess ?? 0;
     const forwardVisibility = Math.pow(Math.max(0, Math.min(1, (forwardness - 0.18) / 0.72)), 1.6);
+    vec3c.copy(activeCamera.position).addScaledVector(sunViewDirection, 1000).project(activeCamera);
+    const sunScreenX = vec3c.x * 0.5 + 0.5;
+    const sunScreenY = vec3c.y * 0.5 + 0.5;
+    const edgeDistance = Math.max(Math.abs(sunScreenX - 0.5) * 2, Math.abs(sunScreenY - 0.5) * 2);
+    const edgeVisibility = Math.max(0, Math.min(1, (edgeDistance - 0.82) / 0.22))
+      * (1 - Math.max(0, Math.min(1, (edgeDistance - 1.28) / 0.5)));
+    const thirdPersonPenalty = this._game.camera.isGameCameraActive && !this._game.camera.isFirstPersonGameCameraActive
+      ? 0.22
+      : 1;
     const intensity = dayAmount
       * forwardVisibility
-      * (0.035 + this._directionalSceneLight.intensity * 0.05)
-      * (1 - storminess * 0.45);
+      * edgeVisibility
+      * thirdPersonPenalty
+      * (0.008 + this._directionalSceneLight.intensity * 0.014)
+      * (1 - storminess * 0.55);
 
-    vec3c.copy(activeCamera.position).addScaledVector(sunViewDirection, 1000).project(activeCamera);
     this._analyticSunHaloPass.setSun(
-      vec2.set(vec3c.x * 0.5 + 0.5, vec3c.y * 0.5 + 0.5),
+      vec2.set(sunScreenX, sunScreenY),
       this._directionalSceneLight.color,
       intensity,
     );
@@ -2773,7 +2785,7 @@ export default class Renderer {
     const useCascades = this._shouldUseDirectionalShadowCascades();
     this._directionalSceneLight.shadow.mapSize.set(directionalMapSize, directionalMapSize);
     this._directionalSceneLight.shadow.autoUpdate = false;
-    this._directionalSceneLight.visible = !useCascades;
+    this._directionalSceneLight.visible = true;
     this._directionalSceneLight.castShadow = (shadows?.enabled ?? false) && !useCascades;
     this._directionalShadowCascadeNearLight.castShadow = (shadows?.enabled ?? false) && useCascades;
     this._directionalShadowCascadeFarLight.castShadow = (shadows?.enabled ?? false) && useCascades;
@@ -3115,8 +3127,8 @@ export default class Renderer {
 
     // Daytime directional light can otherwise cause broad scene bloom. Use only
     // the base world lights so transient lightning flashes still bloom.
-    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.48;
-    return Math.max(daytimeGuard + smoothWidth, 1.08 + smoothWidth);
+    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.58;
+    return Math.max(daytimeGuard + 0.04 + smoothWidth, 1.18 + smoothWidth);
   }
 
   private _clampTargetFogNearAndFar(): void {
