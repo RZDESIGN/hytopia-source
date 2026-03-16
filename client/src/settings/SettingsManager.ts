@@ -48,10 +48,39 @@ type QualityPerfTradeoff = {
     enabled: boolean;
   },
   fpsCap?: number,
+  localReflections?: {
+    enabled: boolean;
+    maxSkyExposure: number;
+    positionDelta: number;
+    textureSize: number;
+    updateIntervalS: number;
+  },
   postProcessing?: {
+    atmosphere?: {
+      cloudShadowStrength: number;
+      enabled: boolean;
+      heightFogDensity: number;
+      heightFogHeightFalloff: number;
+      sunInscatterStrength: number;
+    };
     outline?: boolean;
     bloom?: boolean;
+    gtao?: {
+      enabled: boolean;
+      maxDistance: number;
+      strength: number;
+      worldRadius: number;
+    };
+    lut?: {
+      enabled: boolean;
+      intensity: number;
+    };
     smaa?: boolean;
+    taa?: {
+      enabled: boolean;
+      historyWeight: number;
+      sharpenStrength: number;
+    };
     depthBlur?: {
       enabled: boolean;
       nearStartRatio: number;
@@ -104,9 +133,31 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       fog: { enabled: true, far: 400, near: 340 },
     },
     postProcessing: {
+      atmosphere: {
+        enabled: !MobileManager.isMobile,
+        cloudShadowStrength: 0.18,
+        heightFogDensity: 0.021,
+        heightFogHeightFalloff: 0.052,
+        sunInscatterStrength: 0.3,
+      },
       outline: true,
       bloom: true,
+      gtao: {
+        enabled: !MobileManager.isMobile,
+        maxDistance: 72,
+        strength: 0.38,
+        worldRadius: 5.1,
+      },
+      lut: {
+        enabled: true,
+        intensity: 0.7,
+      },
       smaa: true,
+      taa: {
+        enabled: !MobileManager.isMobile,
+        historyWeight: 0.9,
+        sharpenStrength: 0.1,
+      },
       depthBlur: {
         enabled: !MobileManager.isMobile,
         nearStartRatio: 0.018,
@@ -116,6 +167,13 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         maxNearRadiusPx: 1.75,
         maxFarRadiusPx: 7.25,
       },
+    },
+    localReflections: {
+      enabled: !MobileManager.isMobile,
+      maxSkyExposure: 0.46,
+      positionDelta: 2.2,
+      textureSize: 192,
+      updateIntervalS: 1.6,
     },
   },
   HIGH: {
@@ -141,9 +199,31 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       fog: { enabled: true, far: 230, near: 185 },
     },
     postProcessing: {
+      atmosphere: {
+        enabled: !MobileManager.isMobile,
+        cloudShadowStrength: 0.12,
+        heightFogDensity: 0.016,
+        heightFogHeightFalloff: 0.062,
+        sunInscatterStrength: 0.2,
+      },
       outline: true,
       bloom: true,
+      gtao: {
+        enabled: !MobileManager.isMobile,
+        maxDistance: 52,
+        strength: 0.32,
+        worldRadius: 4.1,
+      },
+      lut: {
+        enabled: true,
+        intensity: 0.58,
+      },
       smaa: true,
+      taa: {
+        enabled: !MobileManager.isMobile,
+        historyWeight: 0.86,
+        sharpenStrength: 0.08,
+      },
       depthBlur: {
         enabled: !MobileManager.isMobile,
         nearStartRatio: 0.022,
@@ -153,6 +233,13 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         maxNearRadiusPx: 1.2,
         maxFarRadiusPx: 5.5,
       },
+    },
+    localReflections: {
+      enabled: !MobileManager.isMobile,
+      maxSkyExposure: 0.36,
+      positionDelta: 2.8,
+      textureSize: 128,
+      updateIntervalS: 2.4,
     },
   },
   // Medium and below favor faster terrain meshing to keep large worlds responsive.
@@ -182,9 +269,31 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       enabled: false,
     },
     postProcessing: {
+      atmosphere: {
+        enabled: false,
+        cloudShadowStrength: 0.0,
+        heightFogDensity: 0.0,
+        heightFogHeightFalloff: 0.08,
+        sunInscatterStrength: 0.0,
+      },
       outline: true,
       bloom: true,
+      gtao: {
+        enabled: false,
+        maxDistance: 38,
+        strength: 0.22,
+        worldRadius: 3.2,
+      },
+      lut: {
+        enabled: false,
+        intensity: 0.0,
+      },
       smaa: false,
+      taa: {
+        enabled: false,
+        historyWeight: 0.0,
+        sharpenStrength: 0.0,
+      },
       depthBlur: {
         enabled: !MobileManager.isMobile,
         nearStartRatio: 0.03,
@@ -194,6 +303,13 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         maxNearRadiusPx: 1.0,
         maxFarRadiusPx: 4.5,
       },
+    },
+    localReflections: {
+      enabled: false,
+      maxSkyExposure: 0.0,
+      positionDelta: 4.0,
+      textureSize: 96,
+      updateIntervalS: 3.0,
     },
   },
   LOW: {
@@ -228,7 +344,29 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       enabled: false,
     },
     postProcessing: {
+      atmosphere: {
+        enabled: false,
+        cloudShadowStrength: 0.0,
+        heightFogDensity: 0.0,
+        heightFogHeightFalloff: 0.08,
+        sunInscatterStrength: 0.0,
+      },
       outline: true,
+      gtao: {
+        enabled: false,
+        maxDistance: 32,
+        strength: 0.2,
+        worldRadius: 2.8,
+      },
+      lut: {
+        enabled: false,
+        intensity: 0.0,
+      },
+      taa: {
+        enabled: false,
+        historyWeight: 0.0,
+        sharpenStrength: 0.0,
+      },
       depthBlur: {
         enabled: false,
         nearStartRatio: 0.08,
@@ -238,6 +376,13 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         maxNearRadiusPx: 0.6,
         maxFarRadiusPx: 2.5,
       },
+    },
+    localReflections: {
+      enabled: false,
+      maxSkyExposure: 0.0,
+      positionDelta: 4.0,
+      textureSize: 96,
+      updateIntervalS: 3.0,
     },
   },
   POWER_SAVING: {
@@ -266,7 +411,29 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
       enabled: false,
     },
     postProcessing: {
+      atmosphere: {
+        enabled: false,
+        cloudShadowStrength: 0.0,
+        heightFogDensity: 0.0,
+        heightFogHeightFalloff: 0.08,
+        sunInscatterStrength: 0.0,
+      },
       outline: true,
+      gtao: {
+        enabled: false,
+        maxDistance: 24,
+        strength: 0.18,
+        worldRadius: 2.4,
+      },
+      lut: {
+        enabled: false,
+        intensity: 0.0,
+      },
+      taa: {
+        enabled: false,
+        historyWeight: 0.0,
+        sharpenStrength: 0.0,
+      },
       depthBlur: {
         enabled: false,
         nearStartRatio: 0.08,
@@ -277,14 +444,20 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         maxFarRadiusPx: 2.5,
       },
     },
+    localReflections: {
+      enabled: false,
+      maxSkyExposure: 0.0,
+      positionDelta: 4.0,
+      textureSize: 96,
+      updateIntervalS: 3.0,
+    },
     fpsCap: 30,
   },
 };
 
-// ULTRA and POWER_SAVING are considered overly extreme settings, so they are excluded from
-// automatic control. In the future, they will only be available when explicitly selected
-// by the user through manual configuration.
-const AUTOMATIC_QUALITY_LEVELS: (keyof typeof QUALITY_PRESETS)[] = ['HIGH', 'MEDIUM', 'LOW'];
+// POWER_SAVING remains excluded from automatic control. ULTRA is allowed on desktop so
+// sustained high FPS can promote beyond HIGH when the device can afford it.
+const AUTOMATIC_QUALITY_LEVELS: (keyof typeof QUALITY_PRESETS)[] = ['ULTRA', 'HIGH', 'MEDIUM', 'LOW'];
 
 // The default quality level is currently hardcoding to HIGH or MEDIUM, but
 // it might also be a good idea to save the adjusted quality level to LocalStorage or
@@ -338,10 +511,9 @@ const QUALITY_ADJUSTMENT_WARMUP_TIME = 5;
 // we set a maximum number of quality adjustment attempts.
 const MAX_QUALITY_BOUNCE_COUNT = 5;
 
-// A max quality level to prevent quality bouncing. This is mainly used to prevent quality
-// bounces on mobile that may be contributing to crashes. We in the mobile case for now set
-// the max quality level to MEDIUM, but we may want to revisit this later.
-const MAX_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = MobileManager.isMobile ? 'MEDIUM' : 'HIGH';
+// A max quality level to prevent quality bouncing. Mobile stays capped at MEDIUM for
+// stability, while desktop can now climb to ULTRA through automatic adjustment.
+const MAX_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = MobileManager.isMobile ? 'MEDIUM' : 'ULTRA';
 
 type PerformanceStats = {
   duration: number;

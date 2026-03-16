@@ -67,6 +67,26 @@ test('preset mode preserves explicit procedural weather when no preset was reque
   }
 });
 
+test('preset mode preserves explicit procedural weather when preset and procedural URI are both provided', () => {
+  const world = createWorldStub('skyboxes/procedural?weather=cloudy');
+  const controller = new EnvironmentController(world as any, {
+    autoStart: false,
+    preset: 'daytime',
+    proceduralSkyUri: 'skyboxes/procedural?weather=cloudy',
+  });
+
+  try {
+    controller.start();
+
+    expect(controller.preset).toBe('daytime');
+    expect(controller.weatherPreset).toBe('cloudy');
+    expect(world.skyboxUri).toContain('skyboxes/procedural');
+    expect(world.skyboxUri).toContain('weather=cloudy');
+  } finally {
+    controller.dispose();
+  }
+});
+
 test('custom non-procedural skyboxes stay unchanged unless procedural sky is explicitly requested', () => {
   const world = createWorldStub('skyboxes/custom-evening');
   const controller = new EnvironmentController(world as any, {
@@ -78,6 +98,24 @@ test('custom non-procedural skyboxes stay unchanged unless procedural sky is exp
 
     expect(world.skyboxUri).toBe('skyboxes/custom-evening');
     expect(world.skyboxUriCalls).toHaveLength(0);
+  } finally {
+    controller.dispose();
+  }
+});
+
+test('setPreset can preserve cloudy daytime when upgrading legacy partly-cloudy skyboxes', () => {
+  const world = createWorldStub('skyboxes/procedural?weather=clear');
+  const controller = new EnvironmentController(world as any, {
+    autoStart: false,
+  });
+
+  try {
+    controller.setPreset('daytime', 'cloudy', 'skyboxes/procedural?weather=cloudy');
+
+    expect(controller.preset).toBe('daytime');
+    expect(controller.weatherPreset).toBe('cloudy');
+    expect(world.skyboxUri).toContain('skyboxes/procedural');
+    expect(world.skyboxUri).toContain('weather=cloudy');
   } finally {
     controller.dispose();
   }

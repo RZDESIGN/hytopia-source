@@ -178,6 +178,10 @@ function getLegacyEnvironmentSkyboxAlias(skyboxUri: string): LegacyEnvironmentSk
   return LEGACY_ENVIRONMENT_SKYBOX_ALIASES[normalizeSkyboxUriForAliasLookup(skyboxUri)] ?? null;
 }
 
+function canUseWeatherOverrideForPreset(preset: EnvironmentPreset): boolean {
+  return preset === 'daytime' || preset === 'nighttime' || preset === 'sunset';
+}
+
 function shouldDefaultToProceduralSky(worldSkyboxUri: string, proceduralSkyUri: string | undefined): boolean {
   return proceduralSkyUri !== undefined
     || worldSkyboxUri.startsWith(PROCEDURAL_SKY_PREFIX)
@@ -330,8 +334,6 @@ export default class EnvironmentController {
           ?? DEFAULT_PROCEDURAL_SKY_URI);
     const parsedPresetFromProceduralSky = parseEnvironmentPresetFromSkyboxUri(sourceProceduralSkyUri);
     const parsedWeatherPresetFromProceduralSky = parseWeatherPresetFromSkyboxUri(sourceProceduralSkyUri);
-    const shouldPreserveSourceWeatherInPresetMode = legacySkyboxAlias?.preset === 'daytime'
-      || parsedPresetFromProceduralSky === null;
     this._clockIntervalMs = options.clockIntervalMs ?? DEFAULT_CLOCK_INTERVAL_MS;
     this._cycleDurationMs = options.cycleDurationMs ?? DEFAULT_CYCLE_DURATION_MS;
     this._cycleOffsetHours = options.cycleOffsetHours ?? DEFAULT_CYCLE_OFFSET_HOURS;
@@ -352,8 +354,12 @@ export default class EnvironmentController {
       ?? legacySkyboxAlias?.preset
       ?? parsedPresetFromProceduralSky
       ?? 'daytime';
-    this._presetWeatherOverride = options.preset === undefined
-      ? (shouldPreserveSourceWeatherInPresetMode ? parsedWeatherPresetFromProceduralSky : null)
+    const shouldPreserveSourceWeatherInPresetMode = canUseWeatherOverrideForPreset(this._preset)
+      && parsedPresetFromProceduralSky === null
+      && parsedWeatherPresetFromProceduralSky !== null
+      && parsedWeatherPresetFromProceduralSky !== ENVIRONMENT_PRESET_DEFINITIONS[this._preset].weatherPreset;
+    this._presetWeatherOverride = shouldPreserveSourceWeatherInPresetMode
+      ? parsedWeatherPresetFromProceduralSky
       : null;
     this._sunBaseHeight = options.sunBaseHeight ?? DEFAULT_SUN_BASE_HEIGHT;
     this._sunHeightRange = options.sunHeightRange ?? DEFAULT_SUN_HEIGHT_RANGE;
@@ -429,11 +435,20 @@ export default class EnvironmentController {
    *
    * **Category:** Core
    */
-  public setPreset(preset: EnvironmentPreset): void {
+  public setPreset(
+    preset: EnvironmentPreset,
+    weatherPresetOverride: EnvironmentWeatherPreset | null = null,
+    proceduralSkyUri?: string,
+  ): void {
     this.stop();
     this._mode = 'preset';
     this._preset = preset;
-    this._presetWeatherOverride = null;
+    this._presetWeatherOverride = canUseWeatherOverrideForPreset(preset)
+      ? weatherPresetOverride
+      : null;
+    if (proceduralSkyUri) {
+      this._proceduralSkyUri = proceduralSkyUri;
+    }
     this._timeMs = getTimeMsForClockHour(
       ENVIRONMENT_PRESET_DEFINITIONS[preset].clockHour,
       this._cycleDurationMs,

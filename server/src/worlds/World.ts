@@ -20,14 +20,38 @@ import type RgbColor from '@/shared/types/RgbColor';
 import type Vector3Like from '@/shared/types/math/Vector3Like';
 import type { EnvironmentControllerOptions } from '@/worlds/EnvironmentController';
 
-function isLegacyEnvironmentSkyboxAlias(skyboxUri: string): boolean {
+type LegacyEnvironmentSkyboxAlias = {
+  preset: 'daytime' | 'nighttime' | 'sunset';
+  proceduralSkyUri: string;
+  weatherPresetOverride?: 'cloudy';
+};
+
+function normalizeSkyboxUriForAliasLookup(skyboxUri: string): string {
   const queryIndex = skyboxUri.indexOf('?');
   const baseUri = (queryIndex >= 0 ? skyboxUri.slice(0, queryIndex) : skyboxUri).replace(/^\/+/, '');
-  const normalizedUri = baseUri.startsWith('skyboxes/') ? baseUri : `skyboxes/${baseUri}`;
 
-  return normalizedUri === 'skyboxes/partly-cloudy'
-    || normalizedUri === 'skyboxes/sunset'
-    || normalizedUri === 'skyboxes/night';
+  return baseUri.startsWith('skyboxes/') ? baseUri : `skyboxes/${baseUri}`;
+}
+
+function getLegacyEnvironmentSkyboxAlias(skyboxUri: string): LegacyEnvironmentSkyboxAlias | null {
+  switch (normalizeSkyboxUriForAliasLookup(skyboxUri)) {
+    case 'skyboxes/partly-cloudy':
+      return {
+        preset: 'daytime',
+        proceduralSkyUri: 'skyboxes/procedural?weather=cloudy',
+        weatherPresetOverride: 'cloudy',
+      };
+    case 'skyboxes/sunset':
+      return { preset: 'sunset', proceduralSkyUri: 'skyboxes/procedural?weather=clear' };
+    case 'skyboxes/night':
+      return { preset: 'nighttime', proceduralSkyUri: 'skyboxes/procedural?weather=clear' };
+    default:
+      return null;
+  }
+}
+
+function isLegacyEnvironmentSkyboxAlias(skyboxUri: string): boolean {
+  return getLegacyEnvironmentSkyboxAlias(skyboxUri) !== null;
 }
 
 /**
@@ -337,9 +361,11 @@ export default class World extends EventRouter implements protocol.Serializable 
     this._fogFar = options.fogFar ?? 550;
     this._fogNear = options.fogNear ?? 500;
     this._name = options.name;
+    const legacySkyboxAlias = getLegacyEnvironmentSkyboxAlias(options.skyboxUri);
+
     this._skyboxIntensity = options.skyboxIntensity ?? 1;
     this._skySunDirection = undefined;
-    this._skyboxUri = options.skyboxUri;
+    this._skyboxUri = legacySkyboxAlias?.proceduralSkyUri ?? options.skyboxUri;
     this._tag = options.tag;
   
     this._audioManager = new AudioManager(this);
@@ -362,6 +388,8 @@ export default class World extends EventRouter implements protocol.Serializable 
       this._environmentController = new EnvironmentController(this, {
         ...environmentOptions,
         autoStart: false,
+        preset: environmentOptions?.preset ?? legacySkyboxAlias?.preset,
+        proceduralSkyUri: environmentOptions?.proceduralSkyUri ?? legacySkyboxAlias?.proceduralSkyUri,
       });
     }
 
@@ -821,20 +849,46 @@ export default class World extends EventRouter implements protocol.Serializable 
   /**
    * Sets the skybox URI for the world.
    *
-   * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`.
+   * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`. Legacy aliases `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` are upgraded to matching procedural sky presets.
    *
    * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.
    *
    * **Category:** Core
    */
   public setSkyboxUri(skyboxUri: string) {
-    this._skyboxUri = skyboxUri;
+    const legacySkyboxAlias = getLegacyEnvironmentSkyboxAlias(skyboxUri);
+    const nextSkyboxUri = legacySkyboxAlias?.proceduralSkyUri ?? skyboxUri;
+
+    this._skyboxUri = nextSkyboxUri;
     this._serialized = undefined;
 
     this.emit(WorldEvent.SET_SKYBOX_URI, {
       world: this,
-      uri: skyboxUri,
+      uri: nextSkyboxUri,
     });
+
+    if (!legacySkyboxAlias) {
+      return;
+    }
+
+    if (!this._environmentController) {
+      this._environmentController = new EnvironmentController(this, {
+        autoStart: false,
+        preset: legacySkyboxAlias.preset,
+        proceduralSkyUri: legacySkyboxAlias.proceduralSkyUri,
+      });
+    } else {
+      this._environmentController.setPreset(
+        legacySkyboxAlias.preset,
+        legacySkyboxAlias.weatherPresetOverride ?? null,
+        legacySkyboxAlias.proceduralSkyUri,
+      );
+      return;
+    }
+
+    if (this._loop.isStarted) {
+      this._environmentController.start();
+    }
   }
 
   /**

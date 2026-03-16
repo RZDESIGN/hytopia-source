@@ -210,7 +210,7 @@ Description
 </td></tr>
 <tr><td>
 
-[setPreset(preset)](./server.environmentcontroller.setpreset.md)
+[setPreset(preset, weatherPresetOverride, proceduralSkyUri)](./server.environmentcontroller.setpreset.md)
 
 
 </td><td>

@@ -5340,6 +5340,7 @@ export declare class EnvironmentController {
     private _nightSkyboxIntensity;
     private _onWeatherPresetChange;
     private _preset;
+    private _presetWeatherOverride;
     private _proceduralSkyUri;
     private _sunBaseHeight;
     private _sunHeightRange;
@@ -5372,7 +5373,7 @@ export declare class EnvironmentController {
      *
      * **Category:** Core
      */
-    setPreset(preset: EnvironmentPreset): void;
+    setPreset(preset: EnvironmentPreset, weatherPresetOverride?: EnvironmentWeatherPreset | null, proceduralSkyUri?: string): void;
     start(): void;
     stop(): void;
     dispose(): void;
@@ -13102,7 +13103,7 @@ export declare class World extends EventRouter implements protocol.Serializable 
     /**
      * Sets the skybox URI for the world.
      *
-     * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`.
+     * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`. Legacy aliases `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` are upgraded to matching procedural sky presets.
      *
      * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.
      *
@@ -13555,7 +13556,7 @@ export declare interface WorldOptions {
     name: string;
     /** The intensity of the skybox brightness for the world. 0 is black, 1 is full brightness, 1+ is brighter. */
     skyboxIntensity?: number;
-    /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`. */
+    /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`. Legacy aliases `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` are automatically upgraded to matching procedural sky presets. */
     skyboxUri: string;
     /** An arbitrary identifier tag of the world. Useful for your own logic */
     tag?: string;
@@ -13563,7 +13564,7 @@ export declare interface WorldOptions {
     tickRate?: number;
     /** The gravity vector for the world. */
     gravity?: Vector3Like;
-    /** Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds. */
+    /** Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds and the legacy `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` aliases. */
     environment?: boolean | EnvironmentControllerOptions;
 }
 

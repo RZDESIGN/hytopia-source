@@ -153,7 +153,7 @@ boolean \| [EnvironmentControllerOptions](./server.environmentcontrolleroptions.
 
 </td><td>
 
-_(Optional)_ Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds.
+_(Optional)_ Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds and the legacy `skyboxes/partly-cloudy`<!-- -->, `skyboxes/sunset`<!-- -->, and `skyboxes/night` aliases.
 
 
 </td></tr>
@@ -324,7 +324,7 @@ string
 
 </td><td>
 
-The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`<!-- -->.
+The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`<!-- -->. Legacy aliases `skyboxes/partly-cloudy`<!-- -->, `skyboxes/sunset`<!-- -->, and `skyboxes/night` are automatically upgraded to matching procedural sky presets.
 
 
 </td></tr>

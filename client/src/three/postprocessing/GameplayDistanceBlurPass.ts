@@ -16,7 +16,7 @@ type BlurCamera = {
   isPerspectiveCamera?: boolean;
 };
 
-const DEPTH_BLUR_RESOLUTION_SCALE = 0.5;
+const DEPTH_BLUR_RESOLUTION_SCALE = 0.42;
 
 const vertexShader = `
   varying vec2 vUv;
@@ -41,9 +41,9 @@ const sharedDepthBlurFunctions = `
   float getBlurFactor(float centerDistance, float nearBlurStart, float focusNear, float focusFar, float farBlurEnd) {
     float nearBlurFactor = 1.0 - smoothstep(nearBlurStart, focusNear, centerDistance);
     float farBlurFactor = smoothstep(focusFar, farBlurEnd, centerDistance);
-    nearBlurFactor = pow(max(nearBlurFactor, 0.0), 1.15);
-    farBlurFactor = pow(max(farBlurFactor, 0.0), 0.82);
-    return max(nearBlurFactor * 0.62, farBlurFactor);
+    nearBlurFactor = pow(max(nearBlurFactor, 0.0), 1.0);
+    farBlurFactor = pow(max(farBlurFactor, 0.0), 0.68);
+    return clamp(max(nearBlurFactor * 0.72, farBlurFactor * 1.12), 0.0, 1.0);
   }
 `;
 
@@ -103,9 +103,9 @@ const BlurShader = {
       float centerDistance = getViewDistance(tDepth, vUv, isPerspectiveCamera, cameraNear, cameraFar);
       float nearBlurFactor = 1.0 - smoothstep(nearBlurStart, focusNear, centerDistance);
       float farBlurFactor = smoothstep(focusFar, farBlurEnd, centerDistance);
-      nearBlurFactor = pow(max(nearBlurFactor, 0.0), 1.15);
-      farBlurFactor = pow(max(farBlurFactor, 0.0), 0.82);
-      float blurFactor = max(nearBlurFactor * 0.62, farBlurFactor);
+      nearBlurFactor = pow(max(nearBlurFactor, 0.0), 1.0);
+      farBlurFactor = pow(max(farBlurFactor, 0.0), 0.68);
+      float blurFactor = clamp(max(nearBlurFactor * 0.72, farBlurFactor * 1.12), 0.0, 1.0);
 
       if (blurFactor <= 0.001) {
         gl_FragColor = centerColor;
@@ -113,7 +113,8 @@ const BlurShader = {
       }
 
       float radiusPx = nearBlurFactor * maxNearBlurRadiusPx + farBlurFactor * maxFarBlurRadiusPx;
-      float depthBleedRange = max(7.0, max(focusNear - nearBlurStart, farBlurEnd - focusFar) * 0.36);
+      radiusPx *= mix(1.0, 1.24, blurFactor);
+      float depthBleedRange = max(5.0, max(focusNear - nearBlurStart, farBlurEnd - focusFar) * 0.28);
       vec3 accum = centerColor.rgb;
       float totalWeight = 1.0;
       vec4 tap;
@@ -197,7 +198,7 @@ const CompositeShader = {
       }
 
       vec3 blurredColor = texture2D(tBlur, vUv).rgb;
-      gl_FragColor = vec4(mix(centerColor.rgb, blurredColor, blurFactor), centerColor.a);
+      gl_FragColor = vec4(mix(centerColor.rgb, blurredColor, min(1.0, blurFactor * 1.12)), centerColor.a);
     }
   `,
 };

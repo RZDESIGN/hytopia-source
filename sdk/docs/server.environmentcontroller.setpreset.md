@@ -11,7 +11,7 @@ Applies a fixed environment preset and disables the moving day/night cycle.
 **Signature:**
 
 ```typescript
-setPreset(preset: EnvironmentPreset): void;
+setPreset(preset: EnvironmentPreset, weatherPresetOverride?: EnvironmentWeatherPreset | null, proceduralSkyUri?: string): void;
 ```
 
 ## Parameters
@@ -43,6 +43,38 @@ preset
 
 
 </td><td>
+
+
+</td></tr>
+<tr><td>
+
+weatherPresetOverride
+
+
+</td><td>
+
+[EnvironmentWeatherPreset](./server.environmentweatherpreset.md) \| null
+
+
+</td><td>
+
+_(Optional)_
+
+
+</td></tr>
+<tr><td>
+
+proceduralSkyUri
+
+
+</td><td>
+
+string
+
+
+</td><td>
+
+_(Optional)_
 
 
 </td></tr>

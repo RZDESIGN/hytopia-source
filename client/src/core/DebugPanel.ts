@@ -101,6 +101,17 @@ export interface DebugPanelConfig {
     triangles: string;
     visibility: string;
   };
+  renderTuning: {
+    gtaoMaxDistance: number;
+    gtaoStrength: number;
+    gtaoWorldRadius: number;
+    localReflectionMaxSkyExposure: number;
+    localReflectionPositionDelta: number;
+    localReflectionUpdateIntervalS: number;
+    lutIntensity: number;
+    temporalHistoryWeight: number;
+    temporalSharpenStrength: number;
+  };
   entity: {
     count: number;
     staticEnvironmentCount: number;
@@ -204,6 +215,12 @@ export default class DebugPanel {
       this._downloadPredictionTrace();
     },
   };
+  private _renderTuningActions = {
+    reset: (): void => {
+      this._game.renderer.resetRuntimeTuning();
+      this._updateRenderTuning();
+    },
+  };
   private _config: DebugPanelConfig = {
     player: {
       position: `-, -, -`,
@@ -233,6 +250,17 @@ export default class DebugPanel {
       sceneUI: '-',
       triangles: '-',
       visibility: '-',
+    },
+    renderTuning: {
+      gtaoMaxDistance: 0,
+      gtaoStrength: 0,
+      gtaoWorldRadius: 0,
+      localReflectionMaxSkyExposure: 0,
+      localReflectionPositionDelta: 0,
+      localReflectionUpdateIntervalS: 0,
+      lutIntensity: 0,
+      temporalHistoryWeight: 0,
+      temporalSharpenStrength: 0,
     },
     webgl: {
       drawCalls: 0,
@@ -387,6 +415,36 @@ export default class DebugPanel {
     budgetFolder.add(this._config.budget, 'sceneUI').name('Scene UI');
     budgetFolder.add(this._config.budget, 'postFx').name('Post FX');
 
+    const renderTuningFolder = this._gui.addFolder('Render Tuning').close();
+    renderTuningFolder.add(this._config.renderTuning, 'temporalHistoryWeight', 0.5, 0.98, 0.005)
+      .name('TAA History')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ temporalHistoryWeight: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'temporalSharpenStrength', 0, 0.35, 0.005)
+      .name('TAA Sharpen')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ temporalSharpenStrength: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'lutIntensity', 0, 1.5, 0.01)
+      .name('LUT Intensity')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ lutIntensity: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'gtaoStrength', 0, 1, 0.01)
+      .name('GTAO Strength')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ gtaoStrength: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'gtaoWorldRadius', 0.5, 12, 0.1)
+      .name('GTAO Radius')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ gtaoWorldRadius: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'gtaoMaxDistance', 4, 160, 1)
+      .name('GTAO Distance')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ gtaoMaxDistance: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'localReflectionMaxSkyExposure', 0, 1, 0.01)
+      .name('Probe Sky Cutoff')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ localReflectionMaxSkyExposure: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'localReflectionPositionDelta', 0.25, 12, 0.05)
+      .name('Probe Move Delta')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ localReflectionPositionDelta: value }));
+    renderTuningFolder.add(this._config.renderTuning, 'localReflectionUpdateIntervalS', 0.1, 12, 0.1)
+      .name('Probe Interval')
+      .onChange((value: number) => this._game.renderer.setRuntimeTuning({ localReflectionUpdateIntervalS: value }));
+    renderTuningFolder.add(this._renderTuningActions, 'reset').name('Reset Overrides');
+
     // WebGL stats panel
     const webglFolder = this._gui.addFolder('WebGL');
     webglFolder.add(this._config.webgl, 'drawCalls').name('Draw calls');
@@ -515,6 +573,7 @@ export default class DebugPanel {
     const perfSnapshot = this._game.performanceBaselineManager.snapshotDetailed();
     this._updatePerformanceStats(perfSnapshot);
     this._updateFrameBudget(perfSnapshot);
+    this._updateRenderTuning();
     this._updateMemoryStats();
     this._updateRttStats();
     this._updateEntityStats();
@@ -568,7 +627,15 @@ export default class DebugPanel {
     const budgets = this._resolveFrameBudgets();
     const frameBudgetMs = 1000 / this._resolveTargetFps();
     const postFx = this._game.renderer.postProcessingDebugState;
-    const postFxCount = Number(postFx.bloom) + Number(postFx.depthBlur) + Number(postFx.outline) + Number(postFx.smaa);
+    const postFxCount = Number(postFx.atmosphere)
+      + Number(postFx.bloom)
+      + Number(postFx.depthBlur)
+      + Number(postFx.gtao)
+      + Number(postFx.lut)
+      + Number(postFx.nearContactShadows)
+      + Number(postFx.outline)
+      + Number(postFx.smaa)
+      + Number(postFx.temporalResolve);
 
     this._config.budget.frameTime = this._formatBudgetStatus(snapshot.frame.timings.p95, frameBudgetMs, 'ms');
     this._config.budget.drawCalls = this._formatBudgetStatus(snapshot.renderer.calls, budgets.drawCalls);
@@ -578,7 +645,20 @@ export default class DebugPanel {
       budgets.visibleChunks,
     );
     this._config.budget.sceneUI = this._formatBudgetStatus(snapshot.sceneUI.visibleCount, budgets.sceneUI);
-    this._config.budget.postFx = `${postFxCount}/4 ${this._formatBudgetLabel(postFxCount <= 2 ? 'ok' : postFxCount === 3 ? 'tight' : 'over')}`;
+    this._config.budget.postFx = `${postFxCount}/9 ${this._formatBudgetLabel(postFxCount <= 4 ? 'ok' : postFxCount <= 6 ? 'tight' : 'over')}`;
+  }
+
+  private _updateRenderTuning(): void {
+    const tuning = this._game.renderer.runtimeTuningState;
+    this._config.renderTuning.temporalHistoryWeight = Number(tuning.temporalHistoryWeight.toFixed(3));
+    this._config.renderTuning.temporalSharpenStrength = Number(tuning.temporalSharpenStrength.toFixed(3));
+    this._config.renderTuning.lutIntensity = Number(tuning.lutIntensity.toFixed(3));
+    this._config.renderTuning.gtaoStrength = Number(tuning.gtaoStrength.toFixed(3));
+    this._config.renderTuning.gtaoWorldRadius = Number(tuning.gtaoWorldRadius.toFixed(2));
+    this._config.renderTuning.gtaoMaxDistance = Number(tuning.gtaoMaxDistance.toFixed(1));
+    this._config.renderTuning.localReflectionMaxSkyExposure = Number(tuning.localReflectionMaxSkyExposure.toFixed(3));
+    this._config.renderTuning.localReflectionPositionDelta = Number(tuning.localReflectionPositionDelta.toFixed(2));
+    this._config.renderTuning.localReflectionUpdateIntervalS = Number(tuning.localReflectionUpdateIntervalS.toFixed(2));
   }
 
   private _updateMemoryStats(): void {

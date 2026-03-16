@@ -1,9 +1,11 @@
 import {
+  ACESFilmicToneMapping,
   AdditiveBlending,
   AmbientLight,
   BackSide,
   BoxGeometry,
   Color,
+  CubeCamera,
   CubeTexture,
   DepthTexture,
   DirectionalLight,
@@ -27,11 +29,13 @@ import {
   ShaderLib,
   ShaderMaterial,
   SRGBColorSpace,
+  Texture,
   UniformsUtils,
   Vector2,
   Vector3,
   Vector4,
   VSMShadowMap,
+  WebGLCubeRenderTarget,
   WebGLRenderer,
   WebGLRenderTarget,
 } from 'three';
@@ -39,11 +43,16 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { LUTPass } from 'three/examples/jsm/postprocessing/LUTPass.js';
 import { AnalyticSunHaloPass } from '../three/postprocessing/AnalyticSunHaloPass';
+import { AtmosphericScatteringPass } from '../three/postprocessing/AtmosphericScatteringPass';
 import { GameplayDistanceBlurPass } from '../three/postprocessing/GameplayDistanceBlurPass';
+import { GroundedGTAOPass } from '../three/postprocessing/GroundedGTAOPass';
 import { NearContactShadowsPass } from '../three/postprocessing/NearContactShadowsPass';
+import { TemporalResolvePass } from '../three/postprocessing/TemporalResolvePass';
 import { WhiteCoreBloomPass } from '../three/postprocessing/WhiteCoreBloomPass';
 import { SelectiveOutlinePass } from '../three/postprocessing/SelectiveOutlinePass';
+import { createCinematicLut } from '../three/postprocessing/createCinematicLut';
 import { WATER_SURFACE_Y_OFFSET } from '../blocks/BlockConstants';
 import Chunk from '../chunks/Chunk';
 import Assets from '../network/Assets';
@@ -139,6 +148,9 @@ const PROCEDURAL_SKY_ENVIRONMENT_NEAR = 0.1;
 const PROCEDURAL_SKY_ENVIRONMENT_SIZE = MobileManager.isMobile ? 64 : 128;
 const PROCEDURAL_SKY_ENVIRONMENT_SUN_DISTANCE = 10;
 const PROCEDURAL_SKY_ENVIRONMENT_SUN_SIZE_RATIO = 260 / 880;
+const LOCAL_REFLECTION_PROBE_FAR = 36;
+const LOCAL_REFLECTION_PROBE_NEAR = 0.2;
+const TEMPORAL_JITTER_SCALE = 0.7;
 
 // Working variables
 const color = new Color();
@@ -193,12 +205,31 @@ type WaterReflectionQuality = {
 };
 
 export type PostProcessingDebugState = {
+  atmosphere: boolean;
   bloom: boolean;
   composer: boolean;
   depthBlur: boolean;
+  gtao: boolean;
+  lut: boolean;
+  nearContactShadows: boolean;
   outline: boolean;
   smaa: boolean;
+  temporalResolve: boolean;
 };
+
+export type RendererRuntimeTuningState = {
+  gtaoMaxDistance: number;
+  gtaoStrength: number;
+  gtaoWorldRadius: number;
+  localReflectionMaxSkyExposure: number;
+  localReflectionPositionDelta: number;
+  localReflectionUpdateIntervalS: number;
+  lutIntensity: number;
+  temporalHistoryWeight: number;
+  temporalSharpenStrength: number;
+};
+
+type RendererRuntimeTuningOverrides = Partial<RendererRuntimeTuningState>;
 
 export enum RendererEventType {
   Animate = 'RENDERER.ANIMATE',
@@ -284,6 +315,20 @@ function blendProceduralSkySettings(
   current.precipitation = target.precipitation;
 }
 
+function halton(index: number, base: number): number {
+  let fraction = 1 / base;
+  let result = 0;
+  let currentIndex = index;
+
+  while (currentIndex > 0) {
+    result += fraction * (currentIndex % base);
+    currentIndex = Math.floor(currentIndex / base);
+    fraction /= base;
+  }
+
+  return result;
+}
+
 export default class Renderer {
   private _game: Game;
   private _ambientLight: AmbientLightData;
@@ -328,6 +373,8 @@ export default class Renderer {
   private _proceduralSkyEnvironmentSkyMesh: Mesh | null = null;
   private _proceduralSkyEnvironmentSunMesh: Mesh | null = null;
   private _proceduralSkyEnvironmentUpdateCooldownS: number = 0;
+  private _baseEnvironmentTexture: Texture | null = null;
+  private _environmentOverrideTexture: Texture | null = null;
   private _proceduralSkySettings: ProceduralSkySettings | null = null;
   private _proceduralSkyTargetSettings: ProceduralSkySettings | null = null;
   private _proceduralMoonMesh: Mesh | null = null;
@@ -359,10 +406,14 @@ export default class Renderer {
   private _outlinePass: SelectiveOutlinePass;
   private _smaaPass: SMAAPass;
   private _analyticSunHaloPass: AnalyticSunHaloPass;
+  private _atmospherePass: AtmosphericScatteringPass;
   private _bloomPass: WhiteCoreBloomPass;
   private _gameplayDistanceBlurPass: GameplayDistanceBlurPass;
+  private _groundedGtaoPass: GroundedGTAOPass;
+  private _lutPass: LUTPass;
   private _nearContactShadowsPass: NearContactShadowsPass;
   private _outputPass: OutputPass;
+  private _temporalResolvePass: TemporalResolvePass;
   private _sceneUIRenderCooldownRemainingS: number = 0;
   private _adaptiveResolutionScale: number = 1;
   private _adaptiveResolutionDownHoldS: number = 0;
@@ -379,13 +430,25 @@ export default class Renderer {
   private _lastAppliedPixelRatio: number = 0;
   private _lastAppliedViewportWidth: number = 0;
   private _lastAppliedViewportHeight: number = 0;
+  private _localReflectionCubeCamera: CubeCamera;
+  private _localReflectionCubeRenderTarget: WebGLCubeRenderTarget;
+  private _localReflectionEnvironmentRenderTarget: WebGLRenderTarget | null = null;
+  private _localReflectionUpdateCooldownS: number = 0;
+  private _lastLocalReflectionProbePosition: Vector3 = new Vector3(Number.NaN, Number.NaN, Number.NaN);
   private _lastPostProcessingState: PostProcessingDebugState = {
+    atmosphere: false,
     bloom: false,
     composer: false,
     depthBlur: false,
+    gtao: false,
+    lut: false,
+    nearContactShadows: false,
     outline: false,
     smaa: false,
+    temporalResolve: false,
   };
+  private _runtimeTuningOverrides: RendererRuntimeTuningOverrides = {};
+  private _temporalJitterIndex: number = 1;
 
   public constructor(game: Game) {
     this._game = game;
@@ -405,6 +468,12 @@ export default class Renderer {
     this._viewModelScene = new Scene();
     this._overlayScene = new Scene();
     this._uiScene = new Scene();
+    this._localReflectionCubeRenderTarget = new WebGLCubeRenderTarget(128, { type: HalfFloatType });
+    this._localReflectionCubeCamera = new CubeCamera(
+      LOCAL_REFLECTION_PROBE_NEAR,
+      LOCAL_REFLECTION_PROBE_FAR,
+      this._localReflectionCubeRenderTarget,
+    );
     this._waterReflectionRenderTarget = new WebGLRenderTarget(
       WATER_REFLECTION_TEXTURE_SIZE_HIGH,
       WATER_REFLECTION_TEXTURE_SIZE_HIGH,
@@ -440,7 +509,9 @@ export default class Renderer {
     // Note: Size for Passes are set appropriately when EffectComposer size is set
     this._smaaPass = new SMAAPass();
     this._analyticSunHaloPass = new AnalyticSunHaloPass();
+    this._atmospherePass = new AtmosphericScatteringPass();
     this._gameplayDistanceBlurPass = new GameplayDistanceBlurPass();
+    this._groundedGtaoPass = new GroundedGTAOPass();
     this._nearContactShadowsPass = new NearContactShadowsPass();
     // Question: Should parameters be configurable?
     this._bloomPass = new WhiteCoreBloomPass(
@@ -449,7 +520,12 @@ export default class Renderer {
       0.4,  // radius
       this._calculateBloomThreshold(), // threshold
     );
+    this._temporalResolvePass = new TemporalResolvePass();
     this._outputPass = new OutputPass();
+    this._lutPass = new LUTPass({
+      intensity: 0,
+      lut: createCinematicLut(),
+    });
 
     Assets.ktx2Loader.detectSupport(this._renderer);
 
@@ -491,6 +567,66 @@ export default class Renderer {
   public get adaptiveResolutionScale(): number { return this._adaptiveResolutionScale; }
   public get effectivePixelRatio(): number { return this._lastAppliedPixelRatio || this._renderer.getPixelRatio(); }
   public get postProcessingDebugState(): PostProcessingDebugState { return this._lastPostProcessingState; }
+  public get runtimeTuningState(): RendererRuntimeTuningState { return this._resolveRuntimeTuningState(); }
+
+  public setRuntimeTuning(overrides: RendererRuntimeTuningOverrides): void {
+    const nextOverrides: RendererRuntimeTuningOverrides = { ...this._runtimeTuningOverrides };
+    let refreshLocalProbe = false;
+    let resetTemporalHistory = false;
+
+    if (overrides.temporalHistoryWeight !== undefined) {
+      nextOverrides.temporalHistoryWeight = Math.min(0.98, Math.max(0.5, overrides.temporalHistoryWeight));
+      resetTemporalHistory = true;
+    }
+    if (overrides.temporalSharpenStrength !== undefined) {
+      nextOverrides.temporalSharpenStrength = Math.min(0.35, Math.max(0, overrides.temporalSharpenStrength));
+      resetTemporalHistory = true;
+    }
+    if (overrides.lutIntensity !== undefined) {
+      nextOverrides.lutIntensity = Math.min(1.5, Math.max(0, overrides.lutIntensity));
+    }
+    if (overrides.gtaoStrength !== undefined) {
+      nextOverrides.gtaoStrength = Math.min(1.0, Math.max(0, overrides.gtaoStrength));
+    }
+    if (overrides.gtaoWorldRadius !== undefined) {
+      nextOverrides.gtaoWorldRadius = Math.min(12, Math.max(0.5, overrides.gtaoWorldRadius));
+    }
+    if (overrides.gtaoMaxDistance !== undefined) {
+      nextOverrides.gtaoMaxDistance = Math.min(160, Math.max(4, overrides.gtaoMaxDistance));
+    }
+    if (overrides.localReflectionMaxSkyExposure !== undefined) {
+      nextOverrides.localReflectionMaxSkyExposure = Math.min(1, Math.max(0, overrides.localReflectionMaxSkyExposure));
+      refreshLocalProbe = true;
+    }
+    if (overrides.localReflectionPositionDelta !== undefined) {
+      nextOverrides.localReflectionPositionDelta = Math.min(12, Math.max(0.25, overrides.localReflectionPositionDelta));
+      refreshLocalProbe = true;
+    }
+    if (overrides.localReflectionUpdateIntervalS !== undefined) {
+      nextOverrides.localReflectionUpdateIntervalS = Math.min(12, Math.max(0.1, overrides.localReflectionUpdateIntervalS));
+      refreshLocalProbe = true;
+    }
+
+    this._runtimeTuningOverrides = nextOverrides;
+
+    if (resetTemporalHistory) {
+      this._temporalResolvePass.markHistoryInvalid();
+      this._temporalJitterIndex = 1;
+    }
+
+    if (refreshLocalProbe) {
+      this._localReflectionUpdateCooldownS = 0;
+      this._lastLocalReflectionProbePosition.set(Number.NaN, Number.NaN, Number.NaN);
+    }
+  }
+
+  public resetRuntimeTuning(): void {
+    this._runtimeTuningOverrides = {};
+    this._temporalResolvePass.markHistoryInvalid();
+    this._temporalJitterIndex = 1;
+    this._localReflectionUpdateCooldownS = 0;
+    this._lastLocalReflectionProbePosition.set(Number.NaN, Number.NaN, Number.NaN);
+  }
 
   private _getViewportSize(): { width: number; height: number } {
     return {
@@ -532,14 +668,18 @@ export default class Renderer {
 
   private _setupPostProcessing(): void {
     this._effectComposer.addPass(this._renderPass);
+    this._effectComposer.addPass(this._groundedGtaoPass);
     this._effectComposer.addPass(this._nearContactShadowsPass);
+    this._effectComposer.addPass(this._atmospherePass);
     this._effectComposer.addPass(this._gameplayDistanceBlurPass);
     this._effectComposer.addPass(this._outlinePass);
     this._effectComposer.addPass(this._analyticSunHaloPass);
     this._effectComposer.addPass(this._viewModelRenderPass);
     this._effectComposer.addPass(this._bloomPass);
+    this._effectComposer.addPass(this._temporalResolvePass);
     this._effectComposer.addPass(this._smaaPass);
     this._effectComposer.addPass(this._outputPass);
+    this._effectComposer.addPass(this._lutPass);
     this._resizePostProcessing();
   }
 
@@ -548,6 +688,27 @@ export default class Renderer {
     this._renderer.getDrawingBufferSize(vec2);
     this._effectComposer.setSize(vec2.width, vec2.height);
     this._bloomPass.setSize(vec2.width >> 2, vec2.height >> 2);
+    this._temporalResolvePass.markHistoryInvalid();
+  }
+
+  private _resolveRuntimeTuningState(): RendererRuntimeTuningState {
+    const postProcessing = this._game.settingsManager.qualityPerfTradeoff.postProcessing;
+    const taa = postProcessing?.taa;
+    const lut = postProcessing?.lut;
+    const gtao = postProcessing?.gtao;
+    const localReflections = this._game.settingsManager.qualityPerfTradeoff.localReflections;
+
+    return {
+      gtaoMaxDistance: this._runtimeTuningOverrides.gtaoMaxDistance ?? gtao?.maxDistance ?? 52,
+      gtaoStrength: this._runtimeTuningOverrides.gtaoStrength ?? gtao?.strength ?? 0.32,
+      gtaoWorldRadius: this._runtimeTuningOverrides.gtaoWorldRadius ?? gtao?.worldRadius ?? 4.1,
+      localReflectionMaxSkyExposure: this._runtimeTuningOverrides.localReflectionMaxSkyExposure ?? localReflections?.maxSkyExposure ?? 0.36,
+      localReflectionPositionDelta: this._runtimeTuningOverrides.localReflectionPositionDelta ?? localReflections?.positionDelta ?? 2.8,
+      localReflectionUpdateIntervalS: this._runtimeTuningOverrides.localReflectionUpdateIntervalS ?? localReflections?.updateIntervalS ?? 2.4,
+      lutIntensity: this._runtimeTuningOverrides.lutIntensity ?? lut?.intensity ?? 0,
+      temporalHistoryWeight: this._runtimeTuningOverrides.temporalHistoryWeight ?? taa?.historyWeight ?? 0.86,
+      temporalSharpenStrength: this._runtimeTuningOverrides.temporalSharpenStrength ?? taa?.sharpenStrength ?? 0.08,
+    };
   }
 
   public addToScene(object: Object3D): void {
@@ -664,50 +825,94 @@ export default class Renderer {
     this._updateSceneUI(frameDeltaS);
     this._updateDirectionalLight(frameDeltaS);
     this._updateWaterReflection(frameDeltaS);
+    this._updateLocalReflectionProbe(frameDeltaS);
+
+    const activeCamera = this._game.camera.activeCamera;
+    const jitterApplied = this._applyTemporalJitter(activeCamera);
     this._updateGameplayDistanceBlur();
     this._updateNearContactShadows();
+    this._updateGroundedGtaoPass();
+    this._updateAtmospherePass(frameDeltaS);
     this._updateAnalyticSunHaloPass();
+    this._updateTemporalResolvePass();
 
     this._applyUnderWaterEffect();
     this._syncFirstPersonViewModelEntity();
 
     this._renderer.info.reset();
     const pp = this._game.settingsManager.qualityPerfTradeoff.postProcessing ?? {};
+    const runtimeTuning = this._resolveRuntimeTuningState();
+    const hasAtmosphere = this._atmospherePass.enabled;
+    const hasGroundedGtao = this._groundedGtaoPass.enabled;
     const hasGameplayDistanceBlur = this._gameplayDistanceBlurPass.enabled;
     const hasNearContactShadows = this._nearContactShadowsPass.enabled;
     const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
     const hasAnalyticSunHalo = this._analyticSunHaloPass.enabled;
-    const shouldUsePostProcessing = hasOutlineTargets || !!pp.bloom || !!pp.smaa || hasGameplayDistanceBlur || hasNearContactShadows || hasAnalyticSunHalo;
+    const hasTemporalResolve = this._temporalResolvePass.enabled;
+    const hasLut = !!pp.lut?.enabled && runtimeTuning.lutIntensity > 0.001;
+    const shouldUsePostProcessing = hasOutlineTargets
+      || !!pp.bloom
+      || !!pp.smaa
+      || hasGameplayDistanceBlur
+      || hasNearContactShadows
+      || hasGroundedGtao
+      || hasAtmosphere
+      || hasAnalyticSunHalo
+      || hasTemporalResolve
+      || hasLut;
     this._lastPostProcessingState.composer = shouldUsePostProcessing;
+    this._lastPostProcessingState.atmosphere = hasAtmosphere;
     this._lastPostProcessingState.depthBlur = hasGameplayDistanceBlur;
+    this._lastPostProcessingState.gtao = hasGroundedGtao;
+    this._lastPostProcessingState.nearContactShadows = hasNearContactShadows;
     this._lastPostProcessingState.outline = hasOutlineTargets;
     this._lastPostProcessingState.bloom = !!pp.bloom;
-    this._lastPostProcessingState.smaa = !!pp.smaa;
+    this._lastPostProcessingState.temporalResolve = hasTemporalResolve;
+    this._lastPostProcessingState.smaa = !!pp.smaa && !hasTemporalResolve;
+    this._lastPostProcessingState.lut = hasLut;
     if (shouldUsePostProcessing) {
-      this._renderPass.camera = this._game.camera.activeCamera;
+      this._renderPass.camera = activeCamera;
       // Keep the first-person view model out of the full-screen post stack so
       // weapon/hand motion does not pay for bloom/SMAA passes every frame.
       this._viewModelRenderPass.enabled = false;
+      this._groundedGtaoPass.enabled = hasGroundedGtao;
       this._nearContactShadowsPass.enabled = hasNearContactShadows;
+      this._atmospherePass.enabled = hasAtmosphere;
       this._gameplayDistanceBlurPass.enabled = hasGameplayDistanceBlur;
       this._outlinePass.enabled = hasOutlineTargets;
       this._analyticSunHaloPass.enabled = hasAnalyticSunHalo;
       this._bloomPass.enabled = !!pp.bloom;
-      this._smaaPass.enabled = !!pp.smaa;
+      this._temporalResolvePass.enabled = hasTemporalResolve;
+      this._smaaPass.enabled = !!pp.smaa && !hasTemporalResolve;
+      this._lutPass.enabled = hasLut;
+      this._lutPass.intensity = runtimeTuning.lutIntensity;
       if (hasOutlineTargets) {
-        this._outlinePass.camera = this._game.camera.activeCamera as never;
+        this._outlinePass.camera = activeCamera as never;
         this._outlinePass.setOutlineTargets(this._game.entityManager.getOutlineTargets());
       } else {
         this._outlinePass.clearOutlineTargets();
       }
-      this._effectComposer.render();
+      try {
+        this._effectComposer.render();
+      } finally {
+        if (jitterApplied) {
+          this._clearTemporalJitter(activeCamera);
+        }
+      }
       if (hasOutlineTargets) {
         this._game.entityManager.clearOutlineTargets();
         this._outlinePass.clearOutlineTargets();
       }
       this._renderFirstPersonViewModel();
     } else {
-      this._renderer.render(this._scene, this._game.camera.activeCamera);
+      this._temporalResolvePass.markHistoryInvalid();
+      try {
+        this._renderer.render(this._scene, activeCamera);
+      } finally {
+        if (jitterApplied) {
+          this._clearTemporalJitter(activeCamera);
+        }
+      }
       this._renderFirstPersonViewModel();
     }
     this._renderScreenOverlays();
@@ -756,9 +961,33 @@ export default class Renderer {
     });
   }
 
+  private _setBaseEnvironmentTexture(texture: Texture | null): void {
+    if (this._baseEnvironmentTexture === texture) {
+      return;
+    }
+    this._baseEnvironmentTexture = texture;
+    this._temporalResolvePass.markHistoryInvalid();
+    this._updateSceneEnvironmentTexture();
+  }
+
+  private _setEnvironmentOverrideTexture(texture: Texture | null): void {
+    if (this._environmentOverrideTexture === texture) {
+      return;
+    }
+    this._environmentOverrideTexture = texture;
+    this._temporalResolvePass.markHistoryInvalid();
+    this._updateSceneEnvironmentTexture();
+  }
+
+  private _updateSceneEnvironmentTexture(): void {
+    const environmentTexture = this._environmentOverrideTexture ?? this._baseEnvironmentTexture;
+    this._scene.environment = environmentTexture;
+    this._viewModelScene.environment = environmentTexture;
+  }
+
   private _disposeSkyVisuals(): void {
-    this._scene.environment = null;
-    this._viewModelScene.environment = null;
+    this._setEnvironmentOverrideTexture(null);
+    this._setBaseEnvironmentTexture(null);
     this._disposeProceduralSkyEnvironment();
 
     if (this._skyboxMesh) {
@@ -907,8 +1136,7 @@ export default class Renderer {
     );
 
     this._proceduralSkyEnvironmentRenderTarget = nextRenderTarget;
-    this._scene.environment = nextRenderTarget.texture;
-    this._viewModelScene.environment = nextRenderTarget.texture;
+    this._setBaseEnvironmentTexture(nextRenderTarget.texture);
 
     if (previousRenderTarget && previousRenderTarget !== nextRenderTarget) {
       previousRenderTarget.dispose();
@@ -1010,6 +1238,12 @@ export default class Renderer {
     this._directionalShadowCascadeNearLight.intensity = useCascades ? directionalIntensity : 0;
     this._directionalShadowCascadeFarLight.intensity = useCascades ? directionalIntensity : 0;
     this._directionalViewModelLight.intensity = directionalIntensity;
+
+    const lightingLevel = this._ambientLight.intensity * 0.68 + directionalIntensity * 0.32;
+    this._renderer.toneMappingExposure = Math.max(
+      0.92,
+      Math.min(1.16, 1.06 - lightingLevel * 0.06 + flashIntensity * 0.03),
+    );
   }
 
   private _updateLightningFlash(lightningIntensity: number): void {
@@ -1135,8 +1369,7 @@ export default class Renderer {
     this._skyboxMesh.matrixWorldAutoUpdate = false;
 
     this._scene.add(this._skyboxMesh);
-    this._scene.environment = skyboxTexture;
-    this._viewModelScene.environment = skyboxTexture;
+    this._setBaseEnvironmentTexture(skyboxTexture);
 
     // Apply current target color immediately to avoid race condition
     // when skyboxIntensity arrives in same packet as skyboxUri
@@ -1493,6 +1726,9 @@ export default class Renderer {
     this._adaptiveResolutionScale = 1;
     this._adaptiveResolutionDownHoldS = 0;
     this._adaptiveResolutionUpHoldS = 0;
+    this._temporalResolvePass.markHistoryInvalid();
+    this._temporalJitterIndex = 1;
+    this._setEnvironmentOverrideTexture(null);
     this._applyRenderResolution();
     this._clampTargetFogNearAndFar();
     this._setupFog();
@@ -1536,6 +1772,7 @@ export default class Renderer {
     this._scene.add(this._directionalShadowCascadeFarLight.target);
     this._scene.add(this._directionalSceneLight);
     this._scene.add(this._directionalSceneLight.target);
+    this._scene.add(this._localReflectionCubeCamera);
 
     this._viewModelScene.add(this._ambientViewModelLight);
     this._viewModelScene.add(this._directionalViewModelLight);
@@ -1721,6 +1958,8 @@ export default class Renderer {
     this._renderer.info.autoReset = false;
     this._renderer.localClippingEnabled = false;
     this._renderer.shadowMap.enabled = true;
+    this._renderer.toneMapping = ACESFilmicToneMapping;
+    this._renderer.toneMappingExposure = 1.04;
     // Be explicit about output space; this is cheap and avoids surprises across Three.js versions.
     this._renderer.outputColorSpace = SRGBColorSpace;
     this._applyShadowSettings();
@@ -2227,6 +2466,225 @@ export default class Renderer {
       blurSettings.maxNearRadiusPx * this._adaptiveResolutionScale,
       blurSettings.maxFarRadiusPx * this._adaptiveResolutionScale,
     );
+  }
+
+  private _shouldUseTemporalResolve(): boolean {
+    const taa = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.taa;
+    return !!taa?.enabled
+      && this._game.camera.isGameCameraActive
+      && !this._game.camera.isOrthographicGameCameraActive
+      && !MobileManager.isMobile;
+  }
+
+  private _applyTemporalJitter(camera: PerspectiveCamera | OrthographicCamera): boolean {
+    if (!(camera instanceof PerspectiveCamera) || !this._shouldUseTemporalResolve()) {
+      return false;
+    }
+
+    this._renderer.getDrawingBufferSize(vec2);
+    const jitterIndex = this._temporalJitterIndex++;
+    const jitterX = (halton(jitterIndex, 2) - 0.5) * TEMPORAL_JITTER_SCALE;
+    const jitterY = (halton(jitterIndex, 3) - 0.5) * TEMPORAL_JITTER_SCALE;
+    camera.setViewOffset(vec2.width, vec2.height, jitterX, jitterY, vec2.width, vec2.height);
+    camera.updateProjectionMatrix();
+    return true;
+  }
+
+  private _clearTemporalJitter(camera: PerspectiveCamera | OrthographicCamera): void {
+    if (!(camera instanceof PerspectiveCamera)) {
+      return;
+    }
+
+    camera.clearViewOffset();
+    camera.updateProjectionMatrix();
+  }
+
+  private _updateTemporalResolvePass(): void {
+    const runtimeTuning = this._resolveRuntimeTuningState();
+    const activeCamera = this._game.camera.activeCamera;
+    const enabled = this._shouldUseTemporalResolve()
+      && activeCamera instanceof PerspectiveCamera;
+
+    if (!enabled) {
+      this._temporalResolvePass.enabled = false;
+      this._temporalResolvePass.markHistoryInvalid();
+      return;
+    }
+
+    this._temporalResolvePass.enabled = true;
+    this._temporalResolvePass.setHistoryWeight(runtimeTuning.temporalHistoryWeight);
+    this._temporalResolvePass.setSharpenStrength(runtimeTuning.temporalSharpenStrength);
+    this._temporalResolvePass.setCamera({
+      far: activeCamera.far,
+      near: activeCamera.near,
+      projectionMatrix: activeCamera.projectionMatrix,
+      projectionMatrixInverse: activeCamera.projectionMatrixInverse,
+      matrixWorld: activeCamera.matrixWorld,
+      matrixWorldInverse: activeCamera.matrixWorldInverse,
+      isPerspectiveCamera: true,
+    });
+  }
+
+  private _shouldUseGroundedGtao(): boolean {
+    const gtao = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.gtao;
+    return !!gtao?.enabled
+      && this._game.camera.isGameCameraActive
+      && !this._game.camera.isOrthographicGameCameraActive
+      && !MobileManager.isMobile;
+  }
+
+  private _updateGroundedGtaoPass(): void {
+    const runtimeTuning = this._resolveRuntimeTuningState();
+    const activeCamera = this._game.camera.activeCamera;
+    const enabled = this._shouldUseGroundedGtao()
+      && runtimeTuning.gtaoStrength > 0.001
+      && runtimeTuning.gtaoWorldRadius > 0.001
+      && runtimeTuning.gtaoMaxDistance > 0.001;
+
+    if (!enabled) {
+      this._groundedGtaoPass.enabled = false;
+      return;
+    }
+
+    this._groundedGtaoPass.enabled = true;
+    this._groundedGtaoPass.setStrength(runtimeTuning.gtaoStrength);
+    this._groundedGtaoPass.setWorldRadius(runtimeTuning.gtaoWorldRadius, runtimeTuning.gtaoMaxDistance);
+    this._groundedGtaoPass.setCamera({
+      far: activeCamera.far,
+      near: activeCamera.near,
+      projectionMatrixInverse: activeCamera.projectionMatrixInverse,
+      isPerspectiveCamera: activeCamera instanceof PerspectiveCamera,
+    });
+  }
+
+  private _shouldUseAtmospherePass(): boolean {
+    const atmosphere = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.atmosphere;
+    return !!atmosphere?.enabled
+      && this._game.camera.isGameCameraActive
+      && !this._game.camera.isOrthographicGameCameraActive
+      && !this._game.chunkManager.inLiquidBlock(this._game.camera.activeCamera.position);
+  }
+
+  private _updateAtmospherePass(frameDeltaS: number): void {
+    const atmosphere = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.atmosphere;
+    const activeCamera = this._game.camera.activeCamera;
+    const enabled = this._shouldUseAtmospherePass();
+
+    if (!enabled) {
+      this._atmospherePass.enabled = false;
+      return;
+    }
+
+    this._atmospherePass.enabled = true;
+    this._atmospherePass.setCamera({
+      far: activeCamera.far,
+      near: activeCamera.near,
+      projectionMatrixInverse: activeCamera.projectionMatrixInverse,
+      matrixWorld: activeCamera.matrixWorld,
+      isPerspectiveCamera: activeCamera instanceof PerspectiveCamera,
+    });
+    this._atmospherePass.setAtmosphere({
+      cloudCoverage: this._proceduralSkySettings?.cloudCoverage ?? 0.12,
+      cloudOpacity: this._proceduralSkySettings?.cloudOpacity ?? 0.0,
+      cloudScale: this._proceduralSkySettings?.cloudScale ?? 0.24,
+      cloudShadowStrength: atmosphere?.cloudShadowStrength ?? 0.12,
+      cloudSpeed: this._proceduralSkySettings?.cloudSpeed ?? 0.01,
+      fogColor: this.fogColor,
+      heightFogDensity: atmosphere?.heightFogDensity ?? 0.016,
+      heightFogHeightFalloff: atmosphere?.heightFogHeightFalloff ?? 0.062,
+      sunColor: this._directionalSceneLight.color,
+      sunDirection: this._skySunDirection ?? this._sunDirection,
+      sunInscatterStrength: atmosphere?.sunInscatterStrength ?? 0.2,
+      sunIntensity: this._directionalSceneLight.intensity,
+      time: this._proceduralSkyTimeS + frameDeltaS,
+      windDirection: this._proceduralSkySettings?.windDirection ?? vec2.set(1, 0.16),
+      worldSeed: this._proceduralSkyWorldSeed,
+    });
+  }
+
+  private _shouldUseLocalReflectionProbe(): boolean {
+    const config = this._game.settingsManager.qualityPerfTradeoff.localReflections;
+    return !!config?.enabled
+      && this._game.camera.isGameCameraActive
+      && !this._game.camera.isOrthographicGameCameraActive
+      && !MobileManager.isMobile;
+  }
+
+  private _ensureLocalReflectionProbeSize(size: number): void {
+    if (this._localReflectionCubeRenderTarget.width === size) {
+      return;
+    }
+
+    this._localReflectionCubeRenderTarget.setSize(size, size);
+    if (this._localReflectionEnvironmentRenderTarget) {
+      this._localReflectionEnvironmentRenderTarget.dispose();
+      this._localReflectionEnvironmentRenderTarget = null;
+    }
+  }
+
+  private _updateLocalReflectionProbe(frameDeltaS: number): void {
+    const config = this._game.settingsManager.qualityPerfTradeoff.localReflections;
+    const runtimeTuning = this._resolveRuntimeTuningState();
+    const activeCamera = this._game.camera.activeCamera;
+    const enabled = this._shouldUseLocalReflectionProbe()
+      && activeCamera instanceof PerspectiveCamera
+      && !this._game.chunkManager.inLiquidBlock(activeCamera.position);
+
+    if (!enabled) {
+      this._setEnvironmentOverrideTexture(null);
+      this._localReflectionUpdateCooldownS = 0;
+      return;
+    }
+
+    Chunk.worldPositionToGlobalCoordinate(activeCamera.position, vec3e);
+    const openSkyAmount = this._game.skyDistanceVolumeManager.getSkyLightBrightnessByGlobalCoordinate(vec3e);
+    if (openSkyAmount > runtimeTuning.localReflectionMaxSkyExposure) {
+      this._setEnvironmentOverrideTexture(null);
+      this._localReflectionUpdateCooldownS = 0;
+      return;
+    }
+
+    this._ensureLocalReflectionProbeSize(config?.textureSize ?? 128);
+    this._localReflectionUpdateCooldownS = Math.max(0, this._localReflectionUpdateCooldownS - frameDeltaS);
+
+    const positionDelta = runtimeTuning.localReflectionPositionDelta;
+    const needsRefresh = !Number.isFinite(this._lastLocalReflectionProbePosition.x)
+      || this._lastLocalReflectionProbePosition.distanceToSquared(activeCamera.position) >= positionDelta * positionDelta
+      || this._localReflectionUpdateCooldownS <= 0
+      || this._localReflectionEnvironmentRenderTarget === null;
+
+    if (!needsRefresh) {
+      this._setEnvironmentOverrideTexture(this._localReflectionEnvironmentRenderTarget?.texture ?? null);
+      return;
+    }
+
+    const previousRenderTarget = this._renderer.getRenderTarget();
+    const previousAutoClear = this._renderer.autoClear;
+    const previousShadowAutoUpdate = this._renderer.shadowMap.autoUpdate;
+
+    this._setEnvironmentOverrideTexture(null);
+    this._localReflectionCubeCamera.position.copy(activeCamera.position);
+    this._localReflectionCubeCamera.updateMatrixWorld();
+
+    try {
+      this._renderer.autoClear = true;
+      this._renderer.shadowMap.autoUpdate = false;
+      this._localReflectionCubeCamera.update(this._renderer, this._scene);
+    } finally {
+      this._renderer.setRenderTarget(previousRenderTarget);
+      this._renderer.autoClear = previousAutoClear;
+      this._renderer.shadowMap.autoUpdate = previousShadowAutoUpdate;
+    }
+
+    const previousEnvironmentRenderTarget = this._localReflectionEnvironmentRenderTarget;
+    this._localReflectionEnvironmentRenderTarget = this._pmremGenerator.fromCubemap(this._localReflectionCubeRenderTarget.texture);
+    if (previousEnvironmentRenderTarget) {
+      previousEnvironmentRenderTarget.dispose();
+    }
+
+    this._lastLocalReflectionProbePosition.copy(activeCamera.position);
+    this._localReflectionUpdateCooldownS = runtimeTuning.localReflectionUpdateIntervalS;
+    this._setEnvironmentOverrideTexture(this._localReflectionEnvironmentRenderTarget.texture);
   }
 
   private _shouldUseDirectionalShadowCascades(): boolean {

@@ -1625,7 +1625,7 @@ export class EnvironmentController {
     // (undocumented)
     get minute(): number;
     get preset(): EnvironmentPreset;
-    setPreset(preset: EnvironmentPreset): void;
+    setPreset(preset: EnvironmentPreset, weatherPresetOverride?: EnvironmentWeatherPreset | null, proceduralSkyUri?: string): void;
     // (undocumented)
     setTimeMs(timeMs: number): void;
     // (undocumented)

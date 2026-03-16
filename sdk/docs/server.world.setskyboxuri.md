@@ -42,7 +42,7 @@ string
 
 </td><td>
 
-The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`<!-- -->, and precipitation can be overridden with `?precip=rain|snow`<!-- -->.
+The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`<!-- -->, and precipitation can be overridden with `?precip=rain|snow`<!-- -->. Legacy aliases `skyboxes/partly-cloudy`<!-- -->, `skyboxes/sunset`<!-- -->, and `skyboxes/night` are upgraded to matching procedural sky presets.
 
 \*\*Side effects:\*\* Emits `WorldEvent.SET_SKYBOX_URI`<!-- -->.
 

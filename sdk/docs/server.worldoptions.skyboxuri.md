@@ -4,7 +4,7 @@
 
 ## WorldOptions.skyboxUri property
 
-The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`<!-- -->.
+The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`<!-- -->. Legacy aliases `skyboxes/partly-cloudy`<!-- -->, `skyboxes/sunset`<!-- -->, and `skyboxes/night` are automatically upgraded to matching procedural sky presets.
 
 **Signature:**
 

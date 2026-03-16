@@ -4,7 +4,7 @@
 
 ## WorldOptions.environment property
 
-Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds.
+Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds and the legacy `skyboxes/partly-cloudy`<!-- -->, `skyboxes/sunset`<!-- -->, and `skyboxes/night` aliases.
 
 **Signature:**
 

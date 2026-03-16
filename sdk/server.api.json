@@ -25346,6 +25346,27 @@
                 },
                 {
                   "kind": "Content",
+                  "text": ", weatherPresetOverride?: "
+                },
+                {
+                  "kind": "Reference",
+                  "text": "EnvironmentWeatherPreset",
+                  "canonicalReference": "server!EnvironmentWeatherPreset:type"
+                },
+                {
+                  "kind": "Content",
+                  "text": " | null"
+                },
+                {
+                  "kind": "Content",
+                  "text": ", proceduralSkyUri?: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "string"
+                },
+                {
+                  "kind": "Content",
                   "text": "): "
                 },
                 {
@@ -25359,8 +25380,8 @@
               ],
               "isStatic": false,
               "returnTypeTokenRange": {
-                "startIndex": 3,
-                "endIndex": 4
+                "startIndex": 8,
+                "endIndex": 9
               },
               "releaseTag": "Public",
               "isProtected": false,
@@ -25373,6 +25394,22 @@
                     "endIndex": 2
                   },
                   "isOptional": false
+                },
+                {
+                  "parameterName": "weatherPresetOverride",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 3,
+                    "endIndex": 5
+                  },
+                  "isOptional": true
+                },
+                {
+                  "parameterName": "proceduralSkyUri",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 6,
+                    "endIndex": 7
+                  },
+                  "isOptional": true
                 }
               ],
               "isOptional": false,
@@ -65454,7 +65491,7 @@
             {
               "kind": "Method",
               "canonicalReference": "server!World#setSkyboxUri:member(1)",
-              "docComment": "/**\n * Sets the skybox URI for the world.\n *\n * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`.\n *\n * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.\n *\n * **Category:** Core\n */\n",
+              "docComment": "/**\n * Sets the skybox URI for the world.\n *\n * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`. Legacy aliases `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` are upgraded to matching procedural sky presets.\n *\n * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.\n *\n * **Category:** Core\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",
@@ -68019,7 +68056,7 @@
             {
               "kind": "PropertySignature",
               "canonicalReference": "server!WorldOptions#environment:member",
-              "docComment": "/**\n * Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds.\n */\n",
+              "docComment": "/**\n * Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds and the legacy `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` aliases.\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",
@@ -68270,7 +68307,7 @@
             {
               "kind": "PropertySignature",
               "canonicalReference": "server!WorldOptions#skyboxUri:member",
-              "docComment": "/**\n * The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`.\n */\n",
+              "docComment": "/**\n * The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`. Legacy aliases `skyboxes/partly-cloudy`, `skyboxes/sunset`, and `skyboxes/night` are automatically upgraded to matching procedural sky presets.\n */\n",
               "excerptTokens": [
                 {
                   "kind": "Content",

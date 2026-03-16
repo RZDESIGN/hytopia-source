@@ -11,6 +11,7 @@ import {
   InstancedMesh,
   Mesh,
   MeshBasicMaterial,
+  MeshPhysicalMaterial,
   MeshStandardMaterial,
   NearestFilter,
   NoBlending,
@@ -32,6 +33,7 @@ import {
   GLTFParser,
 } from 'three/addons/loaders/GLTFLoader.js';
 import EmissiveMeshBasicMaterial, { type ShaderProcessor } from './EmissiveMeshBasicMaterial';
+import EmissiveMeshHeroMaterial, { HERO_PHYSICAL_USER_DATA_KEY } from './EmissiveMeshHeroMaterial';
 // TODO: Honestly I don't want to have dependency with Entity from GLTFManager...
 import Entity from '../entities/Entity';
 import { updateAABB } from '../three/utils';
@@ -95,6 +97,8 @@ const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
 const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
 const MATRIX4_COMPONENT_COUNT = 16;
 
+type ManagedLitMaterial = EmissiveMeshBasicMaterial | EmissiveMeshHeroMaterial;
+
 // Working variables
 const opaqueClonedMeshes: Mesh[] = [];
 const transparentClonedMeshes: Mesh[] = [];
@@ -112,7 +116,7 @@ class InstancedMeshBasicMaterial extends EmissiveMeshBasicMaterial {
   private _game: Game;
   private _instancedTextureEnabled: boolean = false;
 
-  constructor(source: EmissiveMeshBasicMaterial, game: Game) {
+  constructor(source: ManagedLitMaterial, game: Game) {
     super();
     this.copy(source);
     this._game = game;
@@ -392,6 +396,22 @@ class InstancedMeshEx extends InstancedMesh {
 // 
 // This plugin normalizes loaded glTF materials onto the engine's lit material wrapper
 // so imported assets can participate in real lighting and shadow maps.
+function shouldUseHeroPhysicalMaterial(sourceMaterial: MeshStandardMaterial | MeshBasicMaterial): boolean {
+  if (sourceMaterial.userData?.[HERO_PHYSICAL_USER_DATA_KEY] === true || sourceMaterial.userData?.heroPhysical === true) {
+    return true;
+  }
+
+  if (!(sourceMaterial instanceof MeshPhysicalMaterial)) {
+    return false;
+  }
+
+  return sourceMaterial.clearcoat > 0.001
+    || sourceMaterial.transmission > 0.001
+    || sourceMaterial.iridescence > 0.001
+    || sourceMaterial.anisotropy > 0.001
+    || sourceMaterial.sheen > 0.001;
+}
+
 class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
   private _parser: GLTFParser;
   public name = 'HYTOPIA_ALPHA_BLENDING_AND_CLIPPING';
@@ -400,10 +420,12 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
     this._parser = parser;
   }
 
-  async loadMaterial(index: number): Promise<EmissiveMeshBasicMaterial> {
+  async loadMaterial(index: number): Promise<ManagedLitMaterial> {
     // material can be MeshBasicMaterial if the glTF material is with unlit extension.
     const sourceMaterial = await this._parser.loadMaterial(index) as MeshStandardMaterial | MeshBasicMaterial;
-    const material = new EmissiveMeshBasicMaterial();
+    const material = shouldUseHeroPhysicalMaterial(sourceMaterial)
+      ? new EmissiveMeshHeroMaterial()
+      : new EmissiveMeshBasicMaterial();
 
     if (sourceMaterial instanceof MeshStandardMaterial) {
       material.copy(sourceMaterial);
@@ -714,8 +736,8 @@ export default class GLTFManager {
     return cloneBuckets;
   }
 
-  private _getMeshMaterials(mesh: Mesh): EmissiveMeshBasicMaterial[] {
-    return (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as EmissiveMeshBasicMaterial[];
+  private _getMeshMaterials(mesh: Mesh): ManagedLitMaterial[] {
+    return (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as ManagedLitMaterial[];
   }
 
   private _isMeshTransparent(mesh: Mesh): boolean {
@@ -734,8 +756,8 @@ export default class GLTFManager {
     materialIndex: number,
   ): {
     sourceMesh: Mesh;
-    sourceMaterial: EmissiveMeshBasicMaterial;
-    clonedMaterial: EmissiveMeshBasicMaterial;
+    sourceMaterial: ManagedLitMaterial;
+    clonedMaterial: ManagedLitMaterial;
   } {
     const sourceMesh = this._clonedMeshToSourceMesh.get(clonedMesh);
     if (!sourceMesh) {
@@ -759,14 +781,14 @@ export default class GLTFManager {
   private _replaceClonedMaterialAt(
     clonedMesh: Mesh,
     materialIndex: number,
-    material: EmissiveMeshBasicMaterial,
+    material: ManagedLitMaterial,
   ): void {
     if (!Array.isArray(clonedMesh.material)) {
       clonedMesh.material = material;
       return;
     }
 
-    const nextMaterials = clonedMesh.material.slice() as EmissiveMeshBasicMaterial[];
+    const nextMaterials = clonedMesh.material.slice() as ManagedLitMaterial[];
     nextMaterials[materialIndex] = material;
     clonedMesh.material = nextMaterials;
   }
@@ -851,8 +873,8 @@ export default class GLTFManager {
   }
 
   private _materialMatchesSource(
-    clonedMaterial: EmissiveMeshBasicMaterial,
-    sourceMaterial: EmissiveMeshBasicMaterial,
+    clonedMaterial: ManagedLitMaterial,
+    sourceMaterial: ManagedLitMaterial,
   ): boolean {
     return clonedMaterial.transparent === sourceMaterial.transparent
       && clonedMaterial.opacity === sourceMaterial.opacity
@@ -880,9 +902,9 @@ export default class GLTFManager {
       return true;
     }
 
-    const nextMaterials = clonedMesh.material.slice() as EmissiveMeshBasicMaterial[];
+    const nextMaterials = clonedMesh.material.slice() as ManagedLitMaterial[];
     nextMaterials[materialIndex] = sourceMaterial;
-    const sourceMaterials = sourceMesh.material as EmissiveMeshBasicMaterial[];
+    const sourceMaterials = sourceMesh.material as ManagedLitMaterial[];
     const allShared = nextMaterials.length === sourceMaterials.length
       && nextMaterials.every((material, index) => material === sourceMaterials[index]);
 
@@ -891,7 +913,7 @@ export default class GLTFManager {
     return true;
   }
 
-  public ensureOwnMaterial(clonedMesh: Mesh, materialIndex: number = 0): EmissiveMeshBasicMaterial {
+  public ensureOwnMaterial(clonedMesh: Mesh, materialIndex: number = 0): ManagedLitMaterial {
     const { sourceMaterial, clonedMaterial } = this._getMaterialPair(clonedMesh, materialIndex);
 
     if (clonedMaterial !== sourceMaterial) {
@@ -1045,7 +1067,9 @@ export default class GLTFManager {
 
         const cloneBuckets = this._getOrCreateCloneBuckets(entry, sourceMesh);
 
-        const skipInstancing = Array.isArray(sourceMesh.material) || Array.isArray(clonedMesh.material);
+        const skipInstancing = Array.isArray(sourceMesh.material)
+          || Array.isArray(clonedMesh.material)
+          || this._getMeshMaterials(sourceMesh).some(material => material instanceof EmissiveMeshHeroMaterial);
 
         if (!skipInstancing) {
           const desiredCapacity = this._getInstancedMeshCapacity(cloneBuckets.all.size + 1);
@@ -1058,9 +1082,9 @@ export default class GLTFManager {
             const createdInstancedMeshes = !instancedMeshPairs;
 
             if (createdInstancedMeshes) {
-              opaqueMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as EmissiveMeshBasicMaterial, this._game);
+              opaqueMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as ManagedLitMaterial, this._game);
               opaqueMaterial.transparent = false;
-              transparentMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as EmissiveMeshBasicMaterial, this._game);
+              transparentMaterial = new InstancedMeshBasicMaterial(sourceMesh.material as ManagedLitMaterial, this._game);
               transparentMaterial.transparent = true;
               entry.sourceToInstancedMeshUsageState.set(sourceMesh, this._createInstancedMeshUsageState());
               GLTFStats.instancedMeshCount++;
@@ -1082,7 +1106,7 @@ export default class GLTFManager {
 
         this._registerClonedMesh(entry, sourceMesh, clonedMesh);
 
-        if (!skipInstancing && entry.sourceToInstancedMeshes.has(sourceMesh) && !(clonedMesh.material as EmissiveMeshBasicMaterial).transparent) {
+        if (!skipInstancing && entry.sourceToInstancedMeshes.has(sourceMesh) && !(clonedMesh.material as ManagedLitMaterial).transparent) {
           this._setClonedMeshDefaultLayerEnabled(clonedMesh, false);
         }
       }
