@@ -4,9 +4,9 @@
 
 ## EnvironmentController class
 
-Drives a world's day/night lighting and procedural weather state.
+Drives a world's environment lighting and procedural sky state.
 
-Use for: quickly enabling a Minecraft-style moving sun, dynamic ambient/fog, and procedural sky weather on any world. Do NOT use for: biome-specific precipitation audio or gameplay reactions; keep those in your game code via `onWeatherPresetChange`<!-- -->.
+Use for: quickly applying fixed day/night/weather presets to any procedural sky world, or opting into the legacy moving day/night cycle with `mode: 'cycle'`<!-- -->. Do NOT use for: biome-specific precipitation audio or gameplay reactions; keep those in your game code.
 
 \*\*Category:\*\* Core
 
@@ -113,6 +113,29 @@ number
 </td></tr>
 <tr><td>
 
+[preset](./server.environmentcontroller.preset.md)
+
+
+</td><td>
+
+`readonly`
+
+
+</td><td>
+
+[EnvironmentPreset](./server.environmentpreset.md)
+
+
+</td><td>
+
+The currently selected fixed environment preset.
+
+\*\*Category:\*\* Core
+
+
+</td></tr>
+<tr><td>
+
 [timeMs](./server.environmentcontroller.timems.md)
 
 
@@ -147,6 +170,10 @@ number
 
 </td><td>
 
+The current procedural sky weather preset.
+
+\*\*Category:\*\* Core
+
 
 </td></tr>
 </tbody></table>
@@ -178,6 +205,22 @@ Description
 
 
 </td><td>
+
+
+</td></tr>
+<tr><td>
+
+[setPreset(preset)](./server.environmentcontroller.setpreset.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Applies a fixed environment preset and disables the moving day/night cycle.
+
+\*\*Category:\*\* Core
 
 
 </td></tr>

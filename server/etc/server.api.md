@@ -1624,6 +1624,8 @@ export class EnvironmentController {
     get hour(): number;
     // (undocumented)
     get minute(): number;
+    get preset(): EnvironmentPreset;
+    setPreset(preset: EnvironmentPreset): void;
     // (undocumented)
     setTimeMs(timeMs: number): void;
     // (undocumented)
@@ -1634,9 +1636,11 @@ export class EnvironmentController {
     get timeMs(): number;
     // (undocumented)
     update(): void;
-    // (undocumented)
     get weatherPreset(): EnvironmentWeatherPreset;
 }
+
+// @public (undocumented)
+export type EnvironmentControllerMode = 'preset' | 'cycle';
 
 // @public (undocumented)
 export type EnvironmentControllerOptions = {
@@ -1652,8 +1656,10 @@ export type EnvironmentControllerOptions = {
     maxDirectionalLightIntensity?: number;
     minAmbientLightIntensity?: number;
     minDirectionalLightIntensity?: number;
+    mode?: EnvironmentControllerMode;
     nightSkyboxIntensity?: number;
     onWeatherPresetChange?: (world: World, weatherPreset: EnvironmentWeatherPreset) => void;
+    preset?: EnvironmentPreset;
     proceduralSkyUri?: string;
     startTimeMs?: number;
     sunBaseHeight?: number;
@@ -1662,6 +1668,9 @@ export type EnvironmentControllerOptions = {
     weatherEnabled?: boolean;
     weatherSeed?: number;
 };
+
+// @public (undocumented)
+export type EnvironmentPreset = 'daytime' | 'nighttime' | 'sunset' | 'raining' | 'snowing' | 'storming';
 
 // @public (undocumented)
 export type EnvironmentWeatherPreset = 'clear' | 'cloudy' | 'overcast' | 'storm';

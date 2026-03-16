@@ -3,7 +3,7 @@ import {
   DoubleSide,
   FrontSide,
   Matrix4,
-  MeshPhongMaterial,
+  MeshStandardMaterial,
   ShaderMaterial,
   Texture,
   Vector3,
@@ -17,31 +17,40 @@ import { applyDirectionalShadowEdgeFade } from '../three/directionalShadowFade';
 
 const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
 const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
-const BLOCK_OUTGOING_LIGHT_LINE = 'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + reflectedLight.directSpecular + reflectedLight.indirectSpecular + totalEmissiveRadiance;';
+const BLOCK_OUTGOING_LIGHT_LINES = [
+  'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + reflectedLight.directSpecular + reflectedLight.indirectSpecular + totalEmissiveRadiance;',
+  'vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;',
+];
 
 function applyBlockColorPunch(fragmentShader: string): string {
-  if (fragmentShader.includes('blockHighlight') || !fragmentShader.includes(BLOCK_OUTGOING_LIGHT_LINE)) {
+  if (fragmentShader.includes('blockHighlight')) {
     return fragmentShader;
   }
 
-  return fragmentShader.replace(
-    BLOCK_OUTGOING_LIGHT_LINE,
-    `
-      vec3 outgoingLight = reflectedLight.directDiffuse * 1.06
-        + reflectedLight.indirectDiffuse * 0.9
-        + reflectedLight.directSpecular * 0.92
-        + reflectedLight.indirectSpecular * 0.85
-        + totalEmissiveRadiance;
+  for (const outgoingLightLine of BLOCK_OUTGOING_LIGHT_LINES) {
+    if (fragmentShader.includes(outgoingLightLine)) {
+      return fragmentShader.replace(
+        outgoingLightLine,
+        `
+          vec3 outgoingLight = reflectedLight.directDiffuse * 1.06
+            + reflectedLight.indirectDiffuse * 0.9
+            + reflectedLight.directSpecular * 0.92
+            + reflectedLight.indirectSpecular * 0.85
+            + totalEmissiveRadiance;
 
-      float blockLuma = dot( outgoingLight, vec3( 0.2126, 0.7152, 0.0722 ) );
-      float blockHighlight = smoothstep( 0.24, 0.95, blockLuma );
-      outgoingLight = mix( vec3( blockLuma ), outgoingLight, 1.08 + blockHighlight * 0.06 );
-      outgoingLight *= 1.02 + blockHighlight * 0.05;
-    `,
-  );
+          float blockLuma = dot( outgoingLight, vec3( 0.2126, 0.7152, 0.0722 ) );
+          float blockHighlight = smoothstep( 0.24, 0.95, blockLuma );
+          outgoingLight = mix( vec3( blockLuma ), outgoingLight, 1.08 + blockHighlight * 0.06 );
+          outgoingLight *= 1.02 + blockHighlight * 0.05;
+        `,
+      );
+    }
+  }
+
+  return fragmentShader;
 }
 
-class MeshBlockMaterial extends MeshPhongMaterial {
+class MeshBlockMaterial extends MeshStandardMaterial {
   constructor(_game: Game, transparent: boolean, hasLightLevel: boolean = true) {
     super({
       map: null, // set later,
@@ -49,8 +58,9 @@ class MeshBlockMaterial extends MeshPhongMaterial {
       vertexColors: true,
       transparent,
       alphaTest: ALPHA_TEST_THRESHOLD,
-      shininess: hasLightLevel ? 18 : 12,
-      specular: hasLightLevel ? new Color(0.08, 0.08, 0.08) : new Color(0.04, 0.04, 0.04),
+      envMapIntensity: hasLightLevel ? 0.4 : 0.2,
+      metalness: hasLightLevel ? 0.05 : 0.0,
+      roughness: hasLightLevel ? 0.84 : 0.94,
     });
 
     this.name = hasLightLevel ? 'MeshBlockMaterial' : 'MeshBlockMaterialNonLit';

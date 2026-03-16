@@ -15,6 +15,7 @@ import {
 } from './ChunkConstants';
 import ChunkStats from './ChunkStats';
 import type { BlocksBufferGeometryData } from '../blocks/BlockConstants';
+import { isAngleVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import Game from '../Game';
 import { updateAABB } from '../three/utils';
 
@@ -144,6 +145,7 @@ export default class ChunkMeshManager {
 
     mesh.castShadow = castShadow;
     mesh.receiveShadow = receiveShadow;
+    mesh.frustumCulled = isAngleVisibilityCullingEnabled();
     updateAABB(mesh);
 
     return mesh;

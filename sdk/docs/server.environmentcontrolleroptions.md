@@ -4,6 +4,7 @@
 
 ## EnvironmentControllerOptions type
 
+
 **Signature:**
 
 ```typescript
@@ -20,8 +21,10 @@ export type EnvironmentControllerOptions = {
     maxDirectionalLightIntensity?: number;
     minAmbientLightIntensity?: number;
     minDirectionalLightIntensity?: number;
+    mode?: EnvironmentControllerMode;
     nightSkyboxIntensity?: number;
     onWeatherPresetChange?: (world: World, weatherPreset: EnvironmentWeatherPreset) => void;
+    preset?: EnvironmentPreset;
     proceduralSkyUri?: string;
     startTimeMs?: number;
     sunBaseHeight?: number;
@@ -31,5 +34,5 @@ export type EnvironmentControllerOptions = {
     weatherSeed?: number;
 };
 ```
-**References:** [RgbColor](./server.rgbcolor.md)<!-- -->, [World](./server.world.md)<!-- -->, [EnvironmentWeatherPreset](./server.environmentweatherpreset.md)
+**References:** [RgbColor](./server.rgbcolor.md)<!-- -->, [EnvironmentControllerMode](./server.environmentcontrollermode.md)<!-- -->, [World](./server.world.md)<!-- -->, [EnvironmentWeatherPreset](./server.environmentweatherpreset.md)<!-- -->, [EnvironmentPreset](./server.environmentpreset.md)
 

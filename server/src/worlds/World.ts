@@ -105,7 +105,7 @@ export interface WorldOptions {
   /** The intensity of the skybox brightness for the world. 0 is black, 1 is full brightness, 1+ is brighter. */
   skyboxIntensity?: number;
 
-  /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the dynamic sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain`. */
+  /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`. */
   skyboxUri: string;
 
   /** An arbitrary identifier tag of the world. Useful for your own logic */
@@ -117,7 +117,7 @@ export interface WorldOptions {
   /** The gravity vector for the world. */
   gravity?: Vector3Like;
 
-  /** Enables the built-in day/night and procedural weather controller. Defaults to enabled for `skyboxes/procedural` worlds. */
+  /** Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds. */
   environment?: boolean | EnvironmentControllerOptions;
 }
 
@@ -809,7 +809,7 @@ export default class World extends EventRouter implements protocol.Serializable 
   /**
    * Sets the skybox URI for the world.
    *
-   * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the dynamic sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain`.
+   * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`.
    *
    * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.
    *

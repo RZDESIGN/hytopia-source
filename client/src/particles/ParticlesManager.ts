@@ -3,6 +3,7 @@ import ParticleEmitter from './ParticleEmitter';
 import { type ParticleEmitterID } from './ParticleEmitterConstants';
 import { ParticleEmitterCoreOptions } from './ParticleEmitterCore';
 import { RendererEventType, type RendererEventPayload } from '../core/Renderer';
+import { isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
 import { type DeserializedParticleEmitter } from '../network/Deserializer';
@@ -39,7 +40,14 @@ export default class ParticleEmitterManager {
       particleEmitter.update(payload.frameDeltaS);
     }
 
-    if (!this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled) {
+    const distanceVisibilityCullingEnabled = isDistanceVisibilityCullingEnabled(
+      this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled,
+    );
+
+    if (!distanceVisibilityCullingEnabled) {
+      this._particleEmitters.forEach((particleEmitter) => {
+        particleEmitter.setVisible(true);
+      });
       return;
     }
 

@@ -13,6 +13,7 @@ import {
   WebGLProgramParametersWithUniforms,
 } from 'three';
 import EmissiveMeshBasicMaterial from '../gltf/EmissiveMeshBasicMaterial';
+import { isAngleVisibilityCullingEnabled, isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import EntityStats from './EntityStats';
 import type StaticEntity from './StaticEntity';
@@ -124,7 +125,11 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
     this._game = game;
     this._uniforms = {
       [UNIFORM_VIEW_DISTANCE_SQUARED]: {
-        get value(): number { return Math.pow(game.renderer.viewDistance, 2); },
+        get value(): number {
+          return isDistanceVisibilityCullingEnabled(game.settingsManager.qualityPerfTradeoff.viewDistance.enabled)
+            ? Math.pow(game.renderer.viewDistance, 2)
+            : Number.MAX_SAFE_INTEGER;
+        },
       },
       [UNIFORM_RAW_AMBIENT_LIGHT_COLOR]: { value: game.renderer.ambientLight.color },
       [UNIFORM_AMBIENT_LIGHT_INTENSITY]: {
@@ -149,7 +154,7 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
   private _setupGeometry(): void {
     this.matrixAutoUpdate = false;
     this.matrixWorldAutoUpdate = false;
-    this.frustumCulled = true;
+    this.frustumCulled = isAngleVisibilityCullingEnabled();
     this.castShadow = true;
     this.receiveShadow = true;
     updateAABB(this);

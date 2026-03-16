@@ -3,6 +3,7 @@ import {
   Color,
   DoubleSide,
   DynamicDrawUsage,
+  InstancedBufferAttribute,
   InstancedMesh,
   Matrix4,
   MeshBasicMaterial,
@@ -18,7 +19,7 @@ import {
 export const PROCEDURAL_SKYBOX_URI_PREFIX = 'skyboxes/procedural';
 
 export type ProceduralSkyPreset = 'clear' | 'cloudy' | 'overcast' | 'storm';
-export type ProceduralSkyPrecipitation = 'none' | 'rain';
+export type ProceduralSkyPrecipitation = 'none' | 'rain' | 'snow';
 
 export type ProceduralSkySettings = {
   cloudCoverage: number;
@@ -105,10 +106,142 @@ const precipitationPlaneRight = new Vector3();
 const precipitationPlaneUp = new Vector3();
 const precipitationToCamera = new Vector3();
 const precipitationLightningColor = new Color(0xf6fbff);
+const precipitationSnowColor = new Color(0xf8fbff);
 const precipitationGridAnchor = new Vector2();
 const precipitationFallbackAxisA = new Vector3(1, 0, 0);
 const precipitationFallbackAxisB = new Vector3(0, 0, 1);
+const surfaceImpactMatrix = new Matrix4();
+const surfaceImpactPosition = new Vector3();
+const surfaceImpactQuaternion = new Quaternion();
+const surfaceImpactScale = new Vector3();
+const rainSurfaceImpactColor = new Color(0xe6f4ff);
+const snowSurfaceImpactColor = new Color(0xfafcff);
 const STORM_LIGHTNING_BUCKET_S = 4;
+
+type WeatherPrecipitationProfile = {
+  activeCountBase: number;
+  activeCountIntensity: number;
+  activeCountMin: number;
+  anchorStep: number;
+  colorBlend: number;
+  flashBlend: number;
+  heightBase: number;
+  heightIntensity: number;
+  lengthScale: number;
+  lengthScaleBase: number;
+  lengthScaleIntensity: number;
+  opacityBase: number;
+  opacityIntensity: number;
+  opacityLightning: number;
+  radiusBase: number;
+  radiusIntensity: number;
+  speedMultiplier: number;
+  verticalSpanBase: number;
+  verticalSpanIntensity: number;
+  widthScale: number;
+  windDriftBase: number;
+  windDriftIntensity: number;
+  windTiltBase: number;
+  windTiltIntensity: number;
+};
+
+type WeatherSurfaceImpactProfile = {
+  color: Color;
+  growth: number;
+  lifeS: number;
+  maxSpawnPerFrame: number;
+  opacity: number;
+  sampleRadius: number;
+  scaleBase: number;
+  scaleVariance: number;
+  softness: number;
+  spawnRateBase: number;
+  spawnRateIntensity: number;
+};
+
+const WEATHER_PRECIPITATION_PROFILES: Record<Exclude<ProceduralSkyPrecipitation, 'none'>, WeatherPrecipitationProfile> = {
+  rain: {
+    activeCountBase: 0.44,
+    activeCountIntensity: 0.56,
+    activeCountMin: 52,
+    anchorStep: 5,
+    colorBlend: 0,
+    flashBlend: 0.55,
+    heightBase: 6,
+    heightIntensity: 4.5,
+    lengthScale: 1,
+    lengthScaleBase: 0.92,
+    lengthScaleIntensity: 0.36,
+    opacityBase: 0.05,
+    opacityIntensity: 0.15,
+    opacityLightning: 0.05,
+    radiusBase: 12,
+    radiusIntensity: 7,
+    speedMultiplier: 1,
+    verticalSpanBase: 16,
+    verticalSpanIntensity: 12,
+    widthScale: 1,
+    windDriftBase: 0.06,
+    windDriftIntensity: 0.05,
+    windTiltBase: 0.22,
+    windTiltIntensity: 0.12,
+  },
+  snow: {
+    activeCountBase: 0.62,
+    activeCountIntensity: 0.38,
+    activeCountMin: 88,
+    anchorStep: 4,
+    colorBlend: 0.78,
+    flashBlend: 0.22,
+    heightBase: 5,
+    heightIntensity: 3.5,
+    lengthScale: 0.16,
+    lengthScaleBase: 0.9,
+    lengthScaleIntensity: 0.2,
+    opacityBase: 0.10,
+    opacityIntensity: 0.18,
+    opacityLightning: 0.03,
+    radiusBase: 10,
+    radiusIntensity: 6,
+    speedMultiplier: 0.22,
+    verticalSpanBase: 11,
+    verticalSpanIntensity: 8,
+    widthScale: 2.6,
+    windDriftBase: 0.11,
+    windDriftIntensity: 0.09,
+    windTiltBase: 0.34,
+    windTiltIntensity: 0.18,
+  },
+};
+
+const WEATHER_SURFACE_IMPACT_PROFILES: Record<Exclude<ProceduralSkyPrecipitation, 'none'>, WeatherSurfaceImpactProfile> = {
+  rain: {
+    color: rainSurfaceImpactColor,
+    growth: 1.6,
+    lifeS: 0.34,
+    maxSpawnPerFrame: 2,
+    opacity: 0.12,
+    sampleRadius: 9,
+    scaleBase: 0.24,
+    scaleVariance: 0.12,
+    softness: 0,
+    spawnRateBase: 2.5,
+    spawnRateIntensity: 5.5,
+  },
+  snow: {
+    color: snowSurfaceImpactColor,
+    growth: 0.85,
+    lifeS: 0.62,
+    maxSpawnPerFrame: 2,
+    opacity: 0.09,
+    sampleRadius: 8,
+    scaleBase: 0.18,
+    scaleVariance: 0.10,
+    softness: 1,
+    spawnRateBase: 1.2,
+    spawnRateIntensity: 2.8,
+  },
+};
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -116,6 +249,22 @@ function clamp01(value: number): number {
 
 function wrapCentered(value: number, span: number): number {
   return ((((value % span) + span) % span) - span * 0.5);
+}
+
+function getWeatherPrecipitationProfile(precipitation: ProceduralSkyPrecipitation): WeatherPrecipitationProfile | null {
+  if (precipitation === 'none') {
+    return null;
+  }
+
+  return WEATHER_PRECIPITATION_PROFILES[precipitation];
+}
+
+function getWeatherSurfaceImpactProfile(precipitation: ProceduralSkyPrecipitation): WeatherSurfaceImpactProfile | null {
+  if (precipitation === 'none') {
+    return null;
+  }
+
+  return WEATHER_SURFACE_IMPACT_PROFILES[precipitation];
 }
 
 function parseNumberParam(params: URLSearchParams, key: string): number | null {
@@ -182,7 +331,7 @@ function isProceduralSkyPreset(value: string | null): value is ProceduralSkyPres
 }
 
 function isProceduralSkyPrecipitation(value: string | null): value is ProceduralSkyPrecipitation {
-  return value === 'none' || value === 'rain';
+  return value === 'none' || value === 'rain' || value === 'snow';
 }
 
 export function parseProceduralSkySettings(skyboxUri: string): ProceduralSkySettings | null {
@@ -628,34 +777,39 @@ export class WeatherPrecipitationSystem {
     color: Color,
     intensity: number,
     lightningIntensity: number,
+    precipitation: ProceduralSkyPrecipitation,
   ): void {
+    const profile = getWeatherPrecipitationProfile(precipitation);
     const material = this._mesh.material as MeshBasicMaterial;
     const visibleIntensity = clamp01(intensity);
     const flashIntensity = clamp01(lightningIntensity);
 
-    if (visibleIntensity <= 0.001) {
+    if (!profile || visibleIntensity <= 0.001) {
       this._mesh.visible = false;
       this._mesh.count = 0;
       return;
     }
 
     this._mesh.visible = true;
-    material.color.copy(color);
-    material.color.lerp(precipitationLightningColor, flashIntensity * 0.55);
-    material.opacity = 0.05 + visibleIntensity * 0.15 + flashIntensity * 0.05;
+    material.color.copy(color).lerp(precipitationSnowColor, profile.colorBlend);
+    material.color.lerp(precipitationLightningColor, flashIntensity * profile.flashBlend);
+    material.opacity = profile.opacityBase + visibleIntensity * profile.opacityIntensity + flashIntensity * profile.opacityLightning;
 
-    const radius = 12 + visibleIntensity * 7;
+    const radius = profile.radiusBase + visibleIntensity * profile.radiusIntensity;
     const diameter = radius * 2;
-    const verticalSpan = 16 + visibleIntensity * 12;
-    const activeCount = Math.max(52, Math.floor(this._maxParticles * (0.44 + visibleIntensity * 0.56)));
+    const verticalSpan = profile.verticalSpanBase + visibleIntensity * profile.verticalSpanIntensity;
+    const activeCount = Math.max(
+      profile.activeCountMin,
+      Math.floor(this._maxParticles * (profile.activeCountBase + visibleIntensity * profile.activeCountIntensity)),
+    );
     const normalizedWind = windDirection.clone();
     if (normalizedWind.lengthSq() < 0.0001) {
       normalizedWind.set(1, 0);
     } else {
       normalizedWind.normalize();
     }
-    const windDrift = 0.06 + visibleIntensity * 0.05;
-    const anchorStep = 5;
+    const windDrift = profile.windDriftBase + visibleIntensity * profile.windDriftIntensity;
+    const anchorStep = profile.anchorStep;
 
     precipitationGridAnchor.set(
       Math.round(cameraPosition.x / anchorStep) * anchorStep,
@@ -663,17 +817,18 @@ export class WeatherPrecipitationSystem {
     );
 
     precipitationFallDirection.set(
-      normalizedWind.x * (0.22 + visibleIntensity * 0.12),
+      normalizedWind.x * (profile.windTiltBase + visibleIntensity * profile.windTiltIntensity),
       -1,
-      normalizedWind.y * (0.22 + visibleIntensity * 0.12),
+      normalizedWind.y * (profile.windTiltBase + visibleIntensity * profile.windTiltIntensity),
     ).normalize();
     precipitationPlaneUp.copy(precipitationFallDirection);
 
     for (let i = 0; i < activeCount; i++) {
-      const fallPhase = timeS * this._speeds[i] + this._offsetsY[i] * verticalSpan;
+      const fallSpeed = this._speeds[i] * profile.speedMultiplier;
+      const fallPhase = timeS * fallSpeed + this._offsetsY[i] * verticalSpan;
       const x = wrapCentered((this._offsetsX[i] - 0.5) * diameter + fallPhase * normalizedWind.x * windDrift, diameter);
       const z = wrapCentered((this._offsetsZ[i] - 0.5) * diameter + fallPhase * normalizedWind.y * windDrift, diameter);
-      const y = 6 + visibleIntensity * 4.5 - (fallPhase % verticalSpan);
+      const y = profile.heightBase + visibleIntensity * profile.heightIntensity - (fallPhase % verticalSpan);
 
       precipitationPosition.set(precipitationGridAnchor.x + x, cameraPosition.y + y, precipitationGridAnchor.y + z);
       precipitationToCamera.copy(cameraPosition).sub(precipitationPosition);
@@ -700,12 +855,277 @@ export class WeatherPrecipitationSystem {
       precipitationRotationMatrix.makeBasis(precipitationPlaneRight, precipitationPlaneUp, precipitationPlaneNormal);
       precipitationQuaternion.setFromRotationMatrix(precipitationRotationMatrix);
 
-      precipitationScale.set(this._widths[i], this._lengths[i] * (0.92 + visibleIntensity * 0.36), 1);
+      precipitationScale.set(
+        this._widths[i] * profile.widthScale,
+        this._lengths[i] * profile.lengthScale * (profile.lengthScaleBase + visibleIntensity * profile.lengthScaleIntensity),
+        1,
+      );
       precipitationMatrix.compose(precipitationPosition, precipitationQuaternion, precipitationScale);
       this._mesh.setMatrixAt(i, precipitationMatrix);
     }
 
     this._mesh.count = activeCount;
     this._mesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+export class WeatherSurfaceImpactSystem {
+  private _activeCount = 0;
+  private _agesS: Float32Array;
+  private _baseScales: Float32Array;
+  private _growths: Float32Array;
+  private _instanceOpacityAttribute: InstancedBufferAttribute;
+  private _instanceProgressAttribute: InstancedBufferAttribute;
+  private _instanceSoftnessAttribute: InstancedBufferAttribute;
+  private _instanceTintAttribute: InstancedBufferAttribute;
+  private _lifetimesS: Float32Array;
+  private _maxImpacts: number;
+  private _mesh: InstancedMesh;
+  private _opacities: Float32Array;
+  private _positionsX: Float32Array;
+  private _positionsY: Float32Array;
+  private _positionsZ: Float32Array;
+  private _progresses: Float32Array;
+  private _softnesses: Float32Array;
+  private _spawnAccumulator = 0;
+  private _tints: Float32Array;
+
+  constructor(maxImpacts: number = 18) {
+    this._maxImpacts = maxImpacts;
+    this._agesS = new Float32Array(maxImpacts);
+    this._baseScales = new Float32Array(maxImpacts);
+    this._growths = new Float32Array(maxImpacts);
+    this._lifetimesS = new Float32Array(maxImpacts);
+    this._opacities = new Float32Array(maxImpacts);
+    this._positionsX = new Float32Array(maxImpacts);
+    this._positionsY = new Float32Array(maxImpacts);
+    this._positionsZ = new Float32Array(maxImpacts);
+    this._progresses = new Float32Array(maxImpacts);
+    this._softnesses = new Float32Array(maxImpacts);
+    this._tints = new Float32Array(maxImpacts * 3);
+
+    const geometry = new PlaneGeometry(1, 1);
+    geometry.rotateX(-Math.PI * 0.5);
+    this._instanceOpacityAttribute = new InstancedBufferAttribute(this._opacities, 1);
+    this._instanceProgressAttribute = new InstancedBufferAttribute(this._progresses, 1);
+    this._instanceSoftnessAttribute = new InstancedBufferAttribute(this._softnesses, 1);
+    this._instanceTintAttribute = new InstancedBufferAttribute(this._tints, 3);
+    this._instanceOpacityAttribute.setUsage(DynamicDrawUsage);
+    this._instanceProgressAttribute.setUsage(DynamicDrawUsage);
+    this._instanceSoftnessAttribute.setUsage(DynamicDrawUsage);
+    this._instanceTintAttribute.setUsage(DynamicDrawUsage);
+    geometry.setAttribute('instanceOpacity', this._instanceOpacityAttribute);
+    geometry.setAttribute('instanceProgress', this._instanceProgressAttribute);
+    geometry.setAttribute('instanceSoftness', this._instanceSoftnessAttribute);
+    geometry.setAttribute('instanceTint', this._instanceTintAttribute);
+
+    const material = new ShaderMaterial({
+      vertexShader: `
+        attribute float instanceOpacity;
+        attribute float instanceProgress;
+        attribute float instanceSoftness;
+        attribute vec3 instanceTint;
+
+        varying float vOpacity;
+        varying float vProgress;
+        varying float vSoftness;
+        varying vec3 vTint;
+        varying vec2 vUv;
+
+        void main() {
+          vOpacity = instanceOpacity;
+          vProgress = instanceProgress;
+          vSoftness = instanceSoftness;
+          vTint = instanceTint;
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying float vOpacity;
+        varying float vProgress;
+        varying float vSoftness;
+        varying vec3 vTint;
+        varying vec2 vUv;
+
+        void main() {
+          vec2 centeredUv = vUv * 2.0 - 1.0;
+          float dist = length(centeredUv);
+          float ring = smoothstep(0.18, 0.0, abs(dist - 0.58));
+          float disc = pow(max(1.0 - smoothstep(0.0, 0.95, dist), 0.0), 1.7);
+          float shape = mix(ring, disc, vSoftness);
+          float fade = 1.0 - smoothstep(0.0, 1.0, vProgress);
+          float alpha = shape * fade * vOpacity;
+
+          if (alpha <= 0.002) {
+            discard;
+          }
+
+          gl_FragColor = vec4(vTint, alpha);
+          #include <tonemapping_fragment>
+          #include <colorspace_fragment>
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      blending: NormalBlending,
+    });
+
+    this._mesh = new InstancedMesh(geometry, material, maxImpacts);
+    this._mesh.frustumCulled = false;
+    this._mesh.renderOrder = -994;
+    this._mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+    this._mesh.matrixAutoUpdate = false;
+    this._mesh.matrixWorldAutoUpdate = false;
+    this._mesh.count = 0;
+    this._mesh.visible = false;
+    this._mesh.updateMatrix();
+  }
+
+  public get mesh(): InstancedMesh {
+    return this._mesh;
+  }
+
+  public dispose(): void {
+    this._mesh.geometry.dispose();
+    (this._mesh.material as ShaderMaterial).dispose();
+  }
+
+  public update(
+    frameDeltaS: number,
+    precipitation: ProceduralSkyPrecipitation,
+    intensity: number,
+    spawnImpact: (sampleRadius: number) => { x: number; y: number; z: number } | null,
+  ): void {
+    this._advance(frameDeltaS);
+
+    const profile = getWeatherSurfaceImpactProfile(precipitation);
+    const visibleIntensity = clamp01(intensity);
+
+    if (!profile || visibleIntensity <= 0.02) {
+      this._spawnAccumulator = 0;
+      this._syncMesh();
+      return;
+    }
+
+    this._spawnAccumulator = Math.min(
+      this._spawnAccumulator + frameDeltaS * (profile.spawnRateBase + visibleIntensity * profile.spawnRateIntensity),
+      this._maxImpacts,
+    );
+
+    let spawnedThisFrame = 0;
+    while (this._spawnAccumulator >= 1 && spawnedThisFrame < profile.maxSpawnPerFrame) {
+      this._spawnAccumulator -= 1;
+      spawnedThisFrame++;
+
+      const impact = spawnImpact(profile.sampleRadius);
+      if (!impact) {
+        continue;
+      }
+
+      this._spawn(impact.x, impact.y, impact.z, profile);
+    }
+
+    this._syncMesh();
+  }
+
+  private _advance(frameDeltaS: number): void {
+    for (let i = 0; i < this._activeCount;) {
+      this._agesS[i] += frameDeltaS;
+      if (this._agesS[i] >= this._lifetimesS[i]) {
+        this._copySlot(this._activeCount - 1, i);
+        this._activeCount--;
+        continue;
+      }
+
+      i++;
+    }
+  }
+
+  private _copySlot(fromIndex: number, toIndex: number): void {
+    if (fromIndex === toIndex) {
+      return;
+    }
+
+    this._agesS[toIndex] = this._agesS[fromIndex];
+    this._baseScales[toIndex] = this._baseScales[fromIndex];
+    this._growths[toIndex] = this._growths[fromIndex];
+    this._lifetimesS[toIndex] = this._lifetimesS[fromIndex];
+    this._opacities[toIndex] = this._opacities[fromIndex];
+    this._positionsX[toIndex] = this._positionsX[fromIndex];
+    this._positionsY[toIndex] = this._positionsY[fromIndex];
+    this._positionsZ[toIndex] = this._positionsZ[fromIndex];
+    this._progresses[toIndex] = this._progresses[fromIndex];
+    this._softnesses[toIndex] = this._softnesses[fromIndex];
+
+    const fromTintOffset = fromIndex * 3;
+    const toTintOffset = toIndex * 3;
+    this._tints[toTintOffset] = this._tints[fromTintOffset];
+    this._tints[toTintOffset + 1] = this._tints[fromTintOffset + 1];
+    this._tints[toTintOffset + 2] = this._tints[fromTintOffset + 2];
+  }
+
+  private _findReplacementSlot(): number {
+    let oldestIndex = 0;
+    let oldestProgress = -1;
+
+    for (let i = 0; i < this._activeCount; i++) {
+      const progress = this._lifetimesS[i] <= 0 ? 1 : this._agesS[i] / this._lifetimesS[i];
+      if (progress > oldestProgress) {
+        oldestProgress = progress;
+        oldestIndex = i;
+      }
+    }
+
+    return oldestIndex;
+  }
+
+  private _spawn(x: number, y: number, z: number, profile: WeatherSurfaceImpactProfile): void {
+    const slot = this._activeCount < this._maxImpacts
+      ? this._activeCount++
+      : this._findReplacementSlot();
+    const tintOffset = slot * 3;
+
+    this._agesS[slot] = 0;
+    this._baseScales[slot] = profile.scaleBase + Math.random() * profile.scaleVariance;
+    this._growths[slot] = profile.growth;
+    this._lifetimesS[slot] = profile.lifeS * (0.92 + Math.random() * 0.18);
+    this._opacities[slot] = profile.opacity * (0.88 + Math.random() * 0.22);
+    this._positionsX[slot] = x;
+    this._positionsY[slot] = y;
+    this._positionsZ[slot] = z;
+    this._progresses[slot] = 0;
+    this._softnesses[slot] = profile.softness;
+    this._tints[tintOffset] = profile.color.r;
+    this._tints[tintOffset + 1] = profile.color.g;
+    this._tints[tintOffset + 2] = profile.color.b;
+  }
+
+  private _syncMesh(): void {
+    if (this._activeCount <= 0) {
+      this._mesh.visible = false;
+      this._mesh.count = 0;
+      return;
+    }
+
+    for (let i = 0; i < this._activeCount; i++) {
+      const progress = this._lifetimesS[i] <= 0 ? 1 : clamp01(this._agesS[i] / this._lifetimesS[i]);
+      this._progresses[i] = progress;
+
+      const currentScale = this._baseScales[i] * (1 + this._growths[i] * progress);
+      surfaceImpactPosition.set(this._positionsX[i], this._positionsY[i], this._positionsZ[i]);
+      surfaceImpactScale.set(currentScale, currentScale, currentScale);
+      surfaceImpactMatrix.compose(surfaceImpactPosition, surfaceImpactQuaternion, surfaceImpactScale);
+      this._mesh.setMatrixAt(i, surfaceImpactMatrix);
+    }
+
+    this._mesh.visible = true;
+    this._mesh.count = this._activeCount;
+    this._mesh.instanceMatrix.needsUpdate = true;
+    this._instanceOpacityAttribute.needsUpdate = true;
+    this._instanceProgressAttribute.needsUpdate = true;
+    this._instanceSoftnessAttribute.needsUpdate = true;
+    this._instanceTintAttribute.needsUpdate = true;
   }
 }

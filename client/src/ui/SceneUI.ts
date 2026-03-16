@@ -1,6 +1,7 @@
 import { Vector3 } from 'three';
 import SceneUIStats from './SceneUIStats';
 import { CSS2DObject } from '../three/CSS2DRenderer';
+import { isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import Game from '../Game';
 import type { Vector3Like } from 'three';
 import type { TemplateRenderer } from './globals/hytopia';
@@ -122,13 +123,15 @@ export default class SceneUI {
       const maxDistance = this._viewDistance;
       const maxDistanceSquared = maxDistance * maxDistance;
       const distanceSquared = this._position.distanceToSquared(activeCamera.position);
-      
-      // Skip scale and matrix calculation if beyond max distance
-      if (distanceSquared >= maxDistanceSquared) {
+
+      if (isDistanceVisibilityCullingEnabled() && distanceSquared >= maxDistanceSquared) {
         this._object.visible = false;
         return;
       } else {
-        const scale = 1 - distanceSquared / maxDistanceSquared;
+        const normalizedDistance = isDistanceVisibilityCullingEnabled()
+          ? distanceSquared / maxDistanceSquared
+          : Math.min(distanceSquared / maxDistanceSquared, 0.92);
+        const scale = Math.max(0.08, 1 - normalizedDistance);
         // Use scale3d for GPU compositing instead of scale
         const scaleStr = `scale3d(${scale}, ${scale}, 1)`;
         // Since updating styles can sometimes cause side effects even if the value doesn't change,

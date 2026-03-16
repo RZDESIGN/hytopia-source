@@ -74,7 +74,12 @@ export { default as EntityManager } from '@/worlds/entities/EntityManager';
 
 // EnvironmentController
 export { default as EnvironmentController } from '@/worlds/EnvironmentController';
-export type { EnvironmentControllerOptions, EnvironmentWeatherPreset } from '@/worlds/EnvironmentController';
+export type {
+  EnvironmentControllerMode,
+  EnvironmentControllerOptions,
+  EnvironmentPreset,
+  EnvironmentWeatherPreset,
+} from '@/worlds/EnvironmentController';
 
 // EntityModelAnimation
 export { default as EntityModelAnimation, EntityModelAnimationBlendMode, EntityModelAnimationEvent, EntityModelAnimationLoopMode, EntityModelAnimationState } from '@/worlds/entities/EntityModelAnimation';

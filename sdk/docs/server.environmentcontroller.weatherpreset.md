@@ -4,6 +4,10 @@
 
 ## EnvironmentController.weatherPreset property
 
+The current procedural sky weather preset.
+
+\*\*Category:\*\* Core
+
 **Signature:**
 
 ```typescript

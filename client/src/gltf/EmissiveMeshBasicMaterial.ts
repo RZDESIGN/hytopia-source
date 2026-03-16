@@ -1,7 +1,7 @@
 import {
   Color,
-  MeshPhongMaterial,
-  MeshPhongMaterialParameters,
+  MeshStandardMaterial,
+  MeshStandardMaterialParameters,
   Texture,
   WebGLProgramParametersWithUniforms,
   WebGLRenderer,
@@ -11,11 +11,11 @@ import { applyDirectionalShadowEdgeFade } from '../three/directionalShadowFade';
 export type ShaderProcessor = (params: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer) => void;
 
 // The legacy name is kept to avoid a wide rename across the client. The implementation
-// is now a lit Phong material so it can participate in real Three.js lighting/shadows.
-export default class EmissiveMeshBasicMaterial extends MeshPhongMaterial {
+// is now a lit PBR material so imported assets can participate in modern lighting/shadows.
+export default class EmissiveMeshBasicMaterial extends MeshStandardMaterial {
   private _shaderProcessors: ShaderProcessor[] = [];
 
-  constructor(parameters?: MeshPhongMaterialParameters & {
+  constructor(parameters?: MeshStandardMaterialParameters & {
     emissive?: Color | string | number;
     emissiveIntensity?: number;
     emissiveMap?: Texture | null;
@@ -76,7 +76,7 @@ export default class EmissiveMeshBasicMaterial extends MeshPhongMaterial {
     return new (this.constructor as typeof EmissiveMeshBasicMaterial)().copy(this) as this; // type-check hack
   }
 
-  copy(source: EmissiveMeshBasicMaterial): this {
+  copy(source: MeshStandardMaterial | EmissiveMeshBasicMaterial): this {
     super.copy(source);
     this.emissive.copy(source.emissive);
     this.emissiveIntensity = source.emissiveIntensity;

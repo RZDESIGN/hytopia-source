@@ -5313,12 +5313,12 @@ declare type EntitySchema = {
 declare const entitySchema: JSONSchemaType<EntitySchema>;
 
 /**
- * Drives a world's day/night lighting and procedural weather state.
+ * Drives a world's environment lighting and procedural sky state.
  *
- * Use for: quickly enabling a Minecraft-style moving sun, dynamic ambient/fog,
- * and procedural sky weather on any world.
+ * Use for: quickly applying fixed day/night/weather presets to any procedural sky world,
+ * or opting into the legacy moving day/night cycle with `mode: 'cycle'`.
  * Do NOT use for: biome-specific precipitation audio or gameplay reactions;
- * keep those in your game code via `onWeatherPresetChange`.
+ * keep those in your game code.
  *
  * **Category:** Core
  * @public
@@ -5336,8 +5336,10 @@ export declare class EnvironmentController {
     private _maxDirectionalLightIntensity;
     private _minAmbientLightIntensity;
     private _minDirectionalLightIntensity;
+    private _mode;
     private _nightSkyboxIntensity;
     private _onWeatherPresetChange;
+    private _preset;
     private _proceduralSkyUri;
     private _sunBaseHeight;
     private _sunHeightRange;
@@ -5352,8 +5354,25 @@ export declare class EnvironmentController {
     get hour(): number;
     get minute(): number;
     get timeMs(): number;
+    /**
+     * The currently selected fixed environment preset.
+     *
+     * **Category:** Core
+     */
+    get preset(): EnvironmentPreset;
+    /**
+     * The current procedural sky weather preset.
+     *
+     * **Category:** Core
+     */
     get weatherPreset(): EnvironmentWeatherPreset;
     setTimeMs(timeMs: number): void;
+    /**
+     * Applies a fixed environment preset and disables the moving day/night cycle.
+     *
+     * **Category:** Core
+     */
+    setPreset(preset: EnvironmentPreset): void;
     start(): void;
     stop(): void;
     dispose(): void;
@@ -5363,6 +5382,10 @@ export declare class EnvironmentController {
     private _calculateWeatherPreset;
 }
 
+/** @public */
+export declare type EnvironmentControllerMode = 'preset' | 'cycle';
+
+/** @public */
 export declare type EnvironmentControllerOptions = {
     autoStart?: boolean;
     clockIntervalMs?: number;
@@ -5376,8 +5399,10 @@ export declare type EnvironmentControllerOptions = {
     maxDirectionalLightIntensity?: number;
     minAmbientLightIntensity?: number;
     minDirectionalLightIntensity?: number;
+    mode?: EnvironmentControllerMode;
     nightSkyboxIntensity?: number;
     onWeatherPresetChange?: (world: World, weatherPreset: EnvironmentWeatherPreset) => void;
+    preset?: EnvironmentPreset;
     proceduralSkyUri?: string;
     startTimeMs?: number;
     sunBaseHeight?: number;
@@ -5387,6 +5412,10 @@ export declare type EnvironmentControllerOptions = {
     weatherSeed?: number;
 };
 
+/** @public */
+export declare type EnvironmentPreset = 'daytime' | 'nighttime' | 'sunset' | 'raining' | 'snowing' | 'storming';
+
+/** @public */
 export declare type EnvironmentWeatherPreset = 'clear' | 'cloudy' | 'overcast' | 'storm';
 
 /**
@@ -13073,7 +13102,7 @@ export declare class World extends EventRouter implements protocol.Serializable 
     /**
      * Sets the skybox URI for the world.
      *
-     * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the dynamic sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain`.
+     * @param skyboxUri - The cubemap URI of the skybox, or `skyboxes/procedural` for the procedural sky renderer. Weather presets can be selected with `?weather=cloudy|overcast|storm`, and precipitation can be overridden with `?precip=rain|snow`.
      *
      * **Side effects:** Emits `WorldEvent.SET_SKYBOX_URI`.
      *
@@ -13526,7 +13555,7 @@ export declare interface WorldOptions {
     name: string;
     /** The intensity of the skybox brightness for the world. 0 is black, 1 is full brightness, 1+ is brighter. */
     skyboxIntensity?: number;
-    /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the dynamic sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain`. */
+    /** The URI of the skybox cubemap for the world. Use `skyboxes/procedural` for the procedural sky renderer, optionally with `?weather=cloudy|overcast|storm` and `?precip=rain|snow`. */
     skyboxUri: string;
     /** An arbitrary identifier tag of the world. Useful for your own logic */
     tag?: string;
@@ -13534,7 +13563,7 @@ export declare interface WorldOptions {
     tickRate?: number;
     /** The gravity vector for the world. */
     gravity?: Vector3Like;
-    /** Enables the built-in day/night and procedural weather controller. Defaults to enabled for `skyboxes/procedural` worlds. */
+    /** Enables the built-in environment preset controller. Set `mode: 'cycle'` to opt into the legacy moving day/night weather cycle. Defaults to enabled for `skyboxes/procedural` worlds. */
     environment?: boolean | EnvironmentControllerOptions;
 }
 

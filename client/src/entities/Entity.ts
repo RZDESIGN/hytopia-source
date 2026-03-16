@@ -16,7 +16,7 @@ import {
   LoopRepeat,
   Mesh,
   MeshBasicMaterial,
-  MeshPhongMaterial,
+  MeshStandardMaterial,
   NormalAnimationBlendMode,
   Object3D,
   PropertyMixer,
@@ -62,6 +62,9 @@ const BLOB_SHADOW_MAX_GROUND_SCAN = 12;
 const ENTITY_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO = 0.58;
 const ENTITY_SHADOW_LOD_FOCUS_PADDING_RATIO = 0.2;
 const ENTITY_SHADOW_LOD_MIN_PROJECTED_RADIUS = 0.012;
+const ENTITY_SHADOW_LOD_HERO_MAX_CAMERA_DISTANCE_RATIO = 0.92;
+const ENTITY_SHADOW_LOD_HERO_FOCUS_PADDING_RATIO = 0.42;
+const ENTITY_SHADOW_LOD_HERO_FORCE_DISTANCE_RATIO = 0.78;
 
 // Working variables
 const corners: Vector3[] = new Array(8).fill(undefined).map(() => new Vector3());
@@ -2597,25 +2600,29 @@ export default class Entity {
     const shadowFocusCenter = this._game.renderer.directionalShadowFocusCenter;
     const directionalShadowDistance = this._game.renderer.directionalShadowDistance;
     const shadowCasterRadius = this._getShadowCasterRadius();
+    const isHeroEntity = !this._isEnvironmental;
 
     const dxCamera = this._entityRoot.position.x - cameraPosition.x;
     const dyCamera = this._entityRoot.position.y - cameraPosition.y;
     const dzCamera = this._entityRoot.position.z - cameraPosition.z;
     const distanceToCamera = Math.sqrt(dxCamera * dxCamera + dyCamera * dyCamera + dzCamera * dzCamera);
     const maxCasterDistance = Math.min(
-      this._game.renderer.viewDistance * ENTITY_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO,
-      directionalShadowDistance * 1.45 + shadowCasterRadius * 10,
+      this._game.renderer.viewDistance * (isHeroEntity ? ENTITY_SHADOW_LOD_HERO_MAX_CAMERA_DISTANCE_RATIO : ENTITY_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO),
+      directionalShadowDistance * (isHeroEntity ? 1.9 : 1.45) + shadowCasterRadius * (isHeroEntity ? 14 : 10),
     );
 
     const dxFocus = this._entityRoot.position.x - shadowFocusCenter.x;
     const dzFocus = this._entityRoot.position.z - shadowFocusCenter.z;
-    const focusRadius = directionalShadowDistance * (1 + ENTITY_SHADOW_LOD_FOCUS_PADDING_RATIO) + shadowCasterRadius;
+    const focusRadius = directionalShadowDistance * (
+      1 + (isHeroEntity ? ENTITY_SHADOW_LOD_HERO_FOCUS_PADDING_RATIO : ENTITY_SHADOW_LOD_FOCUS_PADDING_RATIO)
+    ) + shadowCasterRadius;
     const projectedRadius = shadowCasterRadius / Math.max(distanceToCamera, 1);
+    const withinHeroForceDistance = isHeroEntity && distanceToCamera <= directionalShadowDistance * ENTITY_SHADOW_LOD_HERO_FORCE_DISTANCE_RATIO;
     const shouldCastShadow = distanceToCamera <= maxCasterDistance
-      && (dxFocus * dxFocus + dzFocus * dzFocus) <= focusRadius * focusRadius
+      && (withinHeroForceDistance || (dxFocus * dxFocus + dzFocus * dzFocus) <= focusRadius * focusRadius)
       && (
         projectedRadius >= ENTITY_SHADOW_LOD_MIN_PROJECTED_RADIUS
-        || distanceToCamera <= directionalShadowDistance * 0.9
+        || distanceToCamera <= directionalShadowDistance * (isHeroEntity ? 1.2 : 0.9)
       );
 
     this._setShadowCastingEnabled(shouldCastShadow);
@@ -2848,7 +2855,7 @@ export default class Entity {
     this._needsWorldBoundingBoxUpdate = true;
   }
 
-  private _storeOriginalMaterialData(material: MeshBasicMaterial | MeshPhongMaterial | EmissiveMeshBasicMaterial): void {
+  private _storeOriginalMaterialData(material: MeshBasicMaterial | MeshStandardMaterial | EmissiveMeshBasicMaterial): void {
     // Materials may be shared across multiple meshes, and the original data might already
     // be stored at this point.
     if (!(ORIGINAL_MATERIAL_DATA in material.userData)) {
@@ -2865,7 +2872,7 @@ export default class Entity {
     }
   }
 
-  private _getOriginalMaterialData(material: MeshBasicMaterial | MeshPhongMaterial | EmissiveMeshBasicMaterial): OriginalMaterialData {
+  private _getOriginalMaterialData(material: MeshBasicMaterial | MeshStandardMaterial | EmissiveMeshBasicMaterial): OriginalMaterialData {
     if (!(ORIGINAL_MATERIAL_DATA in material.userData)) {
       throw new Error(`Missing original material data in Material: ${material.uuid}`);
     }

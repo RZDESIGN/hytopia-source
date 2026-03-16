@@ -3,6 +3,7 @@ import { ParticleEmitterID } from './ParticleEmitterConstants';
 import ParticleEmitterCore, { ParticleEmitterCoreOptions } from './ParticleEmitterCore';
 import Entity from '../entities/Entity';
 import { EntityId } from '../entities/EntityConstants';
+import { isAngleVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import Game from '../Game';
 import Assets from '../network/Assets';
 import type { CustomTextureWrapper } from '../textures/CustomTextureManager';
@@ -38,6 +39,7 @@ export default class ParticleEmitter {
     this._emitterCore = new ParticleEmitterCore(options.emitterCoreOptions || {});
     this._emitterCore.mesh.matrixAutoUpdate = false;
     this._emitterCore.mesh.matrixWorldAutoUpdate = false;
+    this._emitterCore.mesh.frustumCulled = isAngleVisibilityCullingEnabled();
 
     if (options.position) {
       this.setPosition(options.position);
@@ -133,7 +135,7 @@ export default class ParticleEmitter {
     // TODO: Enabling frustum culling may need to be done more carefully. For example,
     // if the position changes frequently or significantly, already emitted particles may
     // be unintentionally culled.
-    this._emitterCore.mesh.frustumCulled = attachedToEntityId === null;
+    this._emitterCore.mesh.frustumCulled = isAngleVisibilityCullingEnabled() && attachedToEntityId === null;
   }
 
   public setAttachedToEntityNodeName(attachedToEntityNodeName: string | null): void {

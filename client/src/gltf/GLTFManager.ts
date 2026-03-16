@@ -402,35 +402,42 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
 
   async loadMaterial(index: number): Promise<EmissiveMeshBasicMaterial> {
     // material can be MeshBasicMaterial if the glTF material is with unlit extension.
-    const pbrMaterial = await this._parser.loadMaterial(index) as MeshStandardMaterial | MeshBasicMaterial;
-    const isPBRMaterial = pbrMaterial instanceof MeshStandardMaterial;
-    const roughness = isPBRMaterial ? pbrMaterial.roughness : 0.85;
-    const metalness = isPBRMaterial ? pbrMaterial.metalness : 0;
+    const sourceMaterial = await this._parser.loadMaterial(index) as MeshStandardMaterial | MeshBasicMaterial;
+    const material = new EmissiveMeshBasicMaterial();
 
-    const material = new EmissiveMeshBasicMaterial({
-      alphaMap: pbrMaterial.alphaMap,
-      alphaTest: pbrMaterial.alphaTest,
-      aoMap: isPBRMaterial ? pbrMaterial.aoMap : null,
-      aoMapIntensity: isPBRMaterial ? pbrMaterial.aoMapIntensity : 1,
-      color: pbrMaterial.color,
-      depthWrite: pbrMaterial.depthWrite,
-      emissive: isPBRMaterial ? pbrMaterial.emissive : new Color(0x000000),
-      emissiveIntensity: isPBRMaterial ? pbrMaterial.emissiveIntensity : 1,
-      emissiveMap: isPBRMaterial ? pbrMaterial.emissiveMap : null,
-      lightMap: isPBRMaterial ? pbrMaterial.lightMap : null,
-      lightMapIntensity: isPBRMaterial ? pbrMaterial.lightMapIntensity : 1,
-      map: pbrMaterial.map,
-      name: pbrMaterial.name,
-      normalMap: isPBRMaterial ? pbrMaterial.normalMap : null,
-      normalScale: isPBRMaterial ? pbrMaterial.normalScale : undefined,
-      opacity: pbrMaterial.opacity,
-      shininess: Math.max(4, (1 - roughness) * 48),
-      side: pbrMaterial.side,
-      specular: new Color().setScalar(0.08 + metalness * 0.2),
-      transparent: Boolean(pbrMaterial.transparent),
-      userData: pbrMaterial.userData,
-      visible: pbrMaterial.visible,
-    });
+    if (sourceMaterial instanceof MeshStandardMaterial) {
+      material.copy(sourceMaterial);
+    } else {
+      material.alphaMap = sourceMaterial.alphaMap;
+      material.alphaTest = sourceMaterial.alphaTest;
+      material.blendDst = sourceMaterial.blendDst;
+      material.blendDstAlpha = sourceMaterial.blendDstAlpha;
+      material.blendEquation = sourceMaterial.blendEquation;
+      material.blendEquationAlpha = sourceMaterial.blendEquationAlpha;
+      material.blendSrc = sourceMaterial.blendSrc;
+      material.blendSrcAlpha = sourceMaterial.blendSrcAlpha;
+      material.blending = sourceMaterial.blending;
+      material.color.copy(sourceMaterial.color);
+      material.colorWrite = sourceMaterial.colorWrite;
+      material.depthTest = sourceMaterial.depthTest;
+      material.depthWrite = sourceMaterial.depthWrite;
+      material.dithering = sourceMaterial.dithering;
+      material.fog = sourceMaterial.fog;
+      material.map = sourceMaterial.map;
+      material.metalness = 0;
+      material.name = sourceMaterial.name;
+      material.opacity = sourceMaterial.opacity;
+      material.premultipliedAlpha = sourceMaterial.premultipliedAlpha;
+      material.roughness = 0.98;
+      material.shadowSide = sourceMaterial.shadowSide;
+      material.side = sourceMaterial.side;
+      material.toneMapped = sourceMaterial.toneMapped;
+      material.transparent = Boolean(sourceMaterial.transparent);
+      material.userData = sourceMaterial.userData;
+      material.vertexColors = sourceMaterial.vertexColors;
+      material.visible = sourceMaterial.visible;
+      material.wireframe = sourceMaterial.wireframe;
+    }
 
     // When Alpha Clipping (Alpha Test) is enabled, the glTF loader follows the
     // glTF spec and does not set transparent = true, meaning Alpha Blending
@@ -463,7 +470,7 @@ class GLTFAlphaBlendingAndClippingMaterialPlugin implements GLTFLoaderPlugin {
     }
 
     // Dispose the original source material since we're using the lit engine wrapper instead.
-    pbrMaterial.dispose();
+    sourceMaterial.dispose();
 
     return material;
   }

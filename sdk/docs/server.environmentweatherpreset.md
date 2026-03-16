@@ -4,6 +4,7 @@
 
 ## EnvironmentWeatherPreset type
 
+
 **Signature:**
 
 ```typescript

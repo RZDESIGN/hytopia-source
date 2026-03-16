@@ -15,6 +15,7 @@ import type { DeserializedBlock } from '../network/Deserializer';
 import type { NetworkManagerEventPayload } from '../network/NetworkEventPayloads';
 import { NetworkManagerEventType } from '../network/NetworkEvents';
 import { ClientSettingsEventType } from '../settings/SettingsManager';
+import { isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import {
   type ChunkWorkerBatchPromotionUpdateMessage,
   type ChunkWorkerChunkBatchBuildMessage,
@@ -157,7 +158,9 @@ export default class ChunkManager {
     ChunkStats.reset();
     this._expirePredictedBlocks(performance.now());
 
-    const viewDistanceEnabled = this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled;
+    const viewDistanceEnabled = isDistanceVisibilityCullingEnabled(
+      this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled,
+    );
     if (!viewDistanceEnabled) {
       if (this._wasViewDistanceEnabled !== false) {
         this._game.chunkMeshManager.addAllBatchMeshesToScene();

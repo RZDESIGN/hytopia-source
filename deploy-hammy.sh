@@ -9,6 +9,33 @@ echo "  Hammy HYTOPIA - Deploy All"
 echo "========================================="
 echo ""
 
+# --- Check npm auth ---
+if ! npm whoami &>/dev/null; then
+  echo "Not logged in to npm."
+  echo ""
+  echo "Set your token first:"
+  echo "  npm config set //registry.npmjs.org/:_authToken <your-token>"
+  echo ""
+  echo "Or log in interactively:"
+  echo "  npm login"
+  echo ""
+  exit 1
+fi
+NPM_USER=$(npm whoami)
+echo "Logged in to npm as: $NPM_USER"
+
+# --- Check Netlify auth ---
+if ! npx netlify-cli api listAccountsForUser &>/dev/null; then
+  echo "Not logged in to Netlify."
+  echo ""
+  echo "Log in first:"
+  echo "  npx netlify-cli login"
+  echo ""
+  exit 1
+fi
+echo "Netlify authenticated."
+echo ""
+
 # --- Determine version bump type ---
 BUMP="${1:-patch}"
 if [[ "$BUMP" != "patch" && "$BUMP" != "minor" && "$BUMP" != "major" ]]; then

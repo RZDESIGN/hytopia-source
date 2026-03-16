@@ -256,9 +256,9 @@ When to use: configuring visual and transform overrides for one or more model no
 
 </td><td>
 
-Drives a world's day/night lighting and procedural weather state.
+Drives a world's environment lighting and procedural sky state.
 
-Use for: quickly enabling a Minecraft-style moving sun, dynamic ambient/fog, and procedural sky weather on any world. Do NOT use for: biome-specific precipitation audio or gameplay reactions; keep those in your game code via `onWeatherPresetChange`<!-- -->.
+Use for: quickly applying fixed day/night/weather presets to any procedural sky world, or opting into the legacy moving day/night cycle with `mode: 'cycle'`<!-- -->. Do NOT use for: biome-specific precipitation audio or gameplay reactions; keep those in your game code.
 
 \*\*Category:\*\* Core
 
@@ -2347,10 +2347,31 @@ Use for: constructing an entity; choose `BlockEntityOptions` or `ModelEntityOpti
 </td></tr>
 <tr><td>
 
+[EnvironmentControllerMode](./server.environmentcontrollermode.md)
+
+
+</td><td>
+
+
+
+</td></tr>
+<tr><td>
+
 [EnvironmentControllerOptions](./server.environmentcontrolleroptions.md)
 
 
 </td><td>
+
+
+
+</td></tr>
+<tr><td>
+
+[EnvironmentPreset](./server.environmentpreset.md)
+
+
+</td><td>
+
 
 
 </td></tr>
@@ -2360,6 +2381,7 @@ Use for: constructing an entity; choose `BlockEntityOptions` or `ModelEntityOpti
 
 
 </td><td>
+
 
 
 </td></tr>

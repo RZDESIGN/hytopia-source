@@ -6,6 +6,7 @@ import LocalPredictionStats from './LocalPredictionStats';
 import StaticEntity from './StaticEntity';
 import StaticEntityManager from './StaticEntityManager';
 import { type RendererEventPayload, RendererEventType } from '../core/Renderer';
+import { isAngleVisibilityCullingEnabled, isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import EventRouter from '../events/EventRouter';
 import type Game from '../Game';
 import type { DeserializedEntity } from '../network/Deserializer';
@@ -511,7 +512,11 @@ export default class EntityManager {
     // Second pass: Apply view distance. 
     // To avoid subsequent updates for invisible entities, perform an early check
     // using the updated local position.
-    if (this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled) {
+    const distanceVisibilityCullingEnabled = isDistanceVisibilityCullingEnabled(
+      this._game.settingsManager.qualityPerfTradeoff.viewDistance.enabled,
+    );
+
+    if (distanceVisibilityCullingEnabled) {
       // View Distance handling. Also refer to the comment in ChunkManager
       const viewDistance = this._game.renderer.viewDistance;
       const viewDistanceSquared = viewDistance * viewDistance;
@@ -525,21 +530,30 @@ export default class EntityManager {
         }
       }
     } else {
-      // If ViewDistance can be toggled dynamically in the future, we need to
-      // make everything visible at the moment it switches to enabled.
-      EntityStats.inViewDistanceCount = this._entities.size;
+      EntityStats.inViewDistanceCount = dynamicEntities.length;
       for (let i = 0; i < dynamicEntities.length; i++) {
-        inViewDistanceDynamicEntities.push(dynamicEntities[i]);
+        const entity = dynamicEntities[i];
+        entity.visible = true;
+        inViewDistanceDynamicEntities.push(entity);
       }
     }
 
     // Third pass: Apply frustum culling
-    const camera = this._game.camera.activeCamera;
-    frustum.setFromProjectionMatrix(projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    if (isAngleVisibilityCullingEnabled()) {
+      const camera = this._game.camera.activeCamera;
+      frustum.setFromProjectionMatrix(projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
 
-    for (let i = 0; i < inViewDistanceDynamicEntities.length; i++) {
-      const entity = inViewDistanceDynamicEntities[i];
-      if (entity.applyFrustumCulling(frustum)) {
+      for (let i = 0; i < inViewDistanceDynamicEntities.length; i++) {
+        const entity = inViewDistanceDynamicEntities[i];
+        if (entity.applyFrustumCulling(frustum)) {
+          entity.applyShadowCasterLod();
+          visibleDynamicEntities.push(entity);
+        }
+      }
+    } else {
+      for (let i = 0; i < inViewDistanceDynamicEntities.length; i++) {
+        const entity = inViewDistanceDynamicEntities[i];
+        entity.visible = true;
         entity.applyShadowCasterLod();
         visibleDynamicEntities.push(entity);
       }

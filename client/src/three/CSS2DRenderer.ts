@@ -13,6 +13,7 @@ import {
   Vector2,
   Vector3,
 } from 'three';
+import { isAngleVisibilityCullingEnabled } from '../core/VisibilityCulling';
 
 // Working variables
 const tmpEl = document.createElement('div');
@@ -157,10 +158,11 @@ export class CSS2DRenderer {
     // whose edge is on-screen may be misclassified as off-screen. We should seek a
     // better method that balances performance and accuracy; if the overhead is not
     // significant, simply ignoring the x and y checks might be another option.
-    const visible =
-      (_vector.x >= -1.25 && _vector.x <= 1.25) &&
-      (_vector.y >= -1.25 && _vector.y <= 1.25) &&
-      (_vector.z >= -1 && _vector.z <= 1);
+    const visible = isAngleVisibilityCullingEnabled()
+      ? (_vector.x >= -1.25 && _vector.x <= 1.25) &&
+        (_vector.y >= -1.25 && _vector.y <= 1.25) &&
+        (_vector.z >= -1 && _vector.z <= 1)
+      : (_vector.z >= -1 && _vector.z <= 1);
 
     if (!visible) {
       this._hideObject(object);

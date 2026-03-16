@@ -17,6 +17,7 @@ import {
   Object3D,
   OrthographicCamera,
   PCFShadowMap,
+  PMREMGenerator,
   PlaneGeometry,
   PerspectiveCamera,
   Plane,
@@ -38,7 +39,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
+import { AnalyticSunHaloPass } from '../three/postprocessing/AnalyticSunHaloPass';
 import { GameplayDistanceBlurPass } from '../three/postprocessing/GameplayDistanceBlurPass';
+import { NearContactShadowsPass } from '../three/postprocessing/NearContactShadowsPass';
 import { WhiteCoreBloomPass } from '../three/postprocessing/WhiteCoreBloomPass';
 import { SelectiveOutlinePass } from '../three/postprocessing/SelectiveOutlinePass';
 import { WATER_SURFACE_Y_OFFSET } from '../blocks/BlockConstants';
@@ -57,9 +60,11 @@ import {
   getStormLightningIntensity,
   parseProceduralSkySettings,
   ProceduralSkyMaterial,
+  type ProceduralSkyPrecipitation,
   type ProceduralSkySettings,
   SquareSunMaterial,
   WeatherPrecipitationSystem,
+  WeatherSurfaceImpactSystem,
 } from './ProceduralSky';
 import MobileManager from '../mobile/MobileManager';
 
@@ -112,6 +117,28 @@ const WATER_REFLECTION_MAX_DISTANCE = 84;
 const WATER_REFLECTION_MIN_SCENE_COVERAGE = 0.18;
 const WORLD_FOG_VIEW_DISTANCE_BUFFER = 24;
 const PROCEDURAL_SKY_SETTINGS_BLEND_SPEED = 2.8;
+const GAMEPLAY_DISTANCE_BLUR_DISTANCE_SCALE = 0.82;
+const WEATHER_SURFACE_IMPACT_JITTER = 0.34;
+const WEATHER_SURFACE_IMPACT_SCAN_ABOVE = 4;
+const WEATHER_SURFACE_IMPACT_SCAN_BELOW = 18;
+const WEATHER_SURFACE_IMPACT_SKY_EXPOSURE_MIN = 0.7;
+const WEATHER_SURFACE_IMPACT_SOLID_Y_OFFSET = 0.018;
+const WEATHER_SURFACE_IMPACT_LIQUID_Y_OFFSET = 0.01;
+const WEATHER_SURFACE_IMPACT_SAMPLE_ATTEMPTS = 4;
+const DIRECTIONAL_SHADOW_CASCADE_NEAR_DISTANCE_RATIO = 0.52;
+const DIRECTIONAL_SHADOW_CASCADE_FAR_MAP_SIZE_RATIO = 0.75;
+const DIRECTIONAL_SHADOW_CASCADE_MIN_MAP_SIZE = 512;
+const NEAR_CONTACT_SHADOW_STRENGTH = 0.58;
+const PROCEDURAL_SKY_ENVIRONMENT_BASE_UPDATE_INTERVAL_S = MobileManager.isMobile ? 5.0 : 2.5;
+const PROCEDURAL_SKY_ENVIRONMENT_TRANSITION_UPDATE_INTERVAL_S = MobileManager.isMobile ? 1.5 : 0.5;
+const PROCEDURAL_SKY_ENVIRONMENT_BOX_SIZE = 24;
+const PROCEDURAL_SKY_ENVIRONMENT_FAR = 32;
+const PROCEDURAL_SKY_ENVIRONMENT_MOON_DISTANCE = 9.5;
+const PROCEDURAL_SKY_ENVIRONMENT_MOON_SIZE_RATIO = 120 / 840;
+const PROCEDURAL_SKY_ENVIRONMENT_NEAR = 0.1;
+const PROCEDURAL_SKY_ENVIRONMENT_SIZE = MobileManager.isMobile ? 64 : 128;
+const PROCEDURAL_SKY_ENVIRONMENT_SUN_DISTANCE = 10;
+const PROCEDURAL_SKY_ENVIRONMENT_SUN_SIZE_RATIO = 260 / 880;
 
 // Working variables
 const color = new Color();
@@ -121,7 +148,10 @@ const vec3b = new Vector3();
 const vec3c = new Vector3();
 const vec3d = new Vector3();
 const vec3e = new Vector3();
+const shadowSnapBasisA = new Vector3();
+const shadowSnapBasisB = new Vector3();
 const LIGHTNING_FLASH_COLOR = new Color(0.78, 0.84, 1);
+const WORLD_ORIGIN = new Vector3();
 const WORLD_UP = new Vector3(0, 1, 0);
 const WORLD_RIGHT = new Vector3(1, 0, 0);
 const waterReflectionRaycaster = new Raycaster();
@@ -251,17 +281,13 @@ function blendProceduralSkySettings(
   current.precipitationIntensity += (target.precipitationIntensity - current.precipitationIntensity) * alpha;
   current.storminess += (target.storminess - current.storminess) * alpha;
   current.windDirection.lerp(target.windDirection, alpha);
-
-  if (target.precipitation === 'rain') {
-    current.precipitation = 'rain';
-  } else if (current.precipitationIntensity <= 0.02) {
-    current.precipitation = target.precipitation;
-  }
+  current.precipitation = target.precipitation;
 }
 
 export default class Renderer {
   private _game: Game;
   private _ambientLight: AmbientLightData;
+  private _pmremGenerator: PMREMGenerator;
   private _renderer: WebGLRenderer;
   private _sceneUiRenderer: CSS2DRenderer;
   // Separate 3D Objects and 2D UI Objects into different scenes. Since they are handled by
@@ -284,6 +310,8 @@ export default class Renderer {
   private _baseDirectionalLightColor: Color = new Color(1, 1, 1);
   private _baseDirectionalLightIntensity: number = 0;
   private _directionalSceneLight: DirectionalLight;
+  private _directionalShadowCascadeNearLight: DirectionalLight;
+  private _directionalShadowCascadeFarLight: DirectionalLight;
   private _directionalViewModelLight: DirectionalLight;
   private _sunDirection: Vector3 = new Vector3(0.3, -1, 0.2).normalize();
   private _skySunDirection: Vector3 | null = null;
@@ -294,12 +322,19 @@ export default class Renderer {
   private _interpolatingFogColor: boolean;
   private _interpolatingSkyboxColor: boolean;
   private _proceduralSkyColor: Color = new Color(0.7, 0.82, 1);
+  private _proceduralSkyEnvironmentMoonMesh: Mesh | null = null;
+  private _proceduralSkyEnvironmentRenderTarget: WebGLRenderTarget | null = null;
+  private _proceduralSkyEnvironmentScene: Scene | null = null;
+  private _proceduralSkyEnvironmentSkyMesh: Mesh | null = null;
+  private _proceduralSkyEnvironmentSunMesh: Mesh | null = null;
+  private _proceduralSkyEnvironmentUpdateCooldownS: number = 0;
   private _proceduralSkySettings: ProceduralSkySettings | null = null;
   private _proceduralSkyTargetSettings: ProceduralSkySettings | null = null;
   private _proceduralMoonMesh: Mesh | null = null;
   private _proceduralSkyWorldSeed: number = 1;
   private _proceduralSkyTimeS: number = 0;
   private _proceduralPrecipitation: WeatherPrecipitationSystem | null = null;
+  private _proceduralSurfaceImpacts: WeatherSurfaceImpactSystem | null = null;
   private _proceduralSunMesh: Mesh | null = null;
   private _lightningFlashQuad: Mesh;
   private _underWaterEffectQuad: Mesh;
@@ -323,8 +358,10 @@ export default class Renderer {
   private _viewModelRenderPass: RenderPass;
   private _outlinePass: SelectiveOutlinePass;
   private _smaaPass: SMAAPass;
+  private _analyticSunHaloPass: AnalyticSunHaloPass;
   private _bloomPass: WhiteCoreBloomPass;
   private _gameplayDistanceBlurPass: GameplayDistanceBlurPass;
+  private _nearContactShadowsPass: NearContactShadowsPass;
   private _outputPass: OutputPass;
   private _sceneUIRenderCooldownRemainingS: number = 0;
   private _adaptiveResolutionScale: number = 1;
@@ -357,9 +394,12 @@ export default class Renderer {
     this._ambientSceneLight = new AmbientLight(0xffffff, 1);
     this._ambientViewModelLight = new AmbientLight(0xffffff, 1);
     this._directionalSceneLight = new DirectionalLight(0xffffff, 0);
+    this._directionalShadowCascadeNearLight = new DirectionalLight(0xffffff, 0);
+    this._directionalShadowCascadeFarLight = new DirectionalLight(0xffffff, 0);
     this._directionalViewModelLight = new DirectionalLight(0xffffff, 0);
     // Anti-aliasing is handled in post-processing
     this._renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    this._pmremGenerator = new PMREMGenerator(this._renderer);
     this._sceneUiRenderer = new CSS2DRenderer({ element: document.getElementById('scene-ui-container')! });
     this._scene = new Scene();
     this._viewModelScene = new Scene();
@@ -399,7 +439,9 @@ export default class Renderer {
     );
     // Note: Size for Passes are set appropriately when EffectComposer size is set
     this._smaaPass = new SMAAPass();
+    this._analyticSunHaloPass = new AnalyticSunHaloPass();
     this._gameplayDistanceBlurPass = new GameplayDistanceBlurPass();
+    this._nearContactShadowsPass = new NearContactShadowsPass();
     // Question: Should parameters be configurable?
     this._bloomPass = new WhiteCoreBloomPass(
       vec2,
@@ -490,8 +532,10 @@ export default class Renderer {
 
   private _setupPostProcessing(): void {
     this._effectComposer.addPass(this._renderPass);
+    this._effectComposer.addPass(this._nearContactShadowsPass);
     this._effectComposer.addPass(this._gameplayDistanceBlurPass);
     this._effectComposer.addPass(this._outlinePass);
+    this._effectComposer.addPass(this._analyticSunHaloPass);
     this._effectComposer.addPass(this._viewModelRenderPass);
     this._effectComposer.addPass(this._bloomPass);
     this._effectComposer.addPass(this._smaaPass);
@@ -621,6 +665,8 @@ export default class Renderer {
     this._updateDirectionalLight(frameDeltaS);
     this._updateWaterReflection(frameDeltaS);
     this._updateGameplayDistanceBlur();
+    this._updateNearContactShadows();
+    this._updateAnalyticSunHaloPass();
 
     this._applyUnderWaterEffect();
     this._syncFirstPersonViewModelEntity();
@@ -628,8 +674,10 @@ export default class Renderer {
     this._renderer.info.reset();
     const pp = this._game.settingsManager.qualityPerfTradeoff.postProcessing ?? {};
     const hasGameplayDistanceBlur = this._gameplayDistanceBlurPass.enabled;
+    const hasNearContactShadows = this._nearContactShadowsPass.enabled;
     const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
-    const shouldUsePostProcessing = hasOutlineTargets || !!pp.bloom || !!pp.smaa || hasGameplayDistanceBlur;
+    const hasAnalyticSunHalo = this._analyticSunHaloPass.enabled;
+    const shouldUsePostProcessing = hasOutlineTargets || !!pp.bloom || !!pp.smaa || hasGameplayDistanceBlur || hasNearContactShadows || hasAnalyticSunHalo;
     this._lastPostProcessingState.composer = shouldUsePostProcessing;
     this._lastPostProcessingState.depthBlur = hasGameplayDistanceBlur;
     this._lastPostProcessingState.outline = hasOutlineTargets;
@@ -640,8 +688,10 @@ export default class Renderer {
       // Keep the first-person view model out of the full-screen post stack so
       // weapon/hand motion does not pay for bloom/SMAA passes every frame.
       this._viewModelRenderPass.enabled = false;
+      this._nearContactShadowsPass.enabled = hasNearContactShadows;
       this._gameplayDistanceBlurPass.enabled = hasGameplayDistanceBlur;
       this._outlinePass.enabled = hasOutlineTargets;
+      this._analyticSunHaloPass.enabled = hasAnalyticSunHalo;
       this._bloomPass.enabled = !!pp.bloom;
       this._smaaPass.enabled = !!pp.smaa;
       if (hasOutlineTargets) {
@@ -707,6 +757,10 @@ export default class Renderer {
   }
 
   private _disposeSkyVisuals(): void {
+    this._scene.environment = null;
+    this._viewModelScene.environment = null;
+    this._disposeProceduralSkyEnvironment();
+
     if (this._skyboxMesh) {
       this._scene.remove(this._skyboxMesh);
       this._skyboxMesh.geometry.dispose();
@@ -739,10 +793,200 @@ export default class Renderer {
       this._proceduralPrecipitation = null;
     }
 
+    if (this._proceduralSurfaceImpacts) {
+      this._scene.remove(this._proceduralSurfaceImpacts.mesh);
+      this._proceduralSurfaceImpacts.dispose();
+      this._proceduralSurfaceImpacts = null;
+    }
+
     this._proceduralSkySettings = null;
     this._proceduralSkyTargetSettings = null;
     this._updateLightningFlash(0);
     this._applyDynamicLighting(0);
+  }
+
+  private _disposeProceduralSkyEnvironment(): void {
+    if (this._proceduralSkyEnvironmentSkyMesh) {
+      this._proceduralSkyEnvironmentSkyMesh.geometry.dispose();
+      (this._proceduralSkyEnvironmentSkyMesh.material as ProceduralSkyMaterial).dispose();
+      this._proceduralSkyEnvironmentSkyMesh = null;
+    }
+
+    if (this._proceduralSkyEnvironmentSunMesh) {
+      this._proceduralSkyEnvironmentSunMesh.geometry.dispose();
+      (this._proceduralSkyEnvironmentSunMesh.material as SquareSunMaterial).dispose();
+      this._proceduralSkyEnvironmentSunMesh = null;
+    }
+
+    if (this._proceduralSkyEnvironmentMoonMesh) {
+      this._proceduralSkyEnvironmentMoonMesh.geometry.dispose();
+      (this._proceduralSkyEnvironmentMoonMesh.material as SquareSunMaterial).dispose();
+      this._proceduralSkyEnvironmentMoonMesh = null;
+    }
+
+    if (this._proceduralSkyEnvironmentRenderTarget) {
+      this._proceduralSkyEnvironmentRenderTarget.dispose();
+      this._proceduralSkyEnvironmentRenderTarget = null;
+    }
+
+    this._proceduralSkyEnvironmentScene = null;
+    this._proceduralSkyEnvironmentUpdateCooldownS = 0;
+  }
+
+  private _setupProceduralSkyEnvironment(settings: ProceduralSkySettings): void {
+    this._disposeProceduralSkyEnvironment();
+
+    this._proceduralSkyEnvironmentScene = new Scene();
+    this._proceduralSkyEnvironmentScene.matrixAutoUpdate = false;
+    this._proceduralSkyEnvironmentScene.matrixWorldAutoUpdate = false;
+
+    this._proceduralSkyEnvironmentSkyMesh = new Mesh(
+      new BoxGeometry(PROCEDURAL_SKY_ENVIRONMENT_BOX_SIZE, PROCEDURAL_SKY_ENVIRONMENT_BOX_SIZE, PROCEDURAL_SKY_ENVIRONMENT_BOX_SIZE),
+      new ProceduralSkyMaterial(settings),
+    );
+    (this._proceduralSkyEnvironmentSkyMesh.material as ProceduralSkyMaterial).worldSeed = this._proceduralSkyWorldSeed;
+    this._proceduralSkyEnvironmentSkyMesh.frustumCulled = false;
+    this._proceduralSkyEnvironmentSkyMesh.matrixAutoUpdate = false;
+    this._proceduralSkyEnvironmentSkyMesh.matrixWorldAutoUpdate = false;
+    this._proceduralSkyEnvironmentSkyMesh.updateMatrix();
+    this._proceduralSkyEnvironmentSkyMesh.matrixWorld.copy(this._proceduralSkyEnvironmentSkyMesh.matrix);
+    this._proceduralSkyEnvironmentScene.add(this._proceduralSkyEnvironmentSkyMesh);
+
+    this._proceduralSkyEnvironmentSunMesh = new Mesh(new PlaneGeometry(1, 1), new SquareSunMaterial());
+    this._proceduralSkyEnvironmentSunMesh.frustumCulled = false;
+    this._proceduralSkyEnvironmentSunMesh.matrixAutoUpdate = false;
+    this._proceduralSkyEnvironmentSunMesh.matrixWorldAutoUpdate = false;
+    this._proceduralSkyEnvironmentScene.add(this._proceduralSkyEnvironmentSunMesh);
+
+    this._proceduralSkyEnvironmentMoonMesh = new Mesh(new PlaneGeometry(1, 1), new SquareSunMaterial());
+    this._proceduralSkyEnvironmentMoonMesh.frustumCulled = false;
+    this._proceduralSkyEnvironmentMoonMesh.matrixAutoUpdate = false;
+    this._proceduralSkyEnvironmentMoonMesh.matrixWorldAutoUpdate = false;
+    this._proceduralSkyEnvironmentScene.add(this._proceduralSkyEnvironmentMoonMesh);
+
+    this._proceduralSkyEnvironmentUpdateCooldownS = 0;
+  }
+
+  private _getProceduralSkyEnvironmentUpdateInterval(): number {
+    if (!this._proceduralSkySettings || !this._proceduralSkyTargetSettings) {
+      return PROCEDURAL_SKY_ENVIRONMENT_BASE_UPDATE_INTERVAL_S;
+    }
+
+    const current = this._proceduralSkySettings;
+    const target = this._proceduralSkyTargetSettings;
+    const settingsDelta =
+      Math.abs(current.cloudCoverage - target.cloudCoverage) +
+      Math.abs(current.cloudOpacity - target.cloudOpacity) +
+      Math.abs(current.cloudScale - target.cloudScale) +
+      Math.abs(current.cloudSpeed - target.cloudSpeed) +
+      Math.abs(current.precipitationIntensity - target.precipitationIntensity) +
+      Math.abs(current.storminess - target.storminess) +
+      current.windDirection.distanceTo(target.windDirection);
+
+    const transitioning = this._interpolatingFogColor
+      || current.precipitation !== target.precipitation
+      || settingsDelta > 0.02;
+
+    return transitioning
+      ? PROCEDURAL_SKY_ENVIRONMENT_TRANSITION_UPDATE_INTERVAL_S
+      : PROCEDURAL_SKY_ENVIRONMENT_BASE_UPDATE_INTERVAL_S;
+  }
+
+  private _renderProceduralSkyEnvironment(): void {
+    if (!this._proceduralSkyEnvironmentScene) {
+      return;
+    }
+
+    const previousRenderTarget = this._proceduralSkyEnvironmentRenderTarget;
+    const nextRenderTarget = this._pmremGenerator.fromScene(
+      this._proceduralSkyEnvironmentScene,
+      0,
+      PROCEDURAL_SKY_ENVIRONMENT_NEAR,
+      PROCEDURAL_SKY_ENVIRONMENT_FAR,
+      { position: WORLD_ORIGIN, size: PROCEDURAL_SKY_ENVIRONMENT_SIZE },
+    );
+
+    this._proceduralSkyEnvironmentRenderTarget = nextRenderTarget;
+    this._scene.environment = nextRenderTarget.texture;
+    this._viewModelScene.environment = nextRenderTarget.texture;
+
+    if (previousRenderTarget && previousRenderTarget !== nextRenderTarget) {
+      previousRenderTarget.dispose();
+    }
+  }
+
+  private _updateProceduralSkyEnvironment(frameDeltaS: number): void {
+    if (
+      !this._skyboxMesh
+      || !isProceduralSkyMaterial(this._skyboxMesh.material)
+      || !this._proceduralSkySettings
+      || !this._proceduralSkyEnvironmentSkyMesh
+      || !this._proceduralSkyEnvironmentSunMesh
+      || !this._proceduralSkyEnvironmentMoonMesh
+    ) {
+      return;
+    }
+
+    this._proceduralSkyEnvironmentUpdateCooldownS = Math.max(0, this._proceduralSkyEnvironmentUpdateCooldownS - frameDeltaS);
+
+    const sourceMaterial = this._skyboxMesh.material;
+    const environmentMaterial = this._proceduralSkyEnvironmentSkyMesh.material as ProceduralSkyMaterial;
+    environmentMaterial.time = this._proceduralSkyTimeS;
+    environmentMaterial.worldSeed = this._proceduralSkyWorldSeed;
+    environmentMaterial.ambientColor.copy(sourceMaterial.ambientColor);
+    environmentMaterial.fogColor.copy(sourceMaterial.fogColor);
+    environmentMaterial.sunColor.copy(sourceMaterial.sunColor);
+    environmentMaterial.sunDirection.copy(sourceMaterial.sunDirection);
+    // Keep lightning out of the captured environment to avoid visible reflection popping.
+    environmentMaterial.lightning = 0;
+    environmentMaterial.skyIntensity = this._skyboxIntensity;
+    environmentMaterial.cloudCoverage = this._proceduralSkySettings.cloudCoverage;
+    environmentMaterial.cloudOpacity = this._proceduralSkySettings.cloudOpacity;
+    environmentMaterial.cloudScale = this._proceduralSkySettings.cloudScale;
+    environmentMaterial.cloudSpeed = this._proceduralSkySettings.cloudSpeed;
+    environmentMaterial.storminess = this._proceduralSkySettings.storminess;
+    environmentMaterial.windDirection.copy(this._proceduralSkySettings.windDirection);
+
+    const sunViewDirection = vec3d.copy(sourceMaterial.sunDirection).negate();
+    const sunMaterial = this._proceduralSkyEnvironmentSunMesh.material as SquareSunMaterial;
+    const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24)) * (1 - this._proceduralSkySettings.storminess * 0.65);
+    const sunSize = (260 + (1 - Math.max(0, sunViewDirection.y)) * 60) * PROCEDURAL_SKY_ENVIRONMENT_SUN_SIZE_RATIO;
+    sunMaterial.dayAmount = dayAmount;
+    sunMaterial.haloAmount = 1.0 - this._proceduralSkySettings.storminess * 0.16;
+    sunMaterial.sunColor.setRGB(1.0, 0.97, 0.92);
+    sunMaterial.sunIntensity = Math.max(3.6, Math.min(this._directionalSceneLight.intensity + 1.2, 4.8));
+    this._proceduralSkyEnvironmentSunMesh.visible = dayAmount > 0.001;
+    if (this._proceduralSkyEnvironmentSunMesh.visible) {
+      this._proceduralSkyEnvironmentSunMesh.position.copy(sunViewDirection).multiplyScalar(PROCEDURAL_SKY_ENVIRONMENT_SUN_DISTANCE);
+      this._proceduralSkyEnvironmentSunMesh.lookAt(WORLD_ORIGIN);
+      this._proceduralSkyEnvironmentSunMesh.scale.set(sunSize, sunSize, 1);
+      this._proceduralSkyEnvironmentSunMesh.updateMatrix();
+      this._proceduralSkyEnvironmentSunMesh.matrixWorld.copy(this._proceduralSkyEnvironmentSunMesh.matrix);
+    }
+
+    const moonViewDirection = vec3e.copy(sunViewDirection).negate();
+    const moonMaterial = this._proceduralSkyEnvironmentMoonMesh.material as SquareSunMaterial;
+    const moonAmount = Math.max(0, Math.min(1, (moonViewDirection.y + 0.1) / 0.32)) * (1 - this._proceduralSkySettings.storminess * 0.5);
+    const moonSize = (120 + moonAmount * 24) * PROCEDURAL_SKY_ENVIRONMENT_MOON_SIZE_RATIO;
+    moonMaterial.dayAmount = moonAmount;
+    moonMaterial.haloAmount = 0.62;
+    moonMaterial.sunColor.setRGB(0.86, 0.90, 1.0);
+    moonMaterial.sunIntensity = 2.4;
+    this._proceduralSkyEnvironmentMoonMesh.visible = moonAmount > 0.001;
+    if (this._proceduralSkyEnvironmentMoonMesh.visible) {
+      this._proceduralSkyEnvironmentMoonMesh.position.copy(moonViewDirection).multiplyScalar(PROCEDURAL_SKY_ENVIRONMENT_MOON_DISTANCE);
+      this._proceduralSkyEnvironmentMoonMesh.lookAt(WORLD_ORIGIN);
+      this._proceduralSkyEnvironmentMoonMesh.scale.set(moonSize, moonSize, 1);
+      this._proceduralSkyEnvironmentMoonMesh.updateMatrix();
+      this._proceduralSkyEnvironmentMoonMesh.matrixWorld.copy(this._proceduralSkyEnvironmentMoonMesh.matrix);
+    }
+
+    if (this._proceduralSkyEnvironmentUpdateCooldownS > 0) {
+      return;
+    }
+
+    this._renderProceduralSkyEnvironment();
+    this._proceduralSkyEnvironmentUpdateCooldownS = this._getProceduralSkyEnvironmentUpdateInterval();
   }
 
   private _applyDynamicLighting(lightningIntensity: number): void {
@@ -756,10 +1000,14 @@ export default class Renderer {
     this._ambientViewModelLight.intensity = this._ambientLight.intensity;
 
     this._directionalSceneLight.color.copy(this._baseDirectionalLightColor).lerp(LIGHTNING_FLASH_COLOR, flashIntensity * 0.4);
+    this._directionalShadowCascadeNearLight.color.copy(this._directionalSceneLight.color);
+    this._directionalShadowCascadeFarLight.color.copy(this._directionalSceneLight.color);
     this._directionalViewModelLight.color.copy(this._directionalSceneLight.color);
 
     const directionalIntensity = this._baseDirectionalLightIntensity + flashIntensity * 1.1;
     this._directionalSceneLight.intensity = directionalIntensity;
+    this._directionalShadowCascadeNearLight.intensity = 0;
+    this._directionalShadowCascadeFarLight.intensity = 0;
     this._directionalViewModelLight.intensity = directionalIntensity;
   }
 
@@ -792,9 +1040,13 @@ export default class Renderer {
       && isProceduralSkyMaterial(this._skyboxMesh.material)
       && this._proceduralSunMesh
       && this._proceduralPrecipitation
+      && this._proceduralSurfaceImpacts
       && this._proceduralSkySettings
     ) {
       this._proceduralSkyTargetSettings = skySettings;
+      if (!this._proceduralSkyEnvironmentScene) {
+        this._setupProceduralSkyEnvironment(this._proceduralSkySettings);
+      }
       return;
     }
 
@@ -827,6 +1079,10 @@ export default class Renderer {
     this._proceduralPrecipitation = new WeatherPrecipitationSystem();
     this._scene.add(this._proceduralPrecipitation.mesh);
 
+    this._proceduralSurfaceImpacts = new WeatherSurfaceImpactSystem();
+    this._scene.add(this._proceduralSurfaceImpacts.mesh);
+
+    this._setupProceduralSkyEnvironment(skySettings);
     this._proceduralSkyColor.copy(this._targetSkyboxColor);
     this._interpolatingSkyboxColor = false;
     this._updateProceduralSky(0);
@@ -878,6 +1134,8 @@ export default class Renderer {
     this._skyboxMesh.matrixWorldAutoUpdate = false;
 
     this._scene.add(this._skyboxMesh);
+    this._scene.environment = skyboxTexture;
+    this._viewModelScene.environment = skyboxTexture;
 
     // Apply current target color immediately to avoid race condition
     // when skyboxIntensity arrives in same packet as skyboxUri
@@ -1120,12 +1378,14 @@ export default class Renderer {
       }
     }
 
-    if (!this._proceduralPrecipitation) {
+    this._updateProceduralSkyEnvironment(frameDeltaS);
+
+    if (!this._proceduralPrecipitation || !this._proceduralSurfaceImpacts) {
       return;
     }
 
     const environmentalAnimationsEnabled = this._game.settingsManager.qualityPerfTradeoff.environmentalAnimations?.enabled !== false;
-    const precipitationEnabled = environmentalAnimationsEnabled && this._proceduralSkySettings.precipitation === 'rain';
+    const precipitationEnabled = environmentalAnimationsEnabled && this._proceduralSkySettings.precipitation !== 'none';
     let precipitationIntensity = 0;
 
     if (precipitationEnabled && !this._game.chunkManager.inLiquidBlock(cameraPosition)) {
@@ -1145,7 +1405,75 @@ export default class Renderer {
       color,
       precipitationIntensity,
       lightningIntensity,
+      this._proceduralSkySettings.precipitation,
     );
+
+    this._proceduralSurfaceImpacts.update(
+      frameDeltaS,
+      this._proceduralSkySettings.precipitation,
+      precipitationIntensity,
+      (sampleRadius) => this._sampleWeatherSurfaceImpact(cameraPosition, sampleRadius, this._proceduralSkySettings!.precipitation),
+    );
+  }
+
+  private _sampleWeatherSurfaceImpact(
+    cameraPosition: Vector3,
+    sampleRadius: number,
+    precipitation: ProceduralSkyPrecipitation,
+  ): { x: number; y: number; z: number } | null {
+    const scanStartY = Math.floor(cameraPosition.y) + WEATHER_SURFACE_IMPACT_SCAN_ABOVE;
+    const scanEndY = Math.floor(cameraPosition.y) - WEATHER_SURFACE_IMPACT_SCAN_BELOW;
+
+    for (let attempt = 0; attempt < WEATHER_SURFACE_IMPACT_SAMPLE_ATTEMPTS; attempt++) {
+      const sampleX = Math.floor(cameraPosition.x + (Math.random() * 2 - 1) * sampleRadius);
+      const sampleZ = Math.floor(cameraPosition.z + (Math.random() * 2 - 1) * sampleRadius);
+
+      for (let sampleY = scanStartY; sampleY >= scanEndY; sampleY--) {
+        vec3b.set(sampleX, sampleY, sampleZ);
+        const block = this._game.chunkManager.getBlock(vec3b);
+        if (!block || block.blockId === 0) {
+          continue;
+        }
+
+        const blockType = this._game.blockTypeManager.getBlockType(block.blockId);
+        if (!blockType) {
+          continue;
+        }
+
+        vec3c.set(sampleX, sampleY + 1, sampleZ);
+        const aboveBlock = this._game.chunkManager.getBlock(vec3c);
+
+        if (blockType.isLiquid) {
+          if (aboveBlock?.blockId && aboveBlock.blockId !== 0) {
+            continue;
+          }
+        } else if (aboveBlock?.blockId && aboveBlock.blockId !== 0) {
+          continue;
+        }
+
+        const exposureY = blockType.isLiquid ? sampleY + 1 : sampleY + 2;
+        vec3d.set(sampleX, exposureY, sampleZ);
+        const skyExposure = this._game.skyDistanceVolumeManager.getSkyLightBrightnessByGlobalCoordinate(vec3d);
+        if (skyExposure < WEATHER_SURFACE_IMPACT_SKY_EXPOSURE_MIN) {
+          break;
+        }
+
+        const jitterAmount = precipitation === 'snow'
+          ? WEATHER_SURFACE_IMPACT_JITTER * 0.6
+          : WEATHER_SURFACE_IMPACT_JITTER;
+        const surfaceYOffset = blockType.isLiquid
+          ? WEATHER_SURFACE_IMPACT_LIQUID_Y_OFFSET + WATER_SURFACE_Y_OFFSET
+          : 1 + WEATHER_SURFACE_IMPACT_SOLID_Y_OFFSET;
+
+        return {
+          x: sampleX + 0.5 + (Math.random() - 0.5) * jitterAmount,
+          y: sampleY + surfaceYOffset,
+          z: sampleZ + 0.5 + (Math.random() - 0.5) * jitterAmount,
+        };
+      }
+    }
+
+    return null;
   }
 
   private _onKeyDown = (event: KeyboardEvent): void => {
@@ -1201,6 +1529,10 @@ export default class Renderer {
     this._uiScene.matrixWorldAutoUpdate = false;
 
     this._scene.add(this._ambientSceneLight);
+    this._scene.add(this._directionalShadowCascadeNearLight);
+    this._scene.add(this._directionalShadowCascadeNearLight.target);
+    this._scene.add(this._directionalShadowCascadeFarLight);
+    this._scene.add(this._directionalShadowCascadeFarLight.target);
     this._scene.add(this._directionalSceneLight);
     this._scene.add(this._directionalSceneLight.target);
 
@@ -1212,6 +1544,14 @@ export default class Renderer {
     this._directionalSceneLight.shadow.bias = DIRECTIONAL_LIGHT_SHADOW_BIAS;
     this._directionalSceneLight.shadow.normalBias = DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS;
     this._directionalSceneLight.shadow.autoUpdate = false;
+    this._directionalShadowCascadeNearLight.castShadow = true;
+    this._directionalShadowCascadeNearLight.shadow.bias = DIRECTIONAL_LIGHT_SHADOW_BIAS;
+    this._directionalShadowCascadeNearLight.shadow.normalBias = DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS;
+    this._directionalShadowCascadeNearLight.shadow.autoUpdate = false;
+    this._directionalShadowCascadeFarLight.castShadow = true;
+    this._directionalShadowCascadeFarLight.shadow.bias = DIRECTIONAL_LIGHT_SHADOW_BIAS;
+    this._directionalShadowCascadeFarLight.shadow.normalBias = DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS;
+    this._directionalShadowCascadeFarLight.shadow.autoUpdate = false;
     this._directionalViewModelLight.castShadow = false;
     this._applyShadowSettings();
     this._updateDirectionalLight(0, true);
@@ -1853,24 +2193,25 @@ export default class Renderer {
     }
 
     const configuredViewDistance = this.viewDistance;
+    const blurDistance = configuredViewDistance * GAMEPLAY_DISTANCE_BLUR_DISTANCE_SCALE;
     const fog = this._scene.fog as Fog | null;
     const fogNear = fog?.near ?? configuredViewDistance * blurSettings.focusFarRatio;
     const fogFar = fog?.far ?? configuredViewDistance;
     const nearBlurStart = Math.max(
       activeCamera.near + 1.5,
-      Math.min(configuredViewDistance * blurSettings.nearStartRatio, fogNear * 0.7),
+      Math.min(blurDistance * blurSettings.nearStartRatio, fogNear * 0.7),
     );
     const focusNear = Math.max(
       nearBlurStart + 1,
-      Math.min(configuredViewDistance * blurSettings.focusNearRatio, fogNear * 0.8),
+      Math.min(blurDistance * blurSettings.focusNearRatio, fogNear * 0.8),
     );
     const focusFar = Math.max(
       focusNear + 1,
-      Math.min(configuredViewDistance * blurSettings.focusFarRatio, fogNear),
+      Math.min(blurDistance * blurSettings.focusFarRatio, fogNear),
     );
     const farBlurEnd = Math.max(
       focusFar + 1,
-      Math.min(configuredViewDistance * blurSettings.farEndRatio, fogFar),
+      Math.min(blurDistance * blurSettings.farEndRatio, fogFar),
     );
 
     if (farBlurEnd <= focusFar || focusFar <= focusNear || focusNear <= nearBlurStart) {
@@ -1887,15 +2228,92 @@ export default class Renderer {
     );
   }
 
+  private _shouldUseDirectionalShadowCascades(): boolean {
+    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
+    return !!shadows?.enabled
+      && !MobileManager.isMobile
+      && (shadows.directionalMapSize >= 1024 || shadows.directionalDistance >= 64);
+  }
+
+  private _shouldUseNearContactShadows(): boolean {
+    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
+    return !!shadows?.enabled && !MobileManager.isMobile;
+  }
+
+  private _updateNearContactShadows(): void {
+    const activeCamera = this._game.camera.activeCamera;
+    const enabled = this._shouldUseNearContactShadows()
+      && this._game.camera.isGameCameraActive
+      && !this._game.camera.isOrthographicGameCameraActive;
+
+    if (!enabled) {
+      this._nearContactShadowsPass.enabled = false;
+      return;
+    }
+
+    this._nearContactShadowsPass.enabled = true;
+    this._nearContactShadowsPass.setStrength(NEAR_CONTACT_SHADOW_STRENGTH);
+    this._nearContactShadowsPass.setCamera({
+      far: activeCamera.far,
+      near: activeCamera.near,
+      projectionMatrixInverse: activeCamera.projectionMatrixInverse,
+      isPerspectiveCamera: activeCamera instanceof PerspectiveCamera,
+    });
+  }
+
+  private _updateAnalyticSunHaloPass(): void {
+    const activeCamera = this._game.camera.activeCamera;
+    const skySunDirection = this._skySunDirection ?? this._sunDirection;
+    const sunViewDirection = vec3.copy(skySunDirection).negate();
+    const cameraForward = vec3b.copy(this._game.camera.activeViewDir);
+
+    if (cameraForward.lengthSq() <= DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
+      cameraForward.set(0, 0, -1);
+    } else {
+      cameraForward.normalize();
+    }
+
+    if (sunViewDirection.lengthSq() <= DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
+      this._analyticSunHaloPass.setSun(vec2.set(0.5, 0.5), this._directionalSceneLight.color, 0);
+      return;
+    }
+
+    sunViewDirection.normalize();
+    const forwardness = Math.max(0, cameraForward.dot(sunViewDirection));
+    const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24));
+    const storminess = this._proceduralSkySettings?.storminess ?? 0;
+    const intensity = dayAmount
+      * Math.pow(forwardness, 0.38)
+      * (0.12 + this._directionalSceneLight.intensity * 0.12)
+      * (1 - storminess * 0.45);
+
+    vec3c.copy(activeCamera.position).addScaledVector(sunViewDirection, 1000).project(activeCamera);
+    this._analyticSunHaloPass.setSun(
+      vec2.set(vec3c.x * 0.5 + 0.5, vec3c.y * 0.5 + 0.5),
+      this._directionalSceneLight.color,
+      intensity,
+    );
+  }
+
   private _applyShadowSettings(): void {
     const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
     this._renderer.shadowMap.enabled = shadows?.enabled ?? false;
     this._renderer.shadowMap.type = shadows?.type === 'pcf' ? PCFShadowMap : VSMShadowMap;
 
     const directionalMapSize = shadows?.directionalMapSize ?? 1024;
+    const useCascades = this._shouldUseDirectionalShadowCascades();
     this._directionalSceneLight.shadow.mapSize.set(directionalMapSize, directionalMapSize);
     this._directionalSceneLight.shadow.autoUpdate = false;
-    this._directionalSceneLight.castShadow = shadows?.enabled ?? false;
+    this._directionalSceneLight.castShadow = (shadows?.enabled ?? false) && !useCascades;
+    this._directionalShadowCascadeNearLight.castShadow = (shadows?.enabled ?? false) && useCascades;
+    this._directionalShadowCascadeFarLight.castShadow = (shadows?.enabled ?? false) && useCascades;
+    this._directionalShadowCascadeNearLight.visible = useCascades;
+    this._directionalShadowCascadeFarLight.visible = useCascades;
+    this._directionalShadowCascadeNearLight.shadow.mapSize.set(directionalMapSize, directionalMapSize);
+    this._directionalShadowCascadeFarLight.shadow.mapSize.set(
+      Math.max(DIRECTIONAL_SHADOW_CASCADE_MIN_MAP_SIZE, Math.round(directionalMapSize * DIRECTIONAL_SHADOW_CASCADE_FAR_MAP_SIZE_RATIO)),
+      Math.max(DIRECTIONAL_SHADOW_CASCADE_MIN_MAP_SIZE, Math.round(directionalMapSize * DIRECTIONAL_SHADOW_CASCADE_FAR_MAP_SIZE_RATIO)),
+    );
     this._markDirectionalShadowDirty();
   }
 
@@ -1915,25 +2333,25 @@ export default class Renderer {
       ? WORLD_UP
       : WORLD_RIGHT;
 
-    vec3b.crossVectors(basisReference, this._sunDirection).normalize();
-    vec3c.crossVectors(this._sunDirection, vec3b).normalize();
+    shadowSnapBasisA.crossVectors(basisReference, this._sunDirection).normalize();
+    shadowSnapBasisB.crossVectors(this._sunDirection, shadowSnapBasisA).normalize();
 
-    const snappedX = Math.round(focusCenter.dot(vec3b) / texelWorldSize) * texelWorldSize;
-    const snappedY = Math.round(focusCenter.dot(vec3c) / texelWorldSize) * texelWorldSize;
+    const snappedX = Math.round(focusCenter.dot(shadowSnapBasisA) / texelWorldSize) * texelWorldSize;
+    const snappedY = Math.round(focusCenter.dot(shadowSnapBasisB) / texelWorldSize) * texelWorldSize;
     const depth = focusCenter.dot(this._sunDirection);
 
     focusCenter.copy(this._sunDirection).multiplyScalar(depth);
-    focusCenter.addScaledVector(vec3b, snappedX);
-    focusCenter.addScaledVector(vec3c, snappedY);
+    focusCenter.addScaledVector(shadowSnapBasisA, snappedX);
+    focusCenter.addScaledVector(shadowSnapBasisB, snappedY);
   }
 
-  private _applyDirectionalLightFocusCenter(focusCenter: Vector3, lightHeight: number, directionalDistance: number): void {
-    this._directionalSceneLight.target.position.copy(focusCenter);
-    this._directionalSceneLight.target.updateMatrixWorld();
-    this._directionalSceneLight.position.copy(focusCenter).addScaledVector(this._sunDirection, -lightHeight);
-    this._directionalSceneLight.updateMatrixWorld();
+  private _applyDirectionalLightToLight(light: DirectionalLight, focusCenter: Vector3, lightHeight: number, directionalDistance: number): void {
+    light.target.position.copy(focusCenter);
+    light.target.updateMatrixWorld();
+    light.position.copy(focusCenter).addScaledVector(this._sunDirection, -lightHeight);
+    light.updateMatrixWorld();
 
-    const shadowCamera = this._directionalSceneLight.shadow.camera as OrthographicCamera;
+    const shadowCamera = light.shadow.camera as OrthographicCamera;
     shadowCamera.left = -directionalDistance;
     shadowCamera.right = directionalDistance;
     shadowCamera.top = directionalDistance;
@@ -1973,22 +2391,32 @@ export default class Renderer {
 
   private _updateDirectionalLight(frameDeltaS: number = 0, force: boolean = false): void {
     const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
+    const useCascades = this._shouldUseDirectionalShadowCascades();
     const directionalDistance = shadows?.directionalDistance ?? 48;
+    const nearCascadeDistance = directionalDistance * DIRECTIONAL_SHADOW_CASCADE_NEAR_DISTANCE_RATIO;
     const cameraPosition = this._game.camera.activeCamera.position;
     const lightHeight = Math.max(DIRECTIONAL_LIGHT_MIN_HEIGHT, directionalDistance * DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER);
+    const nearCascadeLightHeight = Math.max(DIRECTIONAL_LIGHT_MIN_HEIGHT, nearCascadeDistance * DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER);
     const directionalMapSize = this._directionalSceneLight.shadow.mapSize.x || shadows?.directionalMapSize || 1024;
+    const farCascadeMapSize = this._directionalShadowCascadeFarLight.shadow.mapSize.x
+      || Math.max(DIRECTIONAL_SHADOW_CASCADE_MIN_MAP_SIZE, Math.round(directionalMapSize * DIRECTIONAL_SHADOW_CASCADE_FAR_MAP_SIZE_RATIO));
 
     this._directionalShadowUpdateCooldownS = Math.max(0, this._directionalShadowUpdateCooldownS - frameDeltaS);
 
     vec3.copy(cameraPosition);
+    vec3b.copy(cameraPosition);
     vec3d.copy(this._game.camera.activeViewDir);
     if (vec3d.lengthSq() > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
       vec3d.normalize();
       vec3.addScaledVector(vec3d, directionalDistance * DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO);
+      vec3b.addScaledVector(vec3d, nearCascadeDistance * DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO);
     }
 
     if (shadows?.enabled) {
-      this._snapDirectionalShadowFocusCenter(vec3, directionalDistance, directionalMapSize);
+      this._snapDirectionalShadowFocusCenter(vec3, directionalDistance, useCascades ? farCascadeMapSize : directionalMapSize);
+      if (useCascades) {
+        this._snapDirectionalShadowFocusCenter(vec3b, nearCascadeDistance, directionalMapSize);
+      }
     }
 
     const shadowMotionActive = shadows?.enabled
@@ -2001,7 +2429,7 @@ export default class Renderer {
     this._directionalViewModelLight.updateMatrixWorld();
 
     if (!shadows?.enabled) {
-      this._applyDirectionalLightFocusCenter(vec3, lightHeight, directionalDistance);
+      this._applyDirectionalLightToLight(this._directionalSceneLight, vec3, lightHeight, directionalDistance);
       this._directionalShadowInitialized = true;
       this._directionalShadowNeedsUpdate = false;
       this._lastDirectionalShadowFocusCenter.copy(vec3);
@@ -2028,8 +2456,15 @@ export default class Renderer {
       return;
     }
 
-    this._applyDirectionalLightFocusCenter(vec3, lightHeight, directionalDistance);
-    this._directionalSceneLight.shadow.needsUpdate = true;
+    this._applyDirectionalLightToLight(this._directionalSceneLight, vec3, lightHeight, directionalDistance);
+    if (useCascades) {
+      this._applyDirectionalLightToLight(this._directionalShadowCascadeNearLight, vec3b, nearCascadeLightHeight, nearCascadeDistance);
+      this._applyDirectionalLightToLight(this._directionalShadowCascadeFarLight, vec3, lightHeight, directionalDistance);
+      this._directionalShadowCascadeNearLight.shadow.needsUpdate = true;
+      this._directionalShadowCascadeFarLight.shadow.needsUpdate = true;
+    } else {
+      this._directionalSceneLight.shadow.needsUpdate = true;
+    }
     this._directionalShadowNeedsUpdate = false;
     this._directionalShadowInitialized = true;
     this._directionalShadowUpdateCooldownS = shadowMotionActive ? 0 : DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S;
