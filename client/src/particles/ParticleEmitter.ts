@@ -59,7 +59,7 @@ export default class ParticleEmitter {
 
     this.setTextureUri(options.textureUri);
 
-    this._game.renderer.addToScene(this._emitterCore.mesh);
+    this._game.renderer.addToParticlesScene(this._emitterCore.mesh);
   }
 
   public get id(): ParticleEmitterID {
@@ -239,6 +239,6 @@ export default class ParticleEmitter {
     }
 
     this._emitterCore.dispose();
-    this._game.renderer.removeFromScene(this._emitterCore.mesh);
+    this._game.renderer.removeFromParticlesScene(this._emitterCore.mesh);
   }
 }

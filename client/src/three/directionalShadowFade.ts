@@ -3,8 +3,15 @@ const DIRECTIONAL_LIGHT_INFO = 'getDirectionalLightInfo( directionalLight, direc
 const DIRECTIONAL_SHADOW_SETUP = 'directionalLightShadow = directionalLightShadows[ i ];';
 const DIRECTIONAL_SHADOW_APPLY = 'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;';
 const DIRECTIONAL_RE_DIRECT = 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+const UNIFORM_DIRECTIONAL_SHADOW_CONTRAST = 'directionalShadowContrast';
 
-export function applyDirectionalShadowEdgeFade(fragmentShader: string): string {
+const directionalShadowContrastUniform = { value: 1.45 };
+
+export function setDirectionalShadowContrast(value: number): void {
+  directionalShadowContrastUniform.value = value;
+}
+
+export function applyDirectionalShadowEdgeFade(fragmentShader: string, uniforms?: Record<string, { value: number }>): string {
   if (
     fragmentShader.includes('directionalShadowEdgeFade')
     || !fragmentShader.includes(DIRECTIONAL_LIGHT_INFO)
@@ -15,10 +22,16 @@ export function applyDirectionalShadowEdgeFade(fragmentShader: string): string {
     return fragmentShader;
   }
 
+  if (uniforms) {
+    uniforms[UNIFORM_DIRECTIONAL_SHADOW_CONTRAST] = directionalShadowContrastUniform;
+  }
+
   return fragmentShader
     .replace(
       DIRECTIONAL_LIGHT_SECTION,
       `${DIRECTIONAL_LIGHT_SECTION}
+
+		uniform float ${UNIFORM_DIRECTIONAL_SHADOW_CONTRAST};
 
 		float getDirectionalShadowEdgeFadeAmount( vec4 shadowCoord ) {
 			vec3 directionalShadowCoord = shadowCoord.xyz / max( shadowCoord.w, 0.0001 );
@@ -33,7 +46,7 @@ export function applyDirectionalShadowEdgeFade(fragmentShader: string): string {
 		}
 
 		float applyDirectionalShadowContrast( float shadowSample ) {
-			return pow( clamp( shadowSample, 0.0, 1.0 ), 1.45 );
+			return pow( clamp( shadowSample, 0.0, 1.0 ), ${UNIFORM_DIRECTIONAL_SHADOW_CONTRAST} );
 		}`,
     )
     .replace(

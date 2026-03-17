@@ -68,7 +68,7 @@ class MeshBlockMaterial extends MeshStandardMaterial {
 
   public override onBeforeCompile(params: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer): void {
     super.onBeforeCompile(params, renderer);
-    params.fragmentShader = applyBlockColorPunch(applyDirectionalShadowEdgeFade(params.fragmentShader));
+    params.fragmentShader = applyBlockColorPunch(applyDirectionalShadowEdgeFade(params.fragmentShader, params.uniforms as Record<string, { value: number }>));
   }
 }
 
@@ -301,9 +301,9 @@ class MeshLiquidMaterial extends ShaderMaterial {
           gl_FragColor = vec4(color, 0.8);
         }
       `,
-      // Set material to DoubleSide to render the water surface from underwater as well.
-      // However, set forceSinglePass to true to avoid performance concerns.
-      forceSinglePass: true,
+      // Transparent double-sided liquids need the default two-pass rendering
+      // path; forcing a single pass exposes internal triangle/edge artifacts.
+      depthWrite: false,
       side: DoubleSide,
       transparent: true,
     });

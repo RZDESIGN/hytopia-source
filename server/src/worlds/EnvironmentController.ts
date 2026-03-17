@@ -11,6 +11,10 @@ const DEFAULT_MAX_DIRECTIONAL_LIGHT_INTENSITY = 2.7;
 const DEFAULT_MIN_AMBIENT_LIGHT_INTENSITY = 0.16;
 const DEFAULT_MIN_DIRECTIONAL_LIGHT_INTENSITY = 0.2;
 const DEFAULT_NIGHT_SKYBOX_INTENSITY = 0.04;
+const MOONLIGHT_AMBIENT_INTENSITY = 0.08;
+const MOONLIGHT_DIRECTIONAL_INTENSITY = 0.34;
+const NIGHT_AMBIENT_FLOOR_RATIO = 0.6;
+const NIGHT_DIRECTIONAL_FLOOR_RATIO = 1.5;
 const DEFAULT_PROCEDURAL_SKY_URI = 'skyboxes/procedural?weather=clear';
 const DEFAULT_SUN_BASE_HEIGHT = 100;
 const DEFAULT_SUN_HEIGHT_RANGE = 150;
@@ -537,14 +541,16 @@ export default class EnvironmentController {
       sunsetAmbientColor,
       twilightAmount * 0.42,
     );
+    const nightDirectionalFloor = this._minDirectionalLightIntensity * NIGHT_DIRECTIONAL_FLOOR_RATIO;
+    const nightAmbientFloor = this._minAmbientLightIntensity * NIGHT_AMBIENT_FLOOR_RATIO;
     const directionalIntensity = Math.max(
-      this._minDirectionalLightIntensity,
-      daylightAmount * this._maxDirectionalLightIntensity + moonlightAmount * 0.12,
+      nightDirectionalFloor,
+      daylightAmount * this._maxDirectionalLightIntensity + moonlightAmount * MOONLIGHT_DIRECTIONAL_INTENSITY,
     );
     const ambientIntensity = Math.max(
-      this._minAmbientLightIntensity,
+      nightAmbientFloor,
       daylightAmount * this._maxAmbientLightIntensity
-        + moonlightAmount * Math.max(0.12, this._minAmbientLightIntensity * 0.72),
+        + moonlightAmount * Math.max(MOONLIGHT_AMBIENT_INTENSITY, this._minAmbientLightIntensity * 0.4),
     );
     const directionalLightPosition = daylightAmount >= moonlightAmount
       ? { x: sunX, y: sunHeight, z: sunZ }

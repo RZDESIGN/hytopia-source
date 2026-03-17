@@ -53,6 +53,7 @@ import { TemporalResolvePass } from '../three/postprocessing/TemporalResolvePass
 import { WhiteCoreBloomPass } from '../three/postprocessing/WhiteCoreBloomPass';
 import { SelectiveOutlinePass } from '../three/postprocessing/SelectiveOutlinePass';
 import { createCinematicLut } from '../three/postprocessing/createCinematicLut';
+import { setDirectionalShadowContrast } from '../three/directionalShadowFade';
 import { WATER_SURFACE_Y_OFFSET } from '../blocks/BlockConstants';
 import Chunk from '../chunks/Chunk';
 import Assets from '../network/Assets';
@@ -124,6 +125,7 @@ const WATER_REFLECTION_MAX_DISTANCE = 84;
 const WATER_REFLECTION_MIN_SCENE_COVERAGE = 0.18;
 const WORLD_FOG_VIEW_DISTANCE_BUFFER = 24;
 const PROCEDURAL_SKY_SETTINGS_BLEND_SPEED = 2.8;
+const GAMEPLAY_DISTANCE_BLUR_REFERENCE_DISTANCE = 130;
 const GAMEPLAY_DISTANCE_BLUR_DISTANCE_SCALE = 0.82;
 const WEATHER_SURFACE_IMPACT_JITTER = 0.34;
 const WEATHER_SURFACE_IMPACT_SCAN_ABOVE = 4;
@@ -136,6 +138,9 @@ const DIRECTIONAL_SHADOW_CASCADE_NEAR_DISTANCE_RATIO = 0.52;
 const DIRECTIONAL_SHADOW_CASCADE_FAR_MAP_SIZE_RATIO = 0.75;
 const DIRECTIONAL_SHADOW_CASCADE_MIN_MAP_SIZE = 512;
 const NEAR_CONTACT_SHADOW_STRENGTH = 0.58;
+const DIRECTIONAL_SHADOW_CONTRAST_DEFAULT = 1.45;
+const DIRECTIONAL_SHADOW_CONTRAST_HIGH = 2.18;
+const DIRECTIONAL_SHADOW_CONTRAST_ULTRA = 2.34;
 const PROCEDURAL_SKY_ENVIRONMENT_BASE_UPDATE_INTERVAL_S = MobileManager.isMobile ? 5.0 : 2.5;
 const PROCEDURAL_SKY_ENVIRONMENT_TRANSITION_UPDATE_INTERVAL_S = MobileManager.isMobile ? 1.5 : 0.5;
 const PROCEDURAL_SKY_ENVIRONMENT_BOX_SIZE = 24;
@@ -405,7 +410,9 @@ export default class Renderer {
   private _debugPanel: DebugPanel | null = null;
   private _debugPanelLoadPromise: Promise<DebugPanel | null> | null = null;
   private _effectComposer: EffectComposer;
+  private _particlesScene: Scene;
   private _renderPass: RenderPass;
+  private _particlesRenderPass: RenderPass;
   private _viewModelRenderPass: RenderPass;
   private _outlinePass: SelectiveOutlinePass;
   private _smaaPass: SMAAPass;
@@ -502,7 +509,10 @@ export default class Renderer {
       this._effectComposer.renderTarget2.depthTexture.dispose();
     }
     this._effectComposer.renderTarget2.depthTexture = this._effectComposer.renderTarget1.depthTexture;
+    this._particlesScene = new Scene();
     this._renderPass = new RenderPass(this._scene, this._game.camera.activeCamera);
+    this._particlesRenderPass = new RenderPass(this._particlesScene, this._game.camera.activeCamera);
+    this._particlesRenderPass.clear = false;
     this._viewModelRenderPass = new RenderPass(this._viewModelScene, this._game.camera.activeCamera);
     this._viewModelRenderPass.clear = false;
     this._viewModelRenderPass.clearDepth = true;
@@ -536,6 +546,7 @@ export default class Renderer {
     Assets.ktx2Loader.detectSupport(this._renderer);
 
     this._clampTargetFogNearAndFar();
+    this._updateDirectionalShadowContrast();
 
     this._setupRenderer();
     this._setupSceneUiRenderer();
@@ -678,6 +689,7 @@ export default class Renderer {
     this._effectComposer.addPass(this._nearContactShadowsPass);
     this._effectComposer.addPass(this._atmospherePass);
     this._effectComposer.addPass(this._gameplayDistanceBlurPass);
+    this._effectComposer.addPass(this._particlesRenderPass);
     this._effectComposer.addPass(this._outlinePass);
     this._effectComposer.addPass(this._analyticSunHaloPass);
     this._effectComposer.addPass(this._viewModelRenderPass);
@@ -725,8 +737,16 @@ export default class Renderer {
     this._scene.add(object);
   }
 
+  public addToParticlesScene(object: Object3D): void {
+    this._particlesScene.add(object);
+  }
+
   public removeFromScene(object: Object3D): void {
     this._scene.remove(object);
+  }
+
+  public removeFromParticlesScene(object: Object3D): void {
+    this._particlesScene.remove(object);
   }
 
   public purgeEntityObjects(entityId: number): number {
@@ -884,6 +904,7 @@ export default class Renderer {
     this._lastPostProcessingState.lut = hasLut;
     if (shouldUsePostProcessing) {
       this._renderPass.camera = activeCamera;
+      this._particlesRenderPass.camera = activeCamera;
       // Keep the first-person view model out of the full-screen post stack so
       // weapon/hand motion does not pay for bloom/SMAA passes every frame.
       this._viewModelRenderPass.enabled = false;
@@ -891,6 +912,7 @@ export default class Renderer {
       this._nearContactShadowsPass.enabled = hasNearContactShadows;
       this._atmospherePass.enabled = hasAtmosphere;
       this._gameplayDistanceBlurPass.enabled = hasGameplayDistanceBlur;
+      this._particlesRenderPass.enabled = this._particlesScene.children.length > 0;
       this._outlinePass.enabled = hasOutlineTargets;
       this._analyticSunHaloPass.enabled = hasAnalyticSunHalo;
       this._bloomPass.enabled = !!pp.bloom;
@@ -920,6 +942,15 @@ export default class Renderer {
       this._temporalResolvePass.markHistoryInvalid();
       try {
         this._renderer.render(this._scene, activeCamera);
+        if (this._particlesScene.children.length > 0) {
+          const previousAutoClear = this._renderer.autoClear;
+          try {
+            this._renderer.autoClear = false;
+            this._renderer.render(this._particlesScene, activeCamera);
+          } finally {
+            this._renderer.autoClear = previousAutoClear;
+          }
+        }
       } finally {
         if (jitterApplied) {
           this._clearTemporalJitter(activeCamera);
@@ -1277,6 +1308,8 @@ export default class Renderer {
 
   private _loadProceduralSky(skyboxUri: string): void {
     if (this._activeSkyboxUri === skyboxUri) {
+      this._pendingSkyboxTexture = null;
+      this._pendingSkyboxUri = null;
       return;
     }
 
@@ -1345,7 +1378,13 @@ export default class Renderer {
   }
 
   private async _loadSkybox(skyboxUri: string): Promise<void> {
-    if (skyboxUri === this._activeSkyboxUri || skyboxUri === this._pendingSkyboxUri) {
+    if (skyboxUri === this._activeSkyboxUri) {
+      this._pendingSkyboxTexture = null;
+      this._pendingSkyboxUri = null;
+      return;
+    }
+
+    if (skyboxUri === this._pendingSkyboxUri) {
       return;
     }
 
@@ -1777,6 +1816,7 @@ export default class Renderer {
     this._adaptiveResolutionScale = 1;
     this._adaptiveResolutionDownHoldS = 0;
     this._adaptiveResolutionUpHoldS = 0;
+    this._updateDirectionalShadowContrast();
     this._temporalResolvePass.markHistoryInvalid();
     this._temporalJitterIndex = 1;
     this._setEnvironmentOverrideTexture(null);
@@ -1844,6 +1884,20 @@ export default class Renderer {
     this._directionalViewModelLight.castShadow = false;
     this._applyShadowSettings();
     this._updateDirectionalLight(0, true);
+  }
+
+  private _updateDirectionalShadowContrast(): void {
+    switch (this._game.settingsManager.qualityPresetLevel) {
+      case 'ULTRA':
+        setDirectionalShadowContrast(DIRECTIONAL_SHADOW_CONTRAST_ULTRA);
+        break;
+      case 'HIGH':
+        setDirectionalShadowContrast(DIRECTIONAL_SHADOW_CONTRAST_HIGH);
+        break;
+      default:
+        setDirectionalShadowContrast(DIRECTIONAL_SHADOW_CONTRAST_DEFAULT);
+        break;
+    }
   }
 
   private _syncFirstPersonViewModelEntity(): void {
@@ -2473,6 +2527,17 @@ export default class Renderer {
   private _updateGameplayDistanceBlur(): void {
     const blurSettings = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.depthBlur;
     const activeCamera = this._game.camera.activeCamera;
+    const focusAnchorEntity = this._game.camera.isGameCameraActive && !this._game.camera.isFirstPersonGameCameraActive
+      ? this._game.camera.gameCameraAttachedEntity
+      : undefined;
+    const focusAnchorWorld = focusAnchorEntity
+      ? focusAnchorEntity.getWorldPosition(vec3b)
+      : (
+        this._game.camera.isGameCameraActive && !this._game.camera.isFirstPersonGameCameraActive
+          ? this._game.camera.gameCameraSmoothedAttachmentPosition
+          : undefined
+      );
+    const hasFocusAnchor = !!focusAnchorWorld;
 
     if (
       !blurSettings?.enabled
@@ -2484,26 +2549,34 @@ export default class Renderer {
     }
 
     const configuredViewDistance = this.viewDistance;
-    const blurDistance = configuredViewDistance * GAMEPLAY_DISTANCE_BLUR_DISTANCE_SCALE;
+    const blurDistance = Math.min(configuredViewDistance, GAMEPLAY_DISTANCE_BLUR_REFERENCE_DISTANCE) * GAMEPLAY_DISTANCE_BLUR_DISTANCE_SCALE;
     const fog = this._scene.fog as Fog | null;
     const fogNear = fog?.near ?? configuredViewDistance * blurSettings.focusFarRatio;
     const fogFar = fog?.far ?? configuredViewDistance;
-    const nearBlurStart = Math.max(
-      activeCamera.near + 1.5,
-      Math.min(blurDistance * blurSettings.nearStartRatio, fogNear * 0.7),
-    );
-    const focusNear = Math.max(
-      nearBlurStart + 1,
-      Math.min(blurDistance * blurSettings.focusNearRatio, fogNear * 0.8),
-    );
-    const focusFar = Math.max(
-      focusNear + 1,
-      Math.min(blurDistance * blurSettings.focusFarRatio, fogNear),
-    );
-    const farBlurEnd = Math.max(
-      focusFar + 1,
-      Math.min(blurDistance * blurSettings.farEndRatio, fogFar),
-    );
+    const nearBlurStart = hasFocusAnchor
+      ? 0
+      : Math.max(
+        activeCamera.near + 1.5,
+        Math.min(blurDistance * blurSettings.nearStartRatio, fogNear * 0.7),
+      );
+    const focusNear = hasFocusAnchor
+      ? 0.01
+      : Math.max(
+        nearBlurStart + 1,
+        Math.min(blurDistance * blurSettings.focusNearRatio, fogNear * 0.8),
+      );
+    const focusFar = hasFocusAnchor
+      ? Math.max(6, blurDistance * blurSettings.focusFarRatio)
+      : Math.max(
+        focusNear + 1,
+        Math.min(blurDistance * blurSettings.focusFarRatio, fogNear),
+      );
+    const farBlurEnd = hasFocusAnchor
+      ? Math.max(focusFar + 4, blurDistance * blurSettings.farEndRatio)
+      : Math.max(
+        focusFar + 1,
+        Math.min(blurDistance * blurSettings.farEndRatio, fogFar),
+      );
 
     if (farBlurEnd <= focusFar || focusFar <= focusNear || focusNear <= nearBlurStart) {
       this._gameplayDistanceBlurPass.enabled = false;
@@ -2512,10 +2585,19 @@ export default class Renderer {
 
     this._gameplayDistanceBlurPass.enabled = true;
     this._gameplayDistanceBlurPass.setCamera(activeCamera);
+    if (hasFocusAnchor) {
+      vec3c.copy(focusAnchorWorld).applyMatrix4(activeCamera.matrixWorldInverse);
+      this._gameplayDistanceBlurPass.setFocusAnchorView(vec3c);
+    } else {
+      this._gameplayDistanceBlurPass.setFocusAnchorView(null);
+    }
     this._gameplayDistanceBlurPass.setFocusBand(nearBlurStart, focusNear, focusFar, farBlurEnd);
+    // Blur radii are specified in screen-space pixels. Scale them by the actual
+    // render pixel ratio so higher internal-resolution presets like ULTRA keep
+    // the same visible blur strength instead of looking sharper by accident.
     this._gameplayDistanceBlurPass.setMaxBlurRadiiPx(
-      blurSettings.maxNearRadiusPx * this._adaptiveResolutionScale,
-      blurSettings.maxFarRadiusPx * this._adaptiveResolutionScale,
+      blurSettings.maxNearRadiusPx * this.effectivePixelRatio,
+      blurSettings.maxFarRadiusPx * this.effectivePixelRatio,
     );
   }
 

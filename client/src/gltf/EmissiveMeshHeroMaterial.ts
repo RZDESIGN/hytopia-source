@@ -69,7 +69,7 @@ export default class EmissiveMeshHeroMaterial extends MeshPhysicalMaterial {
       processor(params, renderer);
     }
 
-    params.fragmentShader = applyDirectionalShadowEdgeFade(params.fragmentShader);
+    params.fragmentShader = applyDirectionalShadowEdgeFade(params.fragmentShader, params.uniforms as Record<string, { value: number }>);
   }
 
   clone(): this {
