@@ -102,6 +102,7 @@ const DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS = 0.02;
 const DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER = 1.5;
 const DIRECTIONAL_LIGHT_MIN_HEIGHT = 24;
 const DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO = 0.35;
+const DIRECTIONAL_LIGHT_SHADOW_ATTACHED_ENTITY_FORWARD_OFFSET_RATIO = 0.1;
 const DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S = 1 / 30;
 const DIRECTIONAL_LIGHT_SHADOW_IMMEDIATE_UPDATE_DISTANCE_RATIO = 0.5;
 const DIRECTIONAL_LIGHT_SHADOW_CAMERA_POSITION_DELTA_SQ_THRESHOLD = 0.025 * 0.025;
@@ -1586,9 +1587,9 @@ export default class Renderer {
     const sunSize = 260 + (1 - Math.max(0, sunViewDirection.y)) * 60;
 
     sunMaterial.dayAmount = dayAmount;
-    sunMaterial.haloAmount = 1.0 - this._proceduralSkySettings.storminess * 0.16;
+    sunMaterial.haloAmount = 0.55 - this._proceduralSkySettings.storminess * 0.12;
     sunMaterial.sunColor.setRGB(1.0, 0.97, 0.92);
-    sunMaterial.sunIntensity = Math.max(3.6, Math.min(this._directionalSceneLight.intensity + 1.2, 4.8));
+    sunMaterial.sunIntensity = Math.max(1.6, Math.min(this._directionalSceneLight.intensity * 0.62 + 0.35, 2.35));
 
     this._proceduralSunMesh.visible = dayAmount > 0.001;
     if (this._proceduralSunMesh.visible) {
@@ -2699,10 +2700,10 @@ export default class Renderer {
   }
 
   private _shouldUseDirectionalShadowCascades(): boolean {
-    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
-    return !!shadows?.enabled
-      && !MobileManager.isMobile
-      && (shadows.directionalMapSize >= 1024 || shadows.directionalDistance >= 64);
+    // The cascade path is currently unstable on desktop quality presets and can
+    // result in missing directional cast shadows. Prefer the single directional
+    // shadow path until the cascade implementation is rebuilt safely.
+    return false;
   }
 
   private _shouldUseNearContactShadows(): boolean {
@@ -2877,6 +2878,15 @@ export default class Renderer {
     const directionalDistance = shadows?.directionalDistance ?? 48;
     const nearCascadeDistance = directionalDistance * DIRECTIONAL_SHADOW_CASCADE_NEAR_DISTANCE_RATIO;
     const cameraPosition = this._game.camera.activeCamera.position;
+    const attachedShadowEntity = this._game.camera.isGameCameraActive
+      ? this._game.camera.gameCameraAttachedEntity
+      : undefined;
+    const shadowAnchorPosition = attachedShadowEntity
+      ? attachedShadowEntity.getWorldPosition(vec3e)
+      : cameraPosition;
+    const shadowForwardOffsetRatio = attachedShadowEntity
+      ? DIRECTIONAL_LIGHT_SHADOW_ATTACHED_ENTITY_FORWARD_OFFSET_RATIO
+      : DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO;
     const lightHeight = Math.max(DIRECTIONAL_LIGHT_MIN_HEIGHT, directionalDistance * DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER);
     const nearCascadeLightHeight = Math.max(DIRECTIONAL_LIGHT_MIN_HEIGHT, nearCascadeDistance * DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER);
     const directionalMapSize = this._directionalSceneLight.shadow.mapSize.x || shadows?.directionalMapSize || 1024;
@@ -2885,13 +2895,13 @@ export default class Renderer {
 
     this._directionalShadowUpdateCooldownS = Math.max(0, this._directionalShadowUpdateCooldownS - frameDeltaS);
 
-    vec3.copy(cameraPosition);
-    vec3b.copy(cameraPosition);
+    vec3.copy(shadowAnchorPosition);
+    vec3b.copy(shadowAnchorPosition);
     vec3d.copy(this._game.camera.activeViewDir);
     if (vec3d.lengthSq() > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
       vec3d.normalize();
-      vec3.addScaledVector(vec3d, directionalDistance * DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO);
-      vec3b.addScaledVector(vec3d, nearCascadeDistance * DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO);
+      vec3.addScaledVector(vec3d, directionalDistance * shadowForwardOffsetRatio);
+      vec3b.addScaledVector(vec3d, nearCascadeDistance * shadowForwardOffsetRatio);
     }
 
     if (shadows?.enabled) {

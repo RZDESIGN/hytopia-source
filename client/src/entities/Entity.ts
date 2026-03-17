@@ -2606,6 +2606,13 @@ export default class Entity {
     const dyCamera = this._entityRoot.position.y - cameraPosition.y;
     const dzCamera = this._entityRoot.position.z - cameraPosition.z;
     const distanceToCamera = Math.sqrt(dxCamera * dxCamera + dyCamera * dyCamera + dzCamera * dzCamera);
+    const heroAlwaysCastDistance = directionalShadowDistance * 1.35 + shadowCasterRadius * 18;
+
+    if (isHeroEntity && distanceToCamera <= heroAlwaysCastDistance) {
+      this._setShadowCastingEnabled(true);
+      return;
+    }
+
     const maxCasterDistance = Math.min(
       this._game.renderer.viewDistance * (isHeroEntity ? ENTITY_SHADOW_LOD_HERO_MAX_CAMERA_DISTANCE_RATIO : ENTITY_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO),
       directionalShadowDistance * (isHeroEntity ? 1.9 : 1.45) + shadowCasterRadius * (isHeroEntity ? 14 : 10),
