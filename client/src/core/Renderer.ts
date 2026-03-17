@@ -97,16 +97,13 @@ const SCENE_UI_MEDIUM_LOAD_MAX = 12;
 const SCENE_UI_LIGHT_RENDER_INTERVAL_S = MobileManager.isMobile ? 1 / 30 : 1 / 60;
 const SCENE_UI_MEDIUM_RENDER_INTERVAL_S = MobileManager.isMobile ? 1 / 20 : 1 / 30;
 const SCENE_UI_HEAVY_RENDER_INTERVAL_S = MobileManager.isMobile ? 1 / 15 : 1 / 20;
-const DIRECTIONAL_LIGHT_SHADOW_BIAS = -0.0002;
-const DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS = 0.02;
+const DIRECTIONAL_LIGHT_SHADOW_BIAS = -0.00012;
+const DIRECTIONAL_LIGHT_SHADOW_NORMAL_BIAS = 0.01;
 const DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER = 1.5;
 const DIRECTIONAL_LIGHT_MIN_HEIGHT = 24;
-const DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO = 0.35;
-const DIRECTIONAL_LIGHT_SHADOW_ATTACHED_ENTITY_FORWARD_OFFSET_RATIO = 0.1;
 const DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S = 1 / 30;
 const DIRECTIONAL_LIGHT_SHADOW_IMMEDIATE_UPDATE_DISTANCE_RATIO = 0.5;
 const DIRECTIONAL_LIGHT_SHADOW_CAMERA_POSITION_DELTA_SQ_THRESHOLD = 0.025 * 0.025;
-const DIRECTIONAL_LIGHT_SHADOW_VIEW_DIR_DOT_THRESHOLD = 0.999996;
 const DIRECTIONAL_LIGHT_SHADOW_CONTINUOUS_UPDATE_HOLD_S = 0.12;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_PARALLEL_THRESHOLD = 0.95;
 const DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ = 0.000001;
@@ -185,6 +182,10 @@ const waterReflectionTextureMatrixBias = new Matrix4().set(
   0.0, 0.0, 0.5, 0.5,
   0.0, 0.0, 0.0, 1.0,
 );
+
+function isApproximatelyEqual(a: number, b: number, epsilon: number = 0.0001): boolean {
+  return Math.abs(a - b) <= epsilon;
+}
 
 // Simple data container for ambient light (replaces Three.js AmbientLight which has no effect on MeshBasicMaterial)
 export type AmbientLightData = {
@@ -397,6 +398,8 @@ export default class Renderer {
   private _waterReflectionPlaneY: number | null = null;
   private _lastWaterReflectionCameraPosition: Vector3 = new Vector3();
   private _lastWaterReflectionViewDir: Vector3 = new Vector3();
+  private _activeSkyboxUri: string | null = null;
+  private _pendingSkyboxUri: string | null = null;
   private _pendingSkyboxTexture: Promise<CubeTexture> | null = null;
   private _debugVisible: boolean = false;
   private _debugPanel: DebugPanel | null = null;
@@ -517,8 +520,8 @@ export default class Renderer {
     // Question: Should parameters be configurable?
     this._bloomPass = new WhiteCoreBloomPass(
       vec2,
-      0.18, // strength
-      0.3,  // radius
+      0.14, // strength
+      0.2,  // radius
       this._calculateBloomThreshold(), // threshold
     );
     this._temporalResolvePass = new TemporalResolvePass();
@@ -995,6 +998,9 @@ export default class Renderer {
   }
 
   private _disposeSkyVisuals(): void {
+    this._activeSkyboxUri = null;
+    this._pendingSkyboxUri = null;
+    this._pendingSkyboxTexture = null;
     this._setEnvironmentOverrideTexture(null);
     this._setBaseEnvironmentTexture(null);
     this._disposeProceduralSkyEnvironment();
@@ -1165,18 +1171,20 @@ export default class Renderer {
     }
 
     this._proceduralSkyEnvironmentUpdateCooldownS = Math.max(0, this._proceduralSkyEnvironmentUpdateCooldownS - frameDeltaS);
+    if (this._proceduralSkyEnvironmentUpdateCooldownS > 0) {
+      return;
+    }
 
     const sourceMaterial = this._skyboxMesh.material;
     const environmentMaterial = this._proceduralSkyEnvironmentSkyMesh.material as ProceduralSkyMaterial;
     environmentMaterial.time = this._proceduralSkyTimeS;
     environmentMaterial.worldSeed = this._proceduralSkyWorldSeed;
-    environmentMaterial.ambientColor.copy(sourceMaterial.ambientColor);
-    environmentMaterial.fogColor.copy(sourceMaterial.fogColor);
+    environmentMaterial.fogColor.copy(sourceMaterial.fogColor).multiplyScalar(0.76);
     environmentMaterial.sunColor.copy(sourceMaterial.sunColor);
     environmentMaterial.sunDirection.copy(sourceMaterial.sunDirection);
     // Keep lightning out of the captured environment to avoid visible reflection popping.
     environmentMaterial.lightning = 0;
-    environmentMaterial.skyIntensity = this._skyboxIntensity;
+    environmentMaterial.skyIntensity = Math.max(0.08, this._skyboxIntensity * 0.62);
     environmentMaterial.cloudCoverage = this._proceduralSkySettings.cloudCoverage;
     environmentMaterial.cloudOpacity = this._proceduralSkySettings.cloudOpacity;
     environmentMaterial.cloudScale = this._proceduralSkySettings.cloudScale;
@@ -1189,9 +1197,9 @@ export default class Renderer {
     const dayAmount = Math.max(0, Math.min(1, (sunViewDirection.y + 0.1) / 0.24)) * (1 - this._proceduralSkySettings.storminess * 0.65);
     const sunSize = (260 + (1 - Math.max(0, sunViewDirection.y)) * 60) * PROCEDURAL_SKY_ENVIRONMENT_SUN_SIZE_RATIO;
     sunMaterial.dayAmount = dayAmount;
-    sunMaterial.haloAmount = 0.42 - this._proceduralSkySettings.storminess * 0.1;
+    sunMaterial.haloAmount = 0.16 - this._proceduralSkySettings.storminess * 0.05;
     sunMaterial.sunColor.setRGB(1.0, 0.97, 0.92);
-    sunMaterial.sunIntensity = Math.max(1.25, Math.min(this._directionalSceneLight.intensity * 0.5 + 0.15, 1.95));
+    sunMaterial.sunIntensity = Math.max(0.56, Math.min(this._directionalSceneLight.intensity * 0.2 + 0.04, 0.84));
     this._proceduralSkyEnvironmentSunMesh.visible = dayAmount > 0.001;
     if (this._proceduralSkyEnvironmentSunMesh.visible) {
       this._proceduralSkyEnvironmentSunMesh.position.copy(sunViewDirection).multiplyScalar(PROCEDURAL_SKY_ENVIRONMENT_SUN_DISTANCE);
@@ -1216,10 +1224,6 @@ export default class Renderer {
       this._proceduralSkyEnvironmentMoonMesh.scale.set(moonSize, moonSize, 1);
       this._proceduralSkyEnvironmentMoonMesh.updateMatrix();
       this._proceduralSkyEnvironmentMoonMesh.matrixWorld.copy(this._proceduralSkyEnvironmentMoonMesh.matrix);
-    }
-
-    if (this._proceduralSkyEnvironmentUpdateCooldownS > 0) {
-      return;
     }
 
     this._renderProceduralSkyEnvironment();
@@ -1251,8 +1255,8 @@ export default class Renderer {
 
     const lightingLevel = this._ambientLight.intensity * 0.68 + directionalIntensity * 0.32;
     this._renderer.toneMappingExposure = Math.max(
-      0.82,
-      Math.min(0.96, 0.94 - lightingLevel * 0.055 + flashIntensity * 0.02),
+      0.74,
+      Math.min(0.88, 0.86 - lightingLevel * 0.06 + flashIntensity * 0.02),
     );
   }
 
@@ -1272,6 +1276,10 @@ export default class Renderer {
   }
 
   private _loadProceduralSky(skyboxUri: string): void {
+    if (this._activeSkyboxUri === skyboxUri) {
+      return;
+    }
+
     const parsedSkySettings = parseProceduralSkySettings(skyboxUri);
     const skySettings = parsedSkySettings ? cloneProceduralSkySettings(parsedSkySettings) : null;
     if (!skySettings) {
@@ -1279,6 +1287,7 @@ export default class Renderer {
     }
 
     this._pendingSkyboxTexture = null;
+    this._pendingSkyboxUri = null;
 
     if (
       this._skyboxMesh
@@ -1289,6 +1298,7 @@ export default class Renderer {
       && this._proceduralSkySettings
     ) {
       this._proceduralSkyTargetSettings = skySettings;
+      this._activeSkyboxUri = skyboxUri;
       if (!this._proceduralSkyEnvironmentScene) {
         this._setupProceduralSkyEnvironment(this._proceduralSkySettings);
       }
@@ -1328,18 +1338,24 @@ export default class Renderer {
     this._scene.add(this._proceduralSurfaceImpacts.mesh);
 
     this._setupProceduralSkyEnvironment(skySettings);
+    this._activeSkyboxUri = skyboxUri;
     this._proceduralSkyColor.copy(this._targetSkyboxColor);
     this._interpolatingSkyboxColor = false;
     this._updateProceduralSky(0);
   }
 
   private async _loadSkybox(skyboxUri: string): Promise<void> {
+    if (skyboxUri === this._activeSkyboxUri || skyboxUri === this._pendingSkyboxUri) {
+      return;
+    }
+
     if (parseProceduralSkySettings(skyboxUri)) {
       this._loadProceduralSky(skyboxUri);
       return;
     }
 
     const pendingSkyboxTexture = this._loadSkyboxTexture(Assets.toAssetUri(skyboxUri));
+    this._pendingSkyboxUri = skyboxUri;
     this._pendingSkyboxTexture = pendingSkyboxTexture;
 
     let skyboxTexture;
@@ -1358,7 +1374,7 @@ export default class Renderer {
     }
 
     // Looks like a new skybox texture request was issued while awaiting, so do nothing
-    if (this._pendingSkyboxTexture !== pendingSkyboxTexture) {
+    if (this._pendingSkyboxTexture !== pendingSkyboxTexture || this._pendingSkyboxUri !== skyboxUri) {
       return;
     }
 
@@ -1368,6 +1384,7 @@ export default class Renderer {
     }
 
     this._pendingSkyboxTexture = null;
+    this._pendingSkyboxUri = null;
 
     this._disposeSkyVisuals();
 
@@ -1380,6 +1397,7 @@ export default class Renderer {
 
     this._scene.add(this._skyboxMesh);
     this._setBaseEnvironmentTexture(skyboxTexture);
+    this._activeSkyboxUri = skyboxUri;
 
     // Apply current target color immediately to avoid race condition
     // when skyboxIntensity arrives in same packet as skyboxUri
@@ -1420,24 +1438,35 @@ export default class Renderer {
 
     if (deserializedWorld.ambientLightColor) {
       // Colors from protocol are authored as sRGB; convert once for correct linear lighting math.
-      this._baseAmbientLightColor.copy(deserializedWorld.ambientLightColor).convertSRGBToLinear();
-      needsTargetColorsUpdate = true;
+      color.copy(deserializedWorld.ambientLightColor).convertSRGBToLinear();
+      if (!this._baseAmbientLightColor.equals(color)) {
+        this._baseAmbientLightColor.copy(color);
+        needsTargetColorsUpdate = true;
+      }
     }
 
     if (deserializedWorld.ambientLightIntensity !== undefined) {
-      this._baseAmbientLightIntensity = deserializedWorld.ambientLightIntensity;
-      // Update bloom threshold dynamically based on ambient light intensity
-      // Formula: ambientLightIntensity + 0.01 (accounting for smoothWidth=0.01)
-      // This ensures white colors lit by ambient light don't trigger bloom
-      this._bloomPass.threshold = this._calculateBloomThreshold();
+      if (!isApproximatelyEqual(this._baseAmbientLightIntensity, deserializedWorld.ambientLightIntensity)) {
+        this._baseAmbientLightIntensity = deserializedWorld.ambientLightIntensity;
+        // Update bloom threshold dynamically based on ambient light intensity
+        // Formula: ambientLightIntensity + 0.01 (accounting for smoothWidth=0.01)
+        // This ensures white colors lit by ambient light don't trigger bloom
+        this._bloomPass.threshold = this._calculateBloomThreshold();
+      }
     }
 
     if (deserializedWorld.directionalLightColor) {
-      this._baseDirectionalLightColor.copy(deserializedWorld.directionalLightColor).convertSRGBToLinear();
+      color.copy(deserializedWorld.directionalLightColor).convertSRGBToLinear();
+      if (!this._baseDirectionalLightColor.equals(color)) {
+        this._baseDirectionalLightColor.copy(color);
+      }
     }
 
     if (deserializedWorld.directionalLightIntensity !== undefined) {
-      this._baseDirectionalLightIntensity = deserializedWorld.directionalLightIntensity;
+      if (!isApproximatelyEqual(this._baseDirectionalLightIntensity, deserializedWorld.directionalLightIntensity)) {
+        this._baseDirectionalLightIntensity = deserializedWorld.directionalLightIntensity;
+        this._bloomPass.threshold = this._calculateBloomThreshold();
+      }
     }
 
     if (deserializedWorld.directionalLightPosition) {
@@ -1457,7 +1486,9 @@ export default class Renderer {
 
     if (deserializedWorld.skySunDirection !== undefined) {
       if (deserializedWorld.skySunDirection === null) {
-        this._skySunDirection = null;
+        if (this._skySunDirection !== null) {
+          this._skySunDirection = null;
+        }
       } else {
         vec3.set(
           deserializedWorld.skySunDirection.x,
@@ -1468,8 +1499,10 @@ export default class Renderer {
           vec3.normalize();
           if (this._skySunDirection === null) {
             this._skySunDirection = new Vector3();
+            this._skySunDirection.copy(vec3);
+          } else if (this._skySunDirection.distanceToSquared(vec3) > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
+            this._skySunDirection.copy(vec3);
           }
-          this._skySunDirection.copy(vec3);
         }
       }
     }
@@ -1477,14 +1510,20 @@ export default class Renderer {
     if (deserializedWorld.fogColor !== undefined) {
       // Ensure fog color is in linear color space for proper rendering
       if (deserializedWorld.fogColor) {
+        color.copy(deserializedWorld.fogColor).convertSRGBToLinear();
         if (this._fogColor === null) {
-          this._fogColor = new Color();
+          this._fogColor = new Color().copy(color);
+          needsTargetColorsUpdate = true;
+        } else if (!this._fogColor.equals(color)) {
+          this._fogColor.copy(color);
+          needsTargetColorsUpdate = true;
         }
-        this._fogColor.copy(deserializedWorld.fogColor).convertSRGBToLinear();
       } else {
-        this._fogColor = null;
+        if (this._fogColor !== null) {
+          this._fogColor = null;
+          needsTargetColorsUpdate = true;
+        }
       }
-      needsTargetColorsUpdate = true;
     }
 
     if (deserializedWorld.fogFar !== undefined) {
@@ -1502,8 +1541,10 @@ export default class Renderer {
     }
 
     if (deserializedWorld.skyboxIntensity !== undefined) {
-      this._skyboxIntensity = deserializedWorld.skyboxIntensity;
-      needsTargetColorsUpdate = true;
+      if (!isApproximatelyEqual(this._skyboxIntensity, deserializedWorld.skyboxIntensity)) {
+        this._skyboxIntensity = deserializedWorld.skyboxIntensity;
+        needsTargetColorsUpdate = true;
+      }
     }
 
     if (needsTargetColorsUpdate) {
@@ -1554,7 +1595,6 @@ export default class Renderer {
     this._updateLightningFlash(lightningIntensity);
 
     material.time = this._proceduralSkyTimeS;
-    material.ambientColor.copy(this._ambientLight.color).multiplyScalar(this._ambientLight.intensity);
     material.fogColor.copy(fogColor);
     material.sunColor.copy(this._directionalSceneLight.color);
     const skySunDirection = this._skySunDirection ?? this._sunDirection;
@@ -1568,8 +1608,9 @@ export default class Renderer {
     material.storminess = this._proceduralSkySettings.storminess;
     material.windDirection.copy(this._proceduralSkySettings.windDirection);
 
-    this._proceduralSkyColor.copy(fogColor).lerp(material.ambientColor, 0.32);
-    this._proceduralSkyColor.multiplyScalar(Math.max(0.08, this._skyboxIntensity));
+    color.copy(this._ambientLight.color).multiplyScalar(this._ambientLight.intensity);
+    this._proceduralSkyColor.copy(fogColor).lerp(color, 0.18);
+    this._proceduralSkyColor.multiplyScalar(Math.max(0.06, this._skyboxIntensity * 0.72));
 
     const cameraPosition = vec3.setFromMatrixPosition(this._game.camera.activeCamera.matrixWorld);
     this._skyboxMesh.position.copy(cameraPosition);
@@ -1587,9 +1628,9 @@ export default class Renderer {
     const sunSize = 260 + (1 - Math.max(0, sunViewDirection.y)) * 60;
 
     sunMaterial.dayAmount = dayAmount;
-    sunMaterial.haloAmount = 0.55 - this._proceduralSkySettings.storminess * 0.12;
+    sunMaterial.haloAmount = 0.3 - this._proceduralSkySettings.storminess * 0.09;
     sunMaterial.sunColor.setRGB(1.0, 0.97, 0.92);
-    sunMaterial.sunIntensity = Math.max(1.6, Math.min(this._directionalSceneLight.intensity * 0.62 + 0.35, 2.35));
+    sunMaterial.sunIntensity = Math.max(1.02, Math.min(this._directionalSceneLight.intensity * 0.4 + 0.18, 1.55));
 
     this._proceduralSunMesh.visible = dayAmount > 0.001;
     if (this._proceduralSunMesh.visible) {
@@ -2707,8 +2748,11 @@ export default class Renderer {
   }
 
   private _shouldUseNearContactShadows(): boolean {
-    const shadows = this._game.settingsManager.qualityPerfTradeoff.shadows;
-    return !!shadows?.enabled && !MobileManager.isMobile;
+    // This screen-space contact shadow pass produces camera-relative ground
+    // darkening that can look like real cast shadows sliding as the view
+    // rotates. Keep it disabled until the pass is rebuilt with stable world
+    // anchoring and proper material integration.
+    return false;
   }
 
   private _updateNearContactShadows(): void {
@@ -2767,7 +2811,7 @@ export default class Renderer {
       * forwardVisibility
       * edgeVisibility
       * thirdPersonPenalty
-      * (0.008 + this._directionalSceneLight.intensity * 0.014)
+      * (0.004 + this._directionalSceneLight.intensity * 0.008)
       * (1 - storminess * 0.55);
 
     this._analyticSunHaloPass.setSun(
@@ -2803,6 +2847,7 @@ export default class Renderer {
   private _markDirectionalShadowDirty(): void {
     this._directionalShadowNeedsUpdate = true;
     this._directionalShadowUpdateCooldownS = 0;
+    this._renderer.shadowMap.needsUpdate = true;
   }
 
   private _snapDirectionalShadowFocusCenter(focusCenter: Vector3, directionalDistance: number, directionalMapSize: number): void {
@@ -2844,7 +2889,7 @@ export default class Renderer {
     shadowCamera.updateProjectionMatrix();
   }
 
-  private _isDirectionalShadowMotionActive(frameDeltaS: number, cameraPosition: Vector3, viewDir: Vector3): boolean {
+  private _isDirectionalShadowMotionActive(frameDeltaS: number, cameraPosition: Vector3): boolean {
     this._directionalShadowContinuousUpdateRemainingS = Math.max(
       0,
       this._directionalShadowContinuousUpdateRemainingS - frameDeltaS,
@@ -2853,19 +2898,10 @@ export default class Renderer {
     const cameraMoved = this._lastDirectionalShadowCameraPosition.distanceToSquared(cameraPosition)
       >= DIRECTIONAL_LIGHT_SHADOW_CAMERA_POSITION_DELTA_SQ_THRESHOLD;
 
-    let viewDirChanged = false;
-    if (viewDir.lengthSq() > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
-      vec3e.copy(viewDir).normalize();
-      viewDirChanged = this._lastDirectionalShadowViewDir.lengthSq() <= DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ
-        || vec3e.dot(this._lastDirectionalShadowViewDir) <= DIRECTIONAL_LIGHT_SHADOW_VIEW_DIR_DOT_THRESHOLD;
-      this._lastDirectionalShadowViewDir.copy(vec3e);
-    } else {
-      this._lastDirectionalShadowViewDir.set(0, 0, 0);
-    }
-
     this._lastDirectionalShadowCameraPosition.copy(cameraPosition);
+    this._lastDirectionalShadowViewDir.set(0, 0, 0);
 
-    if (cameraMoved || viewDirChanged) {
+    if (cameraMoved) {
       this._directionalShadowContinuousUpdateRemainingS = DIRECTIONAL_LIGHT_SHADOW_CONTINUOUS_UPDATE_HOLD_S;
     }
 
@@ -2884,9 +2920,6 @@ export default class Renderer {
     const shadowAnchorPosition = attachedShadowEntity
       ? attachedShadowEntity.getWorldPosition(vec3e)
       : cameraPosition;
-    const shadowForwardOffsetRatio = attachedShadowEntity
-      ? DIRECTIONAL_LIGHT_SHADOW_ATTACHED_ENTITY_FORWARD_OFFSET_RATIO
-      : DIRECTIONAL_LIGHT_SHADOW_FORWARD_OFFSET_RATIO;
     const lightHeight = Math.max(DIRECTIONAL_LIGHT_MIN_HEIGHT, directionalDistance * DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER);
     const nearCascadeLightHeight = Math.max(DIRECTIONAL_LIGHT_MIN_HEIGHT, nearCascadeDistance * DIRECTIONAL_LIGHT_SHADOW_HEIGHT_MULTIPLIER);
     const directionalMapSize = this._directionalSceneLight.shadow.mapSize.x || shadows?.directionalMapSize || 1024;
@@ -2897,12 +2930,6 @@ export default class Renderer {
 
     vec3.copy(shadowAnchorPosition);
     vec3b.copy(shadowAnchorPosition);
-    vec3d.copy(this._game.camera.activeViewDir);
-    if (vec3d.lengthSq() > DIRECTIONAL_LIGHT_SHADOW_STABILIZATION_EPSILON_SQ) {
-      vec3d.normalize();
-      vec3.addScaledVector(vec3d, directionalDistance * shadowForwardOffsetRatio);
-      vec3b.addScaledVector(vec3d, nearCascadeDistance * shadowForwardOffsetRatio);
-    }
 
     if (shadows?.enabled) {
       this._snapDirectionalShadowFocusCenter(vec3, directionalDistance, useCascades ? farCascadeMapSize : directionalMapSize);
@@ -2912,7 +2939,7 @@ export default class Renderer {
     }
 
     const shadowMotionActive = shadows?.enabled
-      ? this._isDirectionalShadowMotionActive(frameDeltaS, cameraPosition, this._game.camera.activeViewDir)
+      ? this._isDirectionalShadowMotionActive(frameDeltaS, cameraPosition)
       : false;
 
     this._directionalViewModelLight.target.position.set(0, 0, -1);
@@ -2957,6 +2984,7 @@ export default class Renderer {
     } else {
       this._directionalSceneLight.shadow.needsUpdate = true;
     }
+    this._renderer.shadowMap.needsUpdate = true;
     this._directionalShadowNeedsUpdate = false;
     this._directionalShadowInitialized = true;
     this._directionalShadowUpdateCooldownS = shadowMotionActive ? 0 : DIRECTIONAL_LIGHT_SHADOW_UPDATE_INTERVAL_S;
@@ -3137,8 +3165,8 @@ export default class Renderer {
 
     // Daytime directional light can otherwise cause broad scene bloom. Use only
     // the base world lights so transient lightning flashes still bloom.
-    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.68;
-    return Math.max(daytimeGuard + 0.08 + smoothWidth, 1.28 + smoothWidth);
+    const daytimeGuard = this._baseAmbientLightIntensity + this._baseDirectionalLightIntensity * 0.72;
+    return Math.max(daytimeGuard + 0.18 + smoothWidth, 1.42 + smoothWidth);
   }
 
   private _clampTargetFogNearAndFar(): void {

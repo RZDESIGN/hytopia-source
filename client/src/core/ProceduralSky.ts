@@ -33,7 +33,6 @@ export type ProceduralSkySettings = {
   windDirection: Vector2;
 };
 
-const UNIFORM_AMBIENT_COLOR = 'ambientColor';
 const UNIFORM_CLOUD_COVERAGE = 'cloudCoverage';
 const UNIFORM_CLOUD_OPACITY = 'cloudOpacity';
 const UNIFORM_CLOUD_SCALE = 'cloudScale';
@@ -379,7 +378,6 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
   constructor(settings: ProceduralSkySettings) {
     super({
       uniforms: {
-        [UNIFORM_AMBIENT_COLOR]: { value: new Color(0.8, 0.9, 1.0) },
         [UNIFORM_CLOUD_COVERAGE]: { value: settings.cloudCoverage },
         [UNIFORM_CLOUD_OPACITY]: { value: settings.cloudOpacity },
         [UNIFORM_CLOUD_SCALE]: { value: settings.cloudScale },
@@ -396,7 +394,6 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
       },
       vertexShader: ShaderLib.cube.vertexShader,
       fragmentShader: `
-        uniform vec3 ${UNIFORM_AMBIENT_COLOR};
         uniform float ${UNIFORM_CLOUD_COVERAGE};
         uniform float ${UNIFORM_CLOUD_OPACITY};
         uniform float ${UNIFORM_CLOUD_SCALE};
@@ -572,10 +569,6 @@ export class ProceduralSkyMaterial extends ShaderMaterial {
       depthWrite: false,
       fog: false,
     });
-  }
-
-  public get ambientColor(): Color {
-    return this.uniforms[UNIFORM_AMBIENT_COLOR].value;
   }
 
   public get fogColor(): Color {

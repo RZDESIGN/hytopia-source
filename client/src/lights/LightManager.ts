@@ -40,6 +40,7 @@ type ManagedPointLight = {
 type ManagedSpotLight = {
   data: DeserializedLight;
   light: SpotLight;
+  shadowScore: number;
   target: Object3D;
 };
 
@@ -127,6 +128,7 @@ export default class LightManager {
       return {
         data: { ...deserializedLight },
         light,
+        shadowScore: 0,
         target,
       };
     }
@@ -250,16 +252,10 @@ export default class LightManager {
   private _scoreSpotShadowCandidate(
     entry: ManagedSpotLight,
     cameraPosition: Vector3,
-    cameraForward: Vector3,
   ): number {
     tempInterest.copy(entry.light.position).lerp(entry.target.position, 0.65);
     tempOffset.subVectors(tempInterest, cameraPosition);
     const interestDistance = Math.max(0.001, tempOffset.length());
-    tempOffset.multiplyScalar(1 / interestDistance);
-    const screenWeight = Math.max(0, Math.min(1, (tempOffset.dot(cameraForward) + 0.25) / 1.25));
-    if (screenWeight <= 0.001) {
-      return 0;
-    }
 
     tempLightDirection.subVectors(entry.target.position, entry.light.position);
     const lightDirectionLength = tempLightDirection.length();
@@ -281,7 +277,6 @@ export default class LightManager {
 
     return intensityWeight
       * coneSizeWeight
-      * (0.1 + 0.9 * screenWeight)
       * (0.25 + 0.75 * coneWeight)
       * (0.2 + 0.8 * distanceWeight);
   }
@@ -290,11 +285,15 @@ export default class LightManager {
     const shadowSettings = this._game.settingsManager.qualityPerfTradeoff.shadows;
     const maxSpotlightShadows = shadowSettings?.enabled ? shadowSettings.maxSpotlightShadows : 0;
     const spotlightMapSize = shadowSettings?.spotlightMapSize ?? 512;
+    const cameraPosition = this._game.camera.activeCamera.position;
 
     this._spotShadowCandidates.length = 0;
 
     for (const entry of this._lights.values()) {
       if ('target' in entry && entry.light.visible) {
+        if (maxSpotlightShadows > 0) {
+          entry.shadowScore = this._scoreSpotShadowCandidate(entry, cameraPosition);
+        }
         this._spotShadowCandidates.push(entry);
       }
     }
@@ -305,23 +304,17 @@ export default class LightManager {
       }
       return;
     }
-
-    const cameraPosition = this._game.camera.activeCamera.position;
-    tempForward.copy(this._game.camera.activeViewDir);
-    if (tempForward.lengthSq() <= 0.0001) {
-      tempForward.set(0, 0, -1);
-    } else {
-      tempForward.normalize();
-    }
+    // Keep spotlight shadow assignment stable as the player rotates. View-
+    // dependent scoring causes local shadow maps to reshuffle when the camera
+    // turns, which looks like shadows sliding between unrelated light sources.
     this._spotShadowCandidates.sort(
-      (a, b) => this._scoreSpotShadowCandidate(b, cameraPosition, tempForward)
-        - this._scoreSpotShadowCandidate(a, cameraPosition, tempForward),
+      (a, b) => b.shadowScore - a.shadowScore,
     );
 
     let assignedShadowCount = 0;
     for (let i = 0; i < this._spotShadowCandidates.length; i++) {
       const entry = this._spotShadowCandidates[i];
-      const score = this._scoreSpotShadowCandidate(entry, cameraPosition, tempForward);
+      const score = entry.shadowScore;
       const shouldCastShadow = assignedShadowCount < maxSpotlightShadows && score >= MIN_SPOT_SHADOW_SCORE;
       if (entry.light.castShadow !== shouldCastShadow) {
         entry.light.castShadow = shouldCastShadow;

@@ -1,4 +1,4 @@
-import { Texture } from 'three';
+import { SRGBColorSpace, Texture } from 'three';
 import Assets from "../network/Assets";
 
 type CustomTextureEntry = {
@@ -55,6 +55,7 @@ export default class CustomTextureManager {
       // TODO: Proper error handling. Use Missing Texture as fallback
       //       if loading failed?
       const texture = await texturePromise;
+      texture.colorSpace = SRGBColorSpace;
 
       this._textureToEntry.delete(wrappedTexturePromise);
 
