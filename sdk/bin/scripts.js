@@ -3,6 +3,7 @@
 import { execSync, spawn } from 'child_process';
 import archiver from 'archiver';
 import fs from 'fs';
+import { createRequire } from 'module';
 import path from 'path';
 import nodemon from 'nodemon';
 import readline from 'readline';
@@ -10,6 +11,13 @@ import { fileURLToPath } from 'url';
 
 // Store command-line flags
 const flags = {};
+const LEGACY_SDK_RUNTIME = 'legacy-sdk';
+const LEGACY_RUNTIME_DEPENDENCIES = [
+  '@fails-components/webtransport',
+  '@fails-components/webtransport-transport-http3-quiche',
+  'sharp',
+  'ws'
+];
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -432,6 +440,7 @@ async function packageProject() {
 
   // Prepare to package
   const outputFile = path.join(sourceDir, `${projectName}.zip`);
+  const packagedProjectConfig = buildPackagedProjectConfig(sourceDir, projectName, packageJsonPath);
   
   console.log(`📦 Packaging project "${projectName}"...`);
 
@@ -469,18 +478,22 @@ async function packageProject() {
   const items = fs.readdirSync(sourceDir);
   
   // Files/directories to exclude
-  const excludeItems = [
+  const excludeItems = new Set([
     '.git',
     'node_modules',
-    'package-lock.json',
-    `${projectName}.zip` // Exclude the output file itself
-  ];
+    'package-lock.json'
+  ]);
   
   // Add each item to the archive, excluding the ones in the exclude list
   items.forEach(item => {
     const itemPath = path.join(sourceDir, item);
     
-    if (!excludeItems.includes(item)) {
+    if (!excludeItems.has(item) && !item.endsWith('.zip') && !item.endsWith('.tar.gz')) {
+      if (item === 'package.json' && packagedProjectConfig) {
+        archive.append(`${JSON.stringify(packagedProjectConfig, null, 2)}\n`, { name: item });
+        return;
+      }
+
       const stats = fs.statSync(itemPath);
       
       if (stats.isDirectory()) {
@@ -493,6 +506,72 @@ async function packageProject() {
   
   // Finalize the archive
   archive.finalize();
+}
+
+function buildPackagedProjectConfig(sourceDir, projectName, packageJsonPath) {
+  const projectPackageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  const hytopiaDependency = getHytopiaDependency(projectPackageJson);
+  if (typeof hytopiaDependency !== 'string') {
+    return null;
+  }
+
+  const projectRequire = createRequire(packageJsonPath);
+  const sdkPackageJson = resolveHytopiaPackageJson(sourceDir, hytopiaDependency, projectRequire);
+  if (!sdkPackageJson) {
+    return null;
+  }
+
+  const runtimeDependencies = Object.fromEntries(
+    LEGACY_RUNTIME_DEPENDENCIES
+      .map((dependencyName) => [dependencyName, resolveRuntimeDependencyVersion(projectRequire, sdkPackageJson, dependencyName)])
+      .filter(([, version]) => typeof version === 'string' && version.length > 0)
+  );
+
+  return {
+    name: projectPackageJson.name || projectName,
+    version: projectPackageJson.version || '0.0.0',
+    private: true,
+    type: 'module',
+    scripts: {
+      start: 'node index.mjs'
+    },
+    engines: {
+      node: '>=24'
+    },
+    dependencies: runtimeDependencies,
+    'x-hytopia-runtime': LEGACY_SDK_RUNTIME,
+    'x-hytopia-original-name': projectPackageJson.name || projectName,
+    'x-hytopia-sdk-version': sdkPackageJson.version || null
+  };
+}
+
+function resolveHytopiaPackageJson(sourceDir, hytopiaDependency, projectRequire) {
+  try {
+    const sdkPackageJsonPath = hytopiaDependency.startsWith('file:')
+      ? path.resolve(sourceDir, hytopiaDependency.slice('file:'.length), 'package.json')
+      : path.join(path.dirname(projectRequire.resolve('hytopia')), 'package.json');
+
+    return JSON.parse(fs.readFileSync(sdkPackageJsonPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function resolveRuntimeDependencyVersion(projectRequire, sdkPackageJson, dependencyName) {
+  const directVersion = sdkPackageJson.dependencies?.[dependencyName];
+  if (typeof directVersion === 'string' && directVersion.length > 0) {
+    return directVersion;
+  }
+
+  try {
+    const resolvedPackageJsonPath = projectRequire.resolve(`${dependencyName}/package.json`);
+    const resolvedPackageJson = JSON.parse(fs.readFileSync(resolvedPackageJsonPath, 'utf8'));
+    return typeof resolvedPackageJson.version === 'string' && resolvedPackageJson.version.length > 0
+      ? `^${resolvedPackageJson.version}`
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 // ================================================================================
@@ -523,6 +602,13 @@ function parseCommandLineFlags() {
       flags[flag] = value;
     }
   }
+}
+
+function getHytopiaDependency(packageJson) {
+  return packageJson?.dependencies?.hytopia
+    || packageJson?.devDependencies?.hytopia
+    || packageJson?.optionalDependencies?.hytopia
+    || null;
 }
 
 /**

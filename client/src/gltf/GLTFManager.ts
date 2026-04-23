@@ -982,7 +982,7 @@ export default class GLTFManager {
       });
 
       console.log(`glTF model analysis: URL=${uri}, NodeCount=${nodeCount}, MeshCount=${meshCount}, MaterialCount=${materials.size}.`);
-    });
+    }).catch(() => undefined);
 
     this._uriToEntry.set(uri, entry);
 
@@ -1258,48 +1258,63 @@ export default class GLTFManager {
     const entry = this._uriToEntry.get(uri)!;
     const gltfPromise = entry.gltfPromise;
 
-    const clonedGltfPromise = new Promise<GLTF>(async (resolve) => {
-      // TODO: Proper Error handling
-      const gltf = await gltfPromise;
+    const clonedGltfPromise = new Promise<GLTF>((resolve, reject) => {
+      gltfPromise.then(gltf => {
+        this._gltfToEntry.delete(clonedGltfPromise);
 
-      this._gltfToEntry.delete(clonedGltfPromise);
-
-      // If this request has already been canceled, nothing to do
-      if (!entry.clonedGltfPromiseSet.has(clonedGltfPromise)) {
-        return;
-      }
-
-      entry.gltf = gltf;
-      entry.clonedGltfPromiseSet.delete(clonedGltfPromise);
-
-      const clonedGltf = Object.assign({}, gltf);
-      clonedGltf.scene = gltf.scene.clone();
-
-      let meshCount = 0;
-
-      clonedGltf.scene.traverse(obj => {
-        if (obj instanceof Mesh) {
-          meshCount++;
+        // If this request has already been canceled, nothing to do.
+        if (!entry.clonedGltfPromiseSet.has(clonedGltfPromise)) {
+          return;
         }
+
+        entry.gltf = gltf;
+        entry.clonedGltfPromiseSet.delete(clonedGltfPromise);
+
+        const clonedGltf = Object.assign({}, gltf);
+        clonedGltf.scene = gltf.scene.clone();
+
+        let meshCount = 0;
+
+        clonedGltf.scene.traverse(obj => {
+          if (obj instanceof Mesh) {
+            meshCount++;
+          }
+        });
+
+        if (entry.clonedGltfSet.size === 0) {
+          GLTFStats.sourceMeshCount += meshCount;
+        }
+        GLTFStats.clonedMeshCount += meshCount;
+
+        entry.clonedGltfSet.add(clonedGltf);
+
+        this._gltfToEntry.set(clonedGltf, entry);
+
+        this._applyInstancedMesh(entry, clonedGltf);
+
+        // The model's default texture contents may not be included in the
+        // InstancedTexture, so set needsInstancedTextureRefresh = true.
+        // TODO: Can we set it to true only when necessary?
+        entry.needsInstancedTextureRefresh = true;
+
+        resolve(clonedGltf);
+      }).catch(error => {
+        this._gltfToEntry.delete(clonedGltfPromise);
+
+        const wasPending = entry.clonedGltfPromiseSet.has(clonedGltfPromise);
+        entry.clonedGltfPromiseSet.delete(clonedGltfPromise);
+
+        if (!wasPending) {
+          return;
+        }
+
+        if (!entry.gltf && entry.clonedGltfSet.size === 0 && entry.clonedGltfPromiseSet.size === 0) {
+          this._uriToEntry.delete(entry.uri);
+          GLTFStats.fileCount = this._uriToEntry.size;
+        }
+
+        reject(error);
       });
-
-      if (entry.clonedGltfSet.size === 0) {
-        GLTFStats.sourceMeshCount += meshCount;
-      }
-      GLTFStats.clonedMeshCount += meshCount;
-
-      entry.clonedGltfSet.add(clonedGltf);
-
-      this._gltfToEntry.set(clonedGltf, entry);
-
-      this._applyInstancedMesh(entry, clonedGltf);
-
-      // The model's default texture contents may not be included in the
-      // InstancedTexture, so set needsInstancedTextureRefresh = true.
-      // TODO: Can we set it to true only when necessary?
-      entry.needsInstancedTextureRefresh = true;
-
-      resolve(clonedGltf);
     });
 
     entry.clonedGltfPromiseSet.add(clonedGltfPromise);

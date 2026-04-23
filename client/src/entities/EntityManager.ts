@@ -169,6 +169,7 @@ import type {
 export default class EntityManager {
   private _game: Game;
   private _entities: Map<EntityId, Entity | StaticEntity> = new Map();
+  private _loggedIncompleteEntityIds: Set<EntityId> = new Set();
   private _lastRemovedEntityServerTickById: Map<EntityId, number> = new Map();
   private _worldId: number | undefined;
   private _dynamicEntities: Set<Entity> = new Set();
@@ -662,8 +663,17 @@ export default class EntityManager {
         deserializedEntity.rotation === undefined ||
         (!deserializedEntity.blockTextureUri && !deserializedEntity.modelUri)
       ) {
-        return console.info(`EntityManager._onEntityCreateUpdate(): Entity ${deserializedEntity.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedEntity);
+        if (
+          deserializedEntity.id !== undefined &&
+          !this._loggedIncompleteEntityIds.has(deserializedEntity.id)
+        ) {
+          this._loggedIncompleteEntityIds.add(deserializedEntity.id);
+          console.info(`EntityManager._onEntityCreateUpdate(): Entity ${deserializedEntity.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedEntity);
+        }
+        return;
       }
+
+      this._loggedIncompleteEntityIds.delete(deserializedEntity.id);
 
       const entityData = {
         id: deserializedEntity.id,
@@ -766,6 +776,10 @@ export default class EntityManager {
         entity.setEmissiveIntensity(deserializedEntity.emissiveIntensity);
       }
 
+      if (deserializedEntity.modelUri) {
+        entity.setModelUri(deserializedEntity.modelUri);
+      }
+
       if (deserializedEntity.modelAnimations) {
         entity.setModelAnimations(deserializedEntity.modelAnimations);
       }
@@ -776,10 +790,6 @@ export default class EntityManager {
 
       if (!entity.isBlockEntity && deserializedEntity.modelTextureUri) {
         entity.setCustomTexture(deserializedEntity.modelTextureUri);
-      }
-
-      if (deserializedEntity.modelUri) {
-        entity.setModelUri(deserializedEntity.modelUri);
       }
 
       if (deserializedEntity.name) {

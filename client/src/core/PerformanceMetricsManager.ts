@@ -1,4 +1,4 @@
-import { Clock } from 'three';
+import { Timer } from 'three';
 
 declare global {
   interface Performance {
@@ -26,6 +26,7 @@ const SAMPLE_COUNT = 30;
 const OUTLIER_RATIO: number = 0.1;
 // TODO: What if a refresh rate is used that isn't included in this list?
 const COMMON_REFRESH_RATES: number[] = [30, 60, 72, 90, 120, 144, 165, 240, 300, 360];
+const DEFAULT_REFRESH_RATE = 60;
 
 // Collects frame deltas for a specified number of frames,
 // computes the average FPS with optional outlier trimming,
@@ -95,7 +96,7 @@ const estimateRefreshRate = (): Promise<number> => {
 };
 
 export default class PerformanceMetricsManager {
-  private _clock: Clock;
+  private _timer: Timer;
   private _frameCount: number = 0;
   private _frameCountSinceLastFPSUpdate: number = 0;
   private _elapsedTime: number = 0;
@@ -115,22 +116,25 @@ export default class PerformanceMetricsManager {
     // for this, we wait briefly before starting the measurement.
     await new Promise(resolve => { setTimeout(resolve, 500); });
 
-    console.log(`Start Refresh rate estimation.`)
     const refreshRate = await estimateRefreshRate();
-    console.log(`Finished Refresh rate estimation: ${refreshRate} FPS`)
 
     PerformanceMetricsManager._refreshRate = refreshRate;
     return PerformanceMetricsManager._refreshRate;
   }
 
   constructor() {
-    this._clock = new Clock();
+    this._timer = new Timer();
+
+    if (typeof document !== 'undefined') {
+      this._timer.connect(document);
+    }
   }
 
   // Delta time measurement is separated from other update processes. This makes
   // it possible to control the refresh rate.
   public measureDeltaTime(): number {
-    const deltaTime = this._clock.getDelta();
+    this._timer.update();
+    const deltaTime = this._timer.getDelta();
     this._elapsedTimeSinceLastUpdate += deltaTime;
     return deltaTime;
   }
@@ -157,12 +161,7 @@ export default class PerformanceMetricsManager {
   }
 
   public get refreshRate(): number {
-    if (PerformanceMetricsManager._refreshRate === null) {
-      console.warn('PerformanceMetricsManager: Refresh rate is not measured yet. Call PerformanceMetricsManager.measureRefreshRate() beforehand.');
-      return 0;
-    }
-
-    return PerformanceMetricsManager._refreshRate;
+    return PerformanceMetricsManager._refreshRate ?? DEFAULT_REFRESH_RATE;
   }
 
   public get fps(): number {

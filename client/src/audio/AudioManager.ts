@@ -11,6 +11,7 @@ export default class AudioManager {
   private _game: Game;
   private _listener: AudioListener;
   private _audios: Map<number, Audio> = new Map();
+  private _loggedMissingAudioIds: Set<number> = new Set();
   private readonly MAX_ACTIVE_NODES = 64; // Prevent hitting the browser audio node limit, otherwise all audio could completely break.
 
   constructor(game: Game) {
@@ -70,7 +71,11 @@ export default class AudioManager {
 
     if (!audio) {
       if (!deserializedAudio.uri) {
-        return console.warn(`AudioManager._updateAudio(): Audio id ${audioId} is not known by this client, ignoring.`);
+        if (!this._loggedMissingAudioIds.has(audioId)) {
+          this._loggedMissingAudioIds.add(audioId);
+          console.warn(`AudioManager._updateAudio(): Audio id ${audioId} is not known by this client, ignoring.`);
+        }
+        return;
       }
 
       audio = new Audio(this._game, this._listener, {
@@ -79,6 +84,7 @@ export default class AudioManager {
         loop: deserializedAudio.loop,
       });
 
+      this._loggedMissingAudioIds.delete(audioId);
       this._audios.set(audioId, audio);
     }
 

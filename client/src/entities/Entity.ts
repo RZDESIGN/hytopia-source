@@ -3162,89 +3162,109 @@ export default class Entity {
 
   protected async _buildGLTFModel(): Promise<void> {
     if (!this._modelUri) {
-      throw new Error('Entity._buildGLTFModel(): Model uri is required to build a gltf model.');
-    }
-
-    // Cancel all ongoing glTF loading processes and effecitive uri requests to ensure to use
-    // only the latest request.
-    this._pendingGltfs.forEach(pendingGltf => {
-      // The request may have already been resolved, but there could still be code that
-      // is awaiting it and has not yet executed. To suppress error console logs,
-      // the `quiet` flag (second argument) is set. However, this might delay bug detection.
-      this._game.gltfManager.cancel(pendingGltf, true);
-    });
-    this._pendingGltfs.clear();
-    this._pendingEffectiveUris.clear();
-
-    const pendingEffectiveUri = Assets.getEffectiveGLTFlUri(this._modelUri, this._needsNamedNodesGLTF(), this._needsNoAnimationsGLTF());
-    this._pendingEffectiveUris.add(pendingEffectiveUri);
-    const effectiveUri = await pendingEffectiveUri;
-
-    // The effective uri request may have already been canceled while awaiting.
-    // In that case, do nothing.
-    if (!this._pendingEffectiveUris.has(pendingEffectiveUri)) {
+      console.warn('Entity._buildGLTFModel(): Model uri is required to build a gltf model.');
       return;
     }
 
-    this._pendingEffectiveUris.delete(pendingEffectiveUri);
+    let pendingEffectiveUri: Promise<string> | undefined;
+    let pendingGltf: Promise<GLTF> | undefined;
+    const requestedModelUri = this._modelUri;
 
-    const pendingGltf = this._game.gltfManager.load(effectiveUri);
-    this._pendingGltfs.add(pendingGltf);
-    const gltf = await pendingGltf;
+    try {
+      // Cancel all ongoing glTF loading processes and effecitive uri requests to ensure to use
+      // only the latest request.
+      this._pendingGltfs.forEach(pendingGltf => {
+        // The request may have already been resolved, but there could still be code that
+        // is awaiting it and has not yet executed. To suppress error console logs,
+        // the `quiet` flag (second argument) is set. However, this might delay bug detection.
+        this._game.gltfManager.cancel(pendingGltf, true);
+      });
+      this._pendingGltfs.clear();
+      this._pendingEffectiveUris.clear();
 
-    // The request may have already been canceled while awaiting.
-    // In that case, release resources and do nothing.
-    if (!this._pendingGltfs.has(pendingGltf)) {
-      this._game.gltfManager.release(gltf)
-      return;
-    }
+      pendingEffectiveUri = Assets.getEffectiveGLTFlUri(this._modelUri, this._needsNamedNodesGLTF(), this._needsNoAnimationsGLTF());
+      this._pendingEffectiveUris.add(pendingEffectiveUri);
+      const effectiveUri = await pendingEffectiveUri;
 
-    this._pendingGltfs.delete(pendingGltf);
+      // The effective uri request may have already been canceled while awaiting.
+      // In that case, do nothing.
+      if (!this._pendingEffectiveUris.has(pendingEffectiveUri)) {
+        return;
+      }
 
-    // To maintain smooth animation even when the model switches, record the current
-    // animation time and apply it to the new mixer's animation.
-    // TODO: Are there any other values that should be copied?
-    const actionTimes: Record<string, number> = {};
-    if (this._gltfAnimationMixer && this._model) {
+      this._pendingEffectiveUris.delete(pendingEffectiveUri);
+      pendingEffectiveUri = undefined;
+
+      pendingGltf = this._game.gltfManager.load(effectiveUri);
+      this._pendingGltfs.add(pendingGltf);
+      const gltf = await pendingGltf;
+
+      // The request may have already been canceled while awaiting.
+      // In that case, release resources and do nothing.
+      if (!this._pendingGltfs.has(pendingGltf)) {
+        this._game.gltfManager.release(gltf)
+        return;
+      }
+
+      this._pendingGltfs.delete(pendingGltf);
+      pendingGltf = undefined;
+
+      // To maintain smooth animation even when the model switches, record the current
+      // animation time and apply it to the new mixer's animation.
+      // TODO: Are there any other values that should be copied?
+      const actionTimes: Record<string, number> = {};
+      if (this._gltfAnimationMixer && this._model) {
+        this._model.animations.forEach(clip => {
+          const action = this._gltfAnimationMixer!.existingAction(clip);
+          if (action) {
+            actionTimes[clip.name] = action.time;
+          }
+        });
+      }
+
+      this._clearGLTFResources();
+
+      gltf.scene.traverse(obj => {
+        obj.matrixAutoUpdate = false;
+        obj.frustumCulled = false;
+      });
+
+      this._gltf = gltf;
+      this._gltfAnimationMixer = this._setupGLTFModel(gltf);
+      this._model = gltf.scene;
+      this._adjustModelOffset(this._model);
+      this._entityRoot.add(this._model);
+
       this._model.animations.forEach(clip => {
         const action = this._gltfAnimationMixer!.existingAction(clip);
-        if (action) {
-          actionTimes[clip.name] = action.time;
+        if (action && actionTimes[clip.name]) {
+          action.time = actionTimes[clip.name];
         }
       });
-    }
 
-    this._clearGLTFResources();
+      // Entity has a mechanism that reduces the frequency of animation and matrices updates
+      // for distant entities.
+      // Force animation and matrix updates in the frame when the model is added to
+      // the scene. Otherwise, until the next update, it may be rendered at (0, 0, 0)
+      // in a default pose. This would stand out even for a few frames, so avoid it.
+      this._forceAnimationAndLocalMatrixUpdate = true;
 
-    gltf.scene.traverse(obj => {
-      obj.matrixAutoUpdate = false;
-      obj.frustumCulled = false;
-    });
+      this._modelReadyListeners.withNodeName.forEach(callback => callback(this));
+      this._modelReadyListeners.withoutNodeName.forEach(callback => callback(this));
 
-    this._gltf = gltf;
-    this._gltfAnimationMixer = this._setupGLTFModel(gltf);
-    this._model = gltf.scene;
-    this._adjustModelOffset(this._model);
-    this._entityRoot.add(this._model);
-
-    this._model.animations.forEach(clip => {
-      const action = this._gltfAnimationMixer!.existingAction(clip);
-      if (action && actionTimes[clip.name]) {
-        action.time = actionTimes[clip.name];
+      this.addToScene();
+    } catch (error) {
+      if (pendingEffectiveUri) {
+        this._pendingEffectiveUris.delete(pendingEffectiveUri);
       }
-    });
 
-    // Entity has a mechanism that reduces the frequency of animation and matrices updates
-    // for distant entities.
-    // Force animation and matrix updates in the frame when the model is added to
-    // the scene. Otherwise, until the next update, it may be rendered at (0, 0, 0)
-    // in a default pose. This would stand out even for a few frames, so avoid it.
-    this._forceAnimationAndLocalMatrixUpdate = true;
+      if (pendingGltf) {
+        this._pendingGltfs.delete(pendingGltf);
+        this._game.gltfManager.cancel(pendingGltf, true);
+      }
 
-    this._modelReadyListeners.withNodeName.forEach(callback => callback(this));
-    this._modelReadyListeners.withoutNodeName.forEach(callback => callback(this));
-
-    this.addToScene();
+      console.error(`Entity._buildGLTFModel(): Failed to build glTF model for entity ${this._id} (${requestedModelUri}).`, error);
+    }
   }
 
   private _clearGLTFResources(): void {

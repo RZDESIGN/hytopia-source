@@ -69,9 +69,20 @@ export default class SceneUI {
   public get game(): Game { return this._game; }
 
   public update(): void {
+    this._updateInternal(true);
+  }
+
+  public updateAttachedFrameState(): void {
+    if (this._attachedToEntityId == null) {
+      return;
+    }
+
+    this._updateInternal(false);
+  }
+
+  private _updateInternal(recordVisibleStats: boolean): void {
     if (!this._containerDiv) return;
 
-    // Update position if attached to entity
     if (this._attachedToEntityId != null) {
       const entity = this._game.entityManager.getEntity(this._attachedToEntityId);
       if (!entity) {
@@ -142,18 +153,9 @@ export default class SceneUI {
       }
     }
 
-    // Only update object position if it changed
-    if (this._needsUpdatePosition) {
-      if(!this._object.position.equals(this._position)) {
-        this._object.position.copy(this._position);
-        this._object.updateMatrix();
-        // Assumes that object is directly added to Scene and Scene matrix is an identity matrix
-        this._object.matrixWorld.copy(this._object.matrix);
-      }
-      this._needsUpdatePosition = false;
-    }
+    this._commitObjectPosition();
 
-    if (this._object.visible) {
+    if (recordVisibleStats && this._object.visible) {
       SceneUIStats.visibleCount++;
     }
   }
@@ -216,5 +218,20 @@ export default class SceneUI {
 
   private _registerOnStateCallback = (callback: OnStateCallback) => {
     this._onStateCallback = callback;
+  }
+
+  private _commitObjectPosition(): void {
+    if (!this._needsUpdatePosition) {
+      return;
+    }
+
+    if (!this._object.position.equals(this._position)) {
+      this._object.position.copy(this._position);
+      this._object.updateMatrix();
+      // Assumes that object is directly added to Scene and Scene matrix is an identity matrix
+      this._object.matrixWorld.copy(this._object.matrix);
+    }
+
+    this._needsUpdatePosition = false;
   }
 }

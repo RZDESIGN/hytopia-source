@@ -28,6 +28,7 @@ enum BridgeMessageType {
   TOGGLE_DEBUG = 'toggle-debug', // parent wants the client to toggle the debug menu
 
   // Client -> Parent messages
+  BRIDGE_READY = 'bridge-ready', // sent when the iframe bridge is ready to exchange messages
   CHAT_MESSAGE = 'chat-message', // chat message is received from the server
   GAME_READY = 'game-ready', // sent when the game is fully loaded and ready
   KEY_DOWN = 'key-down', // key is pressed by user
@@ -49,6 +50,7 @@ interface BridgeMessageDataMap {
   [BridgeMessageType.TOGGLE_DEBUG]: undefined;
 
   // Client -> Parent messages
+  [BridgeMessageType.BRIDGE_READY]: undefined;
   [BridgeMessageType.CHAT_MESSAGE]: DeserializedChatMessage;
   [BridgeMessageType.GAME_READY]: undefined;
   [BridgeMessageType.KEY_DOWN]: { key: string; };
@@ -75,6 +77,14 @@ export default class BridgeManager {
   constructor(game: Game) {
     this._game = game;
     this._setupEventListeners();
+    this.sendBridgeReady();
+  }
+
+  public sendBridgeReady(): void {
+    this._sendParentMessage({
+      type: BridgeMessageType.BRIDGE_READY,
+      data: undefined
+    });
   }
 
   public sendGameReady(): void {

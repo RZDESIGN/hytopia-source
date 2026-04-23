@@ -37,6 +37,8 @@ const INBOUND_APPLY_HIGH_BACKLOG_BUDGET_MS = 8;
 const INBOUND_APPLY_MEDIUM_BACKLOG_THRESHOLD = 8;
 const INBOUND_APPLY_HIGH_BACKLOG_THRESHOLD = 24;
 const INBOUND_UNRELIABLE_BURST_LIMIT = 4;
+const WEBTRANSPORT_CONNECT_TIMEOUT_MS = 5000;
+const WEBSOCKET_CONNECT_TIMEOUT_MS = 8000;
 let heartbeatReported = false;
 
 type QueuedInboundMessage = {
@@ -274,8 +276,19 @@ export default class NetworkManager {
 
     try {
       const wt = new WebTransport(`https://${this._serverHostname}${window.location.search}`);
-
-      await wt.ready;
+      let timeoutId = 0;
+      try {
+        await Promise.race([
+          wt.ready,
+          new Promise<never>((_, reject) => {
+            timeoutId = window.setTimeout(() => {
+              reject(new Error('WebTransport connection timed out.'));
+            }, WEBTRANSPORT_CONNECT_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
 
       this._wt = wt; // assign after ready, to prevent sendPacket() from sending before ready
       this._wtOnClose = () => this._reconnect();
@@ -335,15 +348,42 @@ export default class NetworkManager {
     return new Promise(resolve => {
       console.log('NetworkManager._connectWebSocket(): Attempting to connect using WebSocket...');
 
-      this._ws = new WebSocket(`wss://${this._serverHostname}${window.location.search}`);
-      this._ws.binaryType = 'arraybuffer';
-      this._ws.onopen = () => {
-        console.log('NetworkManager._connectWebSocket(): WebSocket connection successful!');
+      const ws = new WebSocket(`wss://${this._serverHostname}${window.location.search}`);
+      let settled = false;
+      const timeoutId = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        console.warn('NetworkManager._connectWebSocket(): Timed out waiting for WebSocket to open.');
         resolve();
+        try { ws.close(); } catch { /* NOOP */ }
+      }, WEBSOCKET_CONNECT_TIMEOUT_MS);
+      const settle = () => {
+        if (settled) return false;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        resolve();
+        return true;
       };
-      this._ws.onerror = () => this._ws!.close();
-      this._ws.onclose = () => this._reconnect();
-      this._ws.onmessage = (event: MessageEvent) => {
+
+      this._ws = ws;
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        console.log('NetworkManager._connectWebSocket(): WebSocket connection successful!');
+        settle();
+      };
+      ws.onerror = () => {
+        settle();
+        try { ws.close(); } catch { /* NOOP */ }
+      };
+      ws.onclose = () => {
+        if (this._ws === ws) {
+          this._ws = undefined;
+        }
+
+        settle();
+        void this._reconnect();
+      };
+      ws.onmessage = (event: MessageEvent) => {
         this._scheduleIncomingMessage(new Uint8Array(event.data as ArrayBuffer), true, 'ws');
       };
     });

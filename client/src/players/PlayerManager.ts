@@ -8,6 +8,7 @@ import { DeserializedPlayer } from '../network/Deserializer';
 export default class PlayerManager {
   private _game: Game;
   private _players: Map<string, Player> = new Map();
+  private _loggedIncompletePlayerIds: Set<string> = new Set();
 
   public constructor(game: Game) {
     this._game = game;
@@ -38,9 +39,17 @@ export default class PlayerManager {
         deserializedPlayer.id === undefined ||
         deserializedPlayer.username === undefined
       ) {
-        return console.info(`PlayerManager._updatePlayer(): Player ${deserializedPlayer.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedPlayer);
+        if (
+          deserializedPlayer.id !== undefined &&
+          !this._loggedIncompletePlayerIds.has(deserializedPlayer.id)
+        ) {
+          this._loggedIncompletePlayerIds.add(deserializedPlayer.id);
+          console.info(`PlayerManager._updatePlayer(): Player ${deserializedPlayer.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedPlayer);
+        }
+        return;
       }
 
+      this._loggedIncompletePlayerIds.delete(deserializedPlayer.id);
       player = new Player(this._game, {
         id: deserializedPlayer.id,
         username: deserializedPlayer.username,
@@ -51,6 +60,7 @@ export default class PlayerManager {
     } else {
       if (deserializedPlayer.removed) {
         this._players.delete(player.id);
+        this._loggedIncompletePlayerIds.delete(player.id);
       }
     }
   }

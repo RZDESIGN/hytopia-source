@@ -1111,6 +1111,13 @@ export default class Renderer {
   private _setupProceduralSkyEnvironment(settings: ProceduralSkySettings): void {
     this._disposeProceduralSkyEnvironment();
 
+    // Mobile Safari/WebKit can intermittently black-frame while the procedural
+    // sky PMREM capture updates. Keep the visible sky, but skip the dynamic
+    // environment capture path on mobile.
+    if (MobileManager.isMobile) {
+      return;
+    }
+
     this._proceduralSkyEnvironmentScene = new Scene();
     this._proceduralSkyEnvironmentScene.matrixAutoUpdate = false;
     this._proceduralSkyEnvironmentScene.matrixWorldAutoUpdate = false;
@@ -1978,13 +1985,9 @@ export default class Renderer {
       uiManager.update();
       this._sceneUIRenderCooldownRemainingS = this._getSceneUIRenderInterval(sceneUICount);
     } else {
-      // Always update the camera-attached entity's SceneUI to avoid stale positions
-      // from CSP movement. SceneUI uses the camera's smoothed attachment position for
-      // this entity, so there's no jitter from CSP reconciliation.
-      const attachedEntity = this._game.camera.gameCameraAttachedEntity;
-      if (attachedEntity) {
-        uiManager.updateSceneUIsForEntity(attachedEntity.id);
-      }
+      // Keep all entity-attached SceneUIs aligned to the render cadence so they track
+      // client-side entity interpolation smoothly even when the full SceneUI pass is throttled.
+      uiManager.updateAttachedSceneUIs();
     }
 
     // Always re-project with the current camera so UI tracks smoothly during camera movement
@@ -2696,6 +2699,7 @@ export default class Renderer {
     return !!atmosphere?.enabled
       && this._game.camera.isFirstPersonGameCameraActive
       && !this._game.camera.isOrthographicGameCameraActive
+      && !MobileManager.isMobile
       && !this._game.chunkManager.inLiquidBlock(this._game.camera.activeCamera.position);
   }
 

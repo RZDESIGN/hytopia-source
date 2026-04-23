@@ -33,6 +33,7 @@ export default class UIManager {
   private _game: Game;
   private _sceneUIs: Map<number, SceneUI> = new Map();
   private _pendingSceneUIs: Map<number, DeserializedSceneUI> = new Map();
+  private _loggedIncompleteSceneUIIds: Set<number> = new Set();
   private _sceneUIRefreshRequested: boolean = true;
   private _uiDiv: HTMLDivElement;
   private _uiLoadPromise: Promise<void>;
@@ -161,10 +162,18 @@ export default class UIManager {
     }
   }
 
+  public updateAttachedSceneUIs(): void {
+    for (const sceneUI of this._sceneUIs.values()) {
+      if (sceneUI.attachedToEntityId != null) {
+        sceneUI.updateAttachedFrameState();
+      }
+    }
+  }
+
   public updateSceneUIsForEntity(entityId: number): void {
     for (const sceneUI of this._sceneUIs.values()) {
       if (sceneUI.attachedToEntityId === entityId) {
-        sceneUI.update();
+        sceneUI.updateAttachedFrameState();
       }
     }
   }
@@ -305,8 +314,17 @@ export default class UIManager {
         deserializedSceneUI.templateId === undefined ||
         (deserializedSceneUI.attachedToEntityId == null && deserializedSceneUI.position === undefined)
       ) {
-        return console.info(`UIManager._updateSceneUI(): SceneUI ${deserializedSceneUI.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedSceneUI);
+        if (
+          deserializedSceneUI.id !== undefined &&
+          !this._loggedIncompleteSceneUIIds.has(deserializedSceneUI.id)
+        ) {
+          this._loggedIncompleteSceneUIIds.add(deserializedSceneUI.id);
+          console.info(`UIManager._updateSceneUI(): SceneUI ${deserializedSceneUI.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedSceneUI);
+        }
+        return;
       }
+
+      this._loggedIncompleteSceneUIIds.delete(deserializedSceneUI.id);
 
       sceneUI = new SceneUI(this._game, {
         id: deserializedSceneUI.id,
@@ -327,6 +345,7 @@ export default class UIManager {
       if (deserializedSceneUI.removed) {
         sceneUI.removeFromScene();
         this._sceneUIs.delete(sceneUI.id);
+        this._loggedIncompleteSceneUIIds.delete(sceneUI.id);
         this._sceneUIRefreshRequested = true;
         return;
       }

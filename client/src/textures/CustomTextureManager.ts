@@ -51,32 +51,46 @@ export default class CustomTextureManager {
     const entry = this._uriToEntry.get(uri)!;
     const texturePromise = entry.texturePromise;
 
-    const wrappedTexturePromise = new Promise<CustomTextureWrapper>(async (resolve) => {
-      // TODO: Proper error handling. Use Missing Texture as fallback
-      //       if loading failed?
-      const texture = await texturePromise;
-      texture.colorSpace = SRGBColorSpace;
+    const wrappedTexturePromise = new Promise<CustomTextureWrapper>((resolve, reject) => {
+      texturePromise.then(texture => {
+        texture.colorSpace = SRGBColorSpace;
 
-      this._textureToEntry.delete(wrappedTexturePromise);
+        this._textureToEntry.delete(wrappedTexturePromise);
 
-      // If this request has already been canceled, nothing to do
-      if (!entry.wrappedTexturePromiseSet.has(wrappedTexturePromise)) {
-        return;
-      }
+        // If this request has already been canceled, nothing to do.
+        if (!entry.wrappedTexturePromiseSet.has(wrappedTexturePromise)) {
+          return;
+        }
 
-      entry.wrappedTexturePromiseSet.delete(wrappedTexturePromise);
+        entry.wrappedTexturePromiseSet.delete(wrappedTexturePromise);
 
-      entry.texture = texture;
+        entry.texture = texture;
 
-      // One option is to return the Texture object directly and manage its usage with reference counting,
-      // but instead, we create and return a wrapper object around the texture for each call. This approach
-      // makes it easier to investigate issues if any bugs occur.
-      const wrappedTexture = { texture };
+        // One option is to return the Texture object directly and manage its usage with reference counting,
+        // but instead, we create and return a wrapper object around the texture for each call. This approach
+        // makes it easier to investigate issues if any bugs occur.
+        const wrappedTexture = { texture };
 
-      entry.wrappedTextureSet.add(wrappedTexture);
-      this._textureToEntry.set(wrappedTexture, entry);
+        entry.wrappedTextureSet.add(wrappedTexture);
+        this._textureToEntry.set(wrappedTexture, entry);
 
-      resolve(wrappedTexture);
+        resolve(wrappedTexture);
+      }).catch(error => {
+        this._textureToEntry.delete(wrappedTexturePromise);
+
+        const wasPending = entry.wrappedTexturePromiseSet.has(wrappedTexturePromise);
+        entry.wrappedTexturePromiseSet.delete(wrappedTexturePromise);
+
+        if (!wasPending) {
+          return;
+        }
+
+        if (entry.wrappedTextureSet.size === 0 && entry.wrappedTexturePromiseSet.size === 0) {
+          this._releaseEntry(entry);
+        }
+
+        reject(error);
+      });
     });
 
     entry.wrappedTexturePromiseSet.add(wrappedTexturePromise)

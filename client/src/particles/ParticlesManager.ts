@@ -17,6 +17,7 @@ const toVec2 = new Vector2();
 export default class ParticleEmitterManager {
   private _game: Game;
   private _particleEmitters: Map<ParticleEmitterID, ParticleEmitter> = new Map();
+  private _loggedIncompleteParticleEmitterIds: Set<ParticleEmitterID> = new Set();
 
   constructor(game: Game) {
     this._game = game;
@@ -82,8 +83,17 @@ export default class ParticleEmitterManager {
         deserializedParticleEmitter.id === undefined ||
         deserializedParticleEmitter.textureUri === undefined
       ) {
-        return console.info(`ParticlesManager._updateParticles(): Particles ${deserializedParticleEmitter.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedParticleEmitter);
+        if (
+          deserializedParticleEmitter.id !== undefined &&
+          !this._loggedIncompleteParticleEmitterIds.has(deserializedParticleEmitter.id)
+        ) {
+          this._loggedIncompleteParticleEmitterIds.add(deserializedParticleEmitter.id);
+          console.info(`ParticlesManager._updateParticles(): Particles ${deserializedParticleEmitter.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedParticleEmitter);
+        }
+        return;
       }
+
+      this._loggedIncompleteParticleEmitterIds.delete(deserializedParticleEmitter.id);
 
       particleEmitter = new ParticleEmitter(this._game, {
         id: deserializedParticleEmitter.id,
@@ -131,6 +141,7 @@ export default class ParticleEmitterManager {
       if (deserializedParticleEmitter.removed) {
         particleEmitter.dispose();
         this._particleEmitters.delete(particleEmitter.id);
+        this._loggedIncompleteParticleEmitterIds.delete(particleEmitter.id);
         return;
       }
 

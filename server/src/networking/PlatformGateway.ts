@@ -11,6 +11,13 @@ import type { ServiceResponseDto } from '@hytopia.com/creative-lib/dist/types/se
 
 const LOCAL_DATA_DIRECTORY = './dev/persistence';
 const NOTIFICATION_SERVICE_URL = process.env.HYTOPIA_NOTIFICATION_SERVICE_URL || 'https://prod.notifications.hytopia.com';
+const SELFHOST_ENABLED = process.env.HYTOPIA_SELFHOST === '1' || process.env.HYTOPIA_API_KEY === 'selfhost-local';
+const DEFAULT_SKIN_TEXTURE_URI = 'https://d3qkovarww0lj1.cloudfront.net/' +
+                                 '?skin_tone=SKIN_COLOR_1' +
+                                 '&clothing=CLOTHING_1' +
+                                 '&hair_style=HAIR_STYLE_1' +
+                                 '&hair_color=HAIR_COLOR_1' +
+                                 '&eye_color=00FF00';
 
 /**
  * The cosmetics of a player.
@@ -197,6 +204,15 @@ export default class PlatformGateway {
    * **Category:** Networking
    */
   public async getPlayerCosmetics(userId: string): Promise<PlayerCosmetics | void> {
+    if (SELFHOST_ENABLED) {
+      return {
+        equippedItems: [],
+        hairModelUri: undefined,
+        hairTextureUri: undefined,
+        skinTextureUri: DEFAULT_SKIN_TEXTURE_URI,
+      };
+    }
+
     const iterator = this._gqlWs.iterate<PlayerCosmeticsGqlUserById, { id: string }>({
       query: `{
         userById(id: "${userId}") {
