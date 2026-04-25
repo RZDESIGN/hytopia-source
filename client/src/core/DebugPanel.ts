@@ -629,7 +629,6 @@ export default class DebugPanel {
     const postFx = this._game.renderer.postProcessingDebugState;
     const postFxCount = Number(postFx.atmosphere)
       + Number(postFx.bloom)
-      + Number(postFx.depthBlur)
       + Number(postFx.gtao)
       + Number(postFx.lut)
       + Number(postFx.nearContactShadows)
@@ -645,7 +644,7 @@ export default class DebugPanel {
       budgets.visibleChunks,
     );
     this._config.budget.sceneUI = this._formatBudgetStatus(snapshot.sceneUI.visibleCount, budgets.sceneUI);
-    this._config.budget.postFx = `${postFxCount}/9 ${this._formatBudgetLabel(postFxCount <= 4 ? 'ok' : postFxCount <= 6 ? 'tight' : 'over')}`;
+    this._config.budget.postFx = `${postFxCount}/8 ${this._formatBudgetLabel(postFxCount <= 4 ? 'ok' : postFxCount <= 6 ? 'tight' : 'over')}`;
   }
 
   private _updateRenderTuning(): void {

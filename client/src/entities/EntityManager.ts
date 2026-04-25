@@ -37,6 +37,7 @@ import {
 const fromVec2 = new Vector2();
 const frustum = new Frustum();
 const projScreenMatrix = new Matrix4();
+const NO_ROLLBACK_PREDICTED_INPUT_SET: ReadonlySet<RollbackPredictableInput> = new Set();
 
 export interface OutlineOptions {
   color: Color;
@@ -275,7 +276,7 @@ export default class EntityManager {
     predictedGroundedTransitionCount: 0,
   };
   private _localRollbackPredictedInputSet: ReadonlySet<RollbackPredictableInput> =
-    DEFAULT_ROLLBACK_PREDICTED_INPUT_SET;
+    NO_ROLLBACK_PREDICTED_INPUT_SET;
   private _shouldSuppressEnvironmentAnimations: boolean;
 
   public constructor(game: Game) {
@@ -780,11 +781,11 @@ export default class EntityManager {
         entity.setModelUri(deserializedEntity.modelUri);
       }
 
-      if (deserializedEntity.modelAnimations) {
+      if (deserializedEntity.modelAnimations?.length) {
         entity.setModelAnimations(deserializedEntity.modelAnimations);
       }
 
-      if (deserializedEntity.modelNodeOverrides) {
+      if (deserializedEntity.modelNodeOverrides?.length) {
         entity.setModelNodeOverrides(deserializedEntity.modelNodeOverrides);
       }
 
@@ -941,7 +942,7 @@ export default class EntityManager {
 
   private _resetLocalPredictionState(nextEntityId?: number): void {
     LocalPredictionStats.reset();
-    this._setLocalRollbackPredictedInputs(undefined);
+    this._setLocalRollbackPredictedInputs(undefined, false);
     this._localPredictionDebug.lastReconcileMode = 'none';
     this._localPredictionDebug.softReconcileCount = 0;
     this._localPredictionDebug.snapReconcileCount = 0;
@@ -1085,10 +1086,18 @@ export default class EntityManager {
 
   private _setLocalRollbackPredictedInputs(
     inputs: readonly RollbackPredictableInput[] | undefined,
+    useDefaultWhenUndefined: boolean = true,
   ): void {
-    this._localRollbackPredictedInputSet = inputs && inputs.length > 0
+    if (inputs === undefined) {
+      this._localRollbackPredictedInputSet = useDefaultWhenUndefined
+        ? DEFAULT_ROLLBACK_PREDICTED_INPUT_SET
+        : NO_ROLLBACK_PREDICTED_INPUT_SET;
+      return;
+    }
+
+    this._localRollbackPredictedInputSet = inputs.length > 0
       ? createRollbackPredictedInputSet(inputs)
-      : DEFAULT_ROLLBACK_PREDICTED_INPUT_SET;
+      : NO_ROLLBACK_PREDICTED_INPUT_SET;
   }
 
   private _createCurrentRollbackPredictedInputSnapshot(): RollbackPredictedInputSnapshot {

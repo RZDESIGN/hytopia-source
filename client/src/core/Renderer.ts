@@ -46,7 +46,6 @@ import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 import { LUTPass } from 'three/examples/jsm/postprocessing/LUTPass.js';
 import { AnalyticSunHaloPass } from '../three/postprocessing/AnalyticSunHaloPass';
 import { AtmosphericScatteringPass } from '../three/postprocessing/AtmosphericScatteringPass';
-import { GameplayDistanceBlurPass } from '../three/postprocessing/GameplayDistanceBlurPass';
 import { GroundedGTAOPass } from '../three/postprocessing/GroundedGTAOPass';
 import { NearContactShadowsPass } from '../three/postprocessing/NearContactShadowsPass';
 import { TemporalResolvePass } from '../three/postprocessing/TemporalResolvePass';
@@ -125,8 +124,6 @@ const WATER_REFLECTION_MAX_DISTANCE = 84;
 const WATER_REFLECTION_MIN_SCENE_COVERAGE = 0.18;
 const WORLD_FOG_VIEW_DISTANCE_BUFFER = 24;
 const PROCEDURAL_SKY_SETTINGS_BLEND_SPEED = 2.8;
-const GAMEPLAY_DISTANCE_BLUR_REFERENCE_DISTANCE = 130;
-const GAMEPLAY_DISTANCE_BLUR_DISTANCE_SCALE = 0.82;
 const WEATHER_SURFACE_IMPACT_JITTER = 0.34;
 const WEATHER_SURFACE_IMPACT_SCAN_ABOVE = 4;
 const WEATHER_SURFACE_IMPACT_SCAN_BELOW = 18;
@@ -215,7 +212,6 @@ export type PostProcessingDebugState = {
   atmosphere: boolean;
   bloom: boolean;
   composer: boolean;
-  depthBlur: boolean;
   gtao: boolean;
   lut: boolean;
   nearContactShadows: boolean;
@@ -419,7 +415,6 @@ export default class Renderer {
   private _analyticSunHaloPass: AnalyticSunHaloPass;
   private _atmospherePass: AtmosphericScatteringPass;
   private _bloomPass: WhiteCoreBloomPass;
-  private _gameplayDistanceBlurPass: GameplayDistanceBlurPass;
   private _groundedGtaoPass: GroundedGTAOPass;
   private _lutPass: LUTPass;
   private _nearContactShadowsPass: NearContactShadowsPass;
@@ -450,7 +445,6 @@ export default class Renderer {
     atmosphere: false,
     bloom: false,
     composer: false,
-    depthBlur: false,
     gtao: false,
     lut: false,
     nearContactShadows: false,
@@ -524,7 +518,6 @@ export default class Renderer {
     this._smaaPass = new SMAAPass();
     this._analyticSunHaloPass = new AnalyticSunHaloPass();
     this._atmospherePass = new AtmosphericScatteringPass();
-    this._gameplayDistanceBlurPass = new GameplayDistanceBlurPass();
     this._groundedGtaoPass = new GroundedGTAOPass();
     this._nearContactShadowsPass = new NearContactShadowsPass();
     // Question: Should parameters be configurable?
@@ -688,7 +681,6 @@ export default class Renderer {
     this._effectComposer.addPass(this._groundedGtaoPass);
     this._effectComposer.addPass(this._nearContactShadowsPass);
     this._effectComposer.addPass(this._atmospherePass);
-    this._effectComposer.addPass(this._gameplayDistanceBlurPass);
     this._effectComposer.addPass(this._particlesRenderPass);
     this._effectComposer.addPass(this._outlinePass);
     this._effectComposer.addPass(this._analyticSunHaloPass);
@@ -859,7 +851,6 @@ export default class Renderer {
 
     const activeCamera = this._game.camera.activeCamera;
     const jitterApplied = this._applyTemporalJitter(activeCamera);
-    this._updateGameplayDistanceBlur();
     this._updateNearContactShadows();
     this._updateGroundedGtaoPass();
     this._updateAtmospherePass(frameDeltaS);
@@ -874,7 +865,6 @@ export default class Renderer {
     const runtimeTuning = this._resolveRuntimeTuningState();
     const hasAtmosphere = this._atmospherePass.enabled;
     const hasGroundedGtao = this._groundedGtaoPass.enabled;
-    const hasGameplayDistanceBlur = this._gameplayDistanceBlurPass.enabled;
     const hasNearContactShadows = this._nearContactShadowsPass.enabled;
     const hasOutlineTargets = !!pp.outline && this._game.entityManager.hasOutlines;
     const hasAnalyticSunHalo = this._analyticSunHaloPass.enabled;
@@ -885,7 +875,6 @@ export default class Renderer {
     const shouldUsePostProcessing = hasOutlineTargets
       || !!pp.bloom
       || !!pp.smaa
-      || hasGameplayDistanceBlur
       || hasNearContactShadows
       || hasGroundedGtao
       || hasAtmosphere
@@ -894,7 +883,6 @@ export default class Renderer {
       || hasLut;
     this._lastPostProcessingState.composer = shouldUsePostProcessing;
     this._lastPostProcessingState.atmosphere = hasAtmosphere;
-    this._lastPostProcessingState.depthBlur = hasGameplayDistanceBlur;
     this._lastPostProcessingState.gtao = hasGroundedGtao;
     this._lastPostProcessingState.nearContactShadows = hasNearContactShadows;
     this._lastPostProcessingState.outline = hasOutlineTargets;
@@ -911,7 +899,6 @@ export default class Renderer {
       this._groundedGtaoPass.enabled = hasGroundedGtao;
       this._nearContactShadowsPass.enabled = hasNearContactShadows;
       this._atmospherePass.enabled = hasAtmosphere;
-      this._gameplayDistanceBlurPass.enabled = hasGameplayDistanceBlur;
       this._particlesRenderPass.enabled = this._particlesScene.children.length > 0;
       this._outlinePass.enabled = hasOutlineTargets;
       this._analyticSunHaloPass.enabled = hasAnalyticSunHalo;
@@ -2525,83 +2512,6 @@ export default class Renderer {
     this._lastWaterReflectionCameraPosition.copy(activeCamera.position);
     this._lastWaterReflectionViewDir.copy(vec3d);
     this._waterReflectionUpdateCooldownS = reflectionQuality.updateIntervalS;
-  }
-
-  private _updateGameplayDistanceBlur(): void {
-    const blurSettings = this._game.settingsManager.qualityPerfTradeoff.postProcessing?.depthBlur;
-    const activeCamera = this._game.camera.activeCamera;
-    const focusAnchorEntity = this._game.camera.isGameCameraActive && !this._game.camera.isFirstPersonGameCameraActive
-      ? this._game.camera.gameCameraAttachedEntity
-      : undefined;
-    const focusAnchorWorld = focusAnchorEntity
-      ? focusAnchorEntity.getWorldPosition(vec3b)
-      : (
-        this._game.camera.isGameCameraActive && !this._game.camera.isFirstPersonGameCameraActive
-          ? this._game.camera.gameCameraSmoothedAttachmentPosition
-          : undefined
-      );
-    const hasFocusAnchor = !!focusAnchorWorld;
-
-    if (
-      !blurSettings?.enabled
-      || !this._game.camera.isGameCameraActive
-      || this._game.camera.isOrthographicGameCameraActive
-    ) {
-      this._gameplayDistanceBlurPass.enabled = false;
-      return;
-    }
-
-    const configuredViewDistance = this.viewDistance;
-    const blurDistance = Math.min(configuredViewDistance, GAMEPLAY_DISTANCE_BLUR_REFERENCE_DISTANCE) * GAMEPLAY_DISTANCE_BLUR_DISTANCE_SCALE;
-    const fog = this._scene.fog as Fog | null;
-    const fogNear = fog?.near ?? configuredViewDistance * blurSettings.focusFarRatio;
-    const fogFar = fog?.far ?? configuredViewDistance;
-    const nearBlurStart = hasFocusAnchor
-      ? 0
-      : Math.max(
-        activeCamera.near + 1.5,
-        Math.min(blurDistance * blurSettings.nearStartRatio, fogNear * 0.7),
-      );
-    const focusNear = hasFocusAnchor
-      ? 0.01
-      : Math.max(
-        nearBlurStart + 1,
-        Math.min(blurDistance * blurSettings.focusNearRatio, fogNear * 0.8),
-      );
-    const focusFar = hasFocusAnchor
-      ? Math.max(6, blurDistance * blurSettings.focusFarRatio)
-      : Math.max(
-        focusNear + 1,
-        Math.min(blurDistance * blurSettings.focusFarRatio, fogNear),
-      );
-    const farBlurEnd = hasFocusAnchor
-      ? Math.max(focusFar + 4, blurDistance * blurSettings.farEndRatio)
-      : Math.max(
-        focusFar + 1,
-        Math.min(blurDistance * blurSettings.farEndRatio, fogFar),
-      );
-
-    if (farBlurEnd <= focusFar || focusFar <= focusNear || focusNear <= nearBlurStart) {
-      this._gameplayDistanceBlurPass.enabled = false;
-      return;
-    }
-
-    this._gameplayDistanceBlurPass.enabled = true;
-    this._gameplayDistanceBlurPass.setCamera(activeCamera);
-    if (hasFocusAnchor) {
-      vec3c.copy(focusAnchorWorld).applyMatrix4(activeCamera.matrixWorldInverse);
-      this._gameplayDistanceBlurPass.setFocusAnchorView(vec3c);
-    } else {
-      this._gameplayDistanceBlurPass.setFocusAnchorView(null);
-    }
-    this._gameplayDistanceBlurPass.setFocusBand(nearBlurStart, focusNear, focusFar, farBlurEnd);
-    // Blur radii are specified in screen-space pixels. Scale them by the actual
-    // render pixel ratio so higher internal-resolution presets like ULTRA keep
-    // the same visible blur strength instead of looking sharper by accident.
-    this._gameplayDistanceBlurPass.setMaxBlurRadiiPx(
-      blurSettings.maxNearRadiusPx * this.effectivePixelRatio,
-      blurSettings.maxFarRadiusPx * this.effectivePixelRatio,
-    );
   }
 
   private _shouldUseTemporalResolve(): boolean {

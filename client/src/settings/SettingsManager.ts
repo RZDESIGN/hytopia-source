@@ -81,15 +81,6 @@ type QualityPerfTradeoff = {
       historyWeight: number;
       sharpenStrength: number;
     };
-    depthBlur?: {
-      enabled: boolean;
-      nearStartRatio: number;
-      focusNearRatio: number;
-      focusFarRatio: number;
-      farEndRatio: number;
-      maxNearRadiusPx: number;
-      maxFarRadiusPx: number;
-    },
   },
 };
 
@@ -158,15 +149,6 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         historyWeight: 0.0,
         sharpenStrength: 0.0,
       },
-      depthBlur: {
-        enabled: !MobileManager.isMobile,
-        nearStartRatio: 0.025,
-        focusNearRatio: 0.07,
-        focusFarRatio: 0.15,
-        farEndRatio: 0.32,
-        maxNearRadiusPx: 1.2,
-        maxFarRadiusPx: 7.5,
-      },
     },
     localReflections: {
       enabled: false,
@@ -223,15 +205,6 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         enabled: false,
         historyWeight: 0.0,
         sharpenStrength: 0.0,
-      },
-      depthBlur: {
-        enabled: !MobileManager.isMobile,
-        nearStartRatio: 0.025,
-        focusNearRatio: 0.07,
-        focusFarRatio: 0.15,
-        farEndRatio: 0.32,
-        maxNearRadiusPx: 1.2,
-        maxFarRadiusPx: 7.5,
       },
     },
     localReflections: {
@@ -293,15 +266,6 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         enabled: false,
         historyWeight: 0.0,
         sharpenStrength: 0.0,
-      },
-      depthBlur: {
-        enabled: !MobileManager.isMobile,
-        nearStartRatio: 0.025,
-        focusNearRatio: 0.07,
-        focusFarRatio: 0.15,
-        farEndRatio: 0.32,
-        maxNearRadiusPx: 1.2,
-        maxFarRadiusPx: 7.5,
       },
     },
     localReflections: {
@@ -367,15 +331,6 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         historyWeight: 0.0,
         sharpenStrength: 0.0,
       },
-      depthBlur: {
-        enabled: false,
-        nearStartRatio: 0.08,
-        focusNearRatio: 0.18,
-        focusFarRatio: 0.32,
-        farEndRatio: 0.62,
-        maxNearRadiusPx: 0.6,
-        maxFarRadiusPx: 2.5,
-      },
     },
     localReflections: {
       enabled: false,
@@ -433,15 +388,6 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
         enabled: false,
         historyWeight: 0.0,
         sharpenStrength: 0.0,
-      },
-      depthBlur: {
-        enabled: false,
-        nearStartRatio: 0.08,
-        focusNearRatio: 0.18,
-        focusFarRatio: 0.32,
-        farEndRatio: 0.62,
-        maxNearRadiusPx: 0.6,
-        maxFarRadiusPx: 2.5,
       },
     },
     localReflections: {
