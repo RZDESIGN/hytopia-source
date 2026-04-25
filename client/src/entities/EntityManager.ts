@@ -511,6 +511,11 @@ export default class EntityManager {
       }
     }
 
+    // Visibility culling and GLTF instancing must use the same camera transform
+    // that will render this frame. Update after local prediction so racing-speed
+    // cameras do not cull against the previous frame's view.
+    this._game.camera.update(payload.frameDeltaS);
+
     // Second pass: Apply view distance. 
     // To avoid subsequent updates for invisible entities, perform an early check
     // using the updated local position.

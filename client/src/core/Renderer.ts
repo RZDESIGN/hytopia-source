@@ -847,9 +847,6 @@ export default class Renderer {
     const gltfUpdateStartMs = performance.now();
     this._game.gltfManager.update();
     this._game.performanceBaselineManager.recordGLTFUpdate(performance.now() - gltfUpdateStartMs);
-    // Update the camera as late as possible so rendering uses the freshest
-    // entity transforms and latest look input for this frame.
-    this._game.camera.update(frameDeltaS);
     this._updateSkybox(frameDeltaS);
     this._game.blockMaterialManager.update();
     this._game.audioManager.update();

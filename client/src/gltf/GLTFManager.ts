@@ -50,6 +50,7 @@ const USE_INSTANCED_MESH_THRESHOLD = 8;
 // Note: This only affects rendering method selection, not InstancedMesh creation.
 // InstancedMesh pairs are still created based on USE_INSTANCED_MESH_THRESHOLD.
 const USE_INSTANCED_MESH_THRESHOLD_TRANSPARENT = 4;
+const USE_INSTANCED_MESH_THRESHOLD_TRANSPARENT_EXIT = 2;
 const TRANSPARENT_INSTANCED_SORT_INTERVAL_SMALL = 2;
 const TRANSPARENT_INSTANCED_SORT_INTERVAL_MEDIUM = 3;
 const TRANSPARENT_INSTANCED_SORT_INTERVAL_LARGE = 4;
@@ -2012,11 +2013,9 @@ export default class GLTFManager {
 
         // Process transparent meshes
 
-        // NOTE: When the visible transparent mesh count hovers around the threshold,
-        // rendering may flicker due to frequent switching between individual mesh
-        // rendering (better transparency sorting) and InstancedMesh rendering
-        // (different transparency handling). Consider solution if this becomes
-        // problematic in practice.
+        // Use hysteresis when switching transparent render paths. Without it,
+        // frustum changes at speed can make vegetation/props hover around the
+        // threshold and flicker between individual and instanced rendering.
 
         for (const clonedMesh of cloneBuckets.transparent) {
           if (!Entity.isNodeEffectivelyVisible(this._game, clonedMesh)) {
@@ -2026,7 +2025,12 @@ export default class GLTFManager {
           transparentClonedMeshes.push(clonedMesh);
         }
 
-        if (transparentClonedMeshes.length <= USE_INSTANCED_MESH_THRESHOLD_TRANSPARENT) {
+        const wasRenderingTransparentInstanced = prevTransparentIndex >= 0;
+        const shouldRenderTransparentIndividually = wasRenderingTransparentInstanced
+          ? transparentClonedMeshes.length <= USE_INSTANCED_MESH_THRESHOLD_TRANSPARENT_EXIT
+          : transparentClonedMeshes.length <= USE_INSTANCED_MESH_THRESHOLD_TRANSPARENT;
+
+        if (shouldRenderTransparentIndividually) {
           // Use regular mesh rendering for better transparency sorting
           // Re-enable layers for visible transparent meshes
           for (const clonedMesh of transparentClonedMeshes) {
@@ -2085,7 +2089,7 @@ export default class GLTFManager {
           usage.prevTransparentIndex = nextTransparentIndex;
         }
 
-        if (transparentClonedMeshes.length <= USE_INSTANCED_MESH_THRESHOLD_TRANSPARENT) {
+        if (shouldRenderTransparentIndividually) {
           if (prevTransparentIndex >= 0 && prevTransparentIndex < instancedMeshPairs.length) {
             this._setInstancedMeshInScene(instancedMeshPairs[prevTransparentIndex].transparent, false);
           }
