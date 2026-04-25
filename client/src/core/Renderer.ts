@@ -1,5 +1,4 @@
 import {
-  ACESFilmicToneMapping,
   AdditiveBlending,
   AmbientLight,
   BackSide,
@@ -16,6 +15,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MultiplyBlending,
+  NeutralToneMapping,
   Object3D,
   OrthographicCamera,
   PCFShadowMap,
@@ -151,9 +151,11 @@ const PROCEDURAL_SKY_ENVIRONMENT_SUN_SIZE_RATIO = 260 / 880;
 const LOCAL_REFLECTION_PROBE_FAR = 36;
 const LOCAL_REFLECTION_PROBE_NEAR = 0.2;
 const TEMPORAL_JITTER_SCALE = 0.7;
+const COLOR_PRESERVING_TONE_MAPPING_EXPOSURE = 1.0;
 
 // Working variables
 const color = new Color();
+const colorb = new Color();
 const vec2 = new Vector2();
 const vec3 = new Vector3();
 const vec3b = new Vector3();
@@ -163,6 +165,7 @@ const vec3e = new Vector3();
 const shadowSnapBasisA = new Vector3();
 const shadowSnapBasisB = new Vector3();
 const LIGHTNING_FLASH_COLOR = new Color(0.78, 0.84, 1);
+const NEUTRAL_LIGHT_COLOR = new Color(1, 1, 1);
 const WORLD_ORIGIN = new Vector3();
 const WORLD_UP = new Vector3(0, 1, 0);
 const WORLD_RIGHT = new Vector3(1, 0, 0);
@@ -187,6 +190,10 @@ const waterReflectionTextureMatrixBias = new Matrix4().set(
 
 function isApproximatelyEqual(a: number, b: number, epsilon: number = 0.0001): boolean {
   return Math.abs(a - b) <= epsilon;
+}
+
+function getColorBrightness(color: Color): number {
+  return Math.max(color.r, color.g, color.b);
 }
 
 // Simple data container for ambient light (replaces Three.js AmbientLight which has no effect on MeshBasicMaterial)
@@ -357,6 +364,8 @@ export default class Renderer {
   private _baseAmbientLightIntensity: number = 1;
   private _baseDirectionalLightColor: Color = new Color(1, 1, 1);
   private _baseDirectionalLightIntensity: number = 0;
+  private _environmentAmbientLightColor: Color = new Color(1, 1, 1);
+  private _environmentDirectionalLightColor: Color = new Color(1, 1, 1);
   private _directionalSceneLight: DirectionalLight;
   private _directionalShadowCascadeNearLight: DirectionalLight;
   private _directionalShadowCascadeFarLight: DirectionalLight;
@@ -1257,20 +1266,25 @@ export default class Renderer {
 
   private _applyDynamicLighting(lightningIntensity: number): void {
     const flashIntensity = Math.max(0, Math.min(1, lightningIntensity));
+    const ambientSourceColor = color.copy(this._baseAmbientLightColor).lerp(LIGHTNING_FLASH_COLOR, flashIntensity * 0.28);
+    const directionalSourceColor = colorb.copy(this._baseDirectionalLightColor).lerp(LIGHTNING_FLASH_COLOR, flashIntensity * 0.4);
+    const ambientIntensity = (this._baseAmbientLightIntensity + flashIntensity * 0.72) * getColorBrightness(ambientSourceColor);
+    const directionalIntensity = (this._baseDirectionalLightIntensity + flashIntensity * 1.1) * getColorBrightness(directionalSourceColor);
 
-    this._ambientLight.color.copy(this._baseAmbientLightColor).lerp(LIGHTNING_FLASH_COLOR, flashIntensity * 0.28);
-    this._ambientLight.intensity = this._baseAmbientLightIntensity + flashIntensity * 0.72;
+    this._environmentAmbientLightColor.copy(ambientSourceColor);
+    this._environmentDirectionalLightColor.copy(directionalSourceColor);
+    this._ambientLight.color.copy(NEUTRAL_LIGHT_COLOR);
+    this._ambientLight.intensity = ambientIntensity;
     this._ambientSceneLight.color.copy(this._ambientLight.color);
     this._ambientViewModelLight.color.copy(this._ambientLight.color);
     this._ambientSceneLight.intensity = this._ambientLight.intensity;
     this._ambientViewModelLight.intensity = this._ambientLight.intensity;
 
-    this._directionalSceneLight.color.copy(this._baseDirectionalLightColor).lerp(LIGHTNING_FLASH_COLOR, flashIntensity * 0.4);
+    this._directionalSceneLight.color.copy(NEUTRAL_LIGHT_COLOR);
     this._directionalShadowCascadeNearLight.color.copy(this._directionalSceneLight.color);
     this._directionalShadowCascadeFarLight.color.copy(this._directionalSceneLight.color);
     this._directionalViewModelLight.color.copy(this._directionalSceneLight.color);
 
-    const directionalIntensity = this._baseDirectionalLightIntensity + flashIntensity * 1.1;
     this._directionalSceneLight.intensity = directionalIntensity;
     // Keep cascades shadow-only. The visible sun light remains the single direct
     // lighting source, and the material shader remaps the two shadow maps onto it.
@@ -1278,11 +1292,7 @@ export default class Renderer {
     this._directionalShadowCascadeFarLight.intensity = 0;
     this._directionalViewModelLight.intensity = directionalIntensity;
 
-    const lightingLevel = this._ambientLight.intensity * 0.68 + directionalIntensity * 0.32;
-    this._renderer.toneMappingExposure = Math.max(
-      0.74,
-      Math.min(0.88, 0.86 - lightingLevel * 0.06 + flashIntensity * 0.02),
-    );
+    this._renderer.toneMappingExposure = COLOR_PRESERVING_TONE_MAPPING_EXPOSURE;
   }
 
   private _updateLightningFlash(lightningIntensity: number): void {
@@ -1629,7 +1639,7 @@ export default class Renderer {
 
     material.time = this._proceduralSkyTimeS;
     material.fogColor.copy(fogColor);
-    material.sunColor.copy(this._directionalSceneLight.color);
+    material.sunColor.copy(this._environmentDirectionalLightColor);
     const skySunDirection = this._skySunDirection ?? this._sunDirection;
     material.sunDirection.copy(skySunDirection);
     material.lightning = lightningIntensity;
@@ -1641,7 +1651,7 @@ export default class Renderer {
     material.storminess = this._proceduralSkySettings.storminess;
     material.windDirection.copy(this._proceduralSkySettings.windDirection);
 
-    color.copy(this._ambientLight.color).multiplyScalar(this._ambientLight.intensity);
+    color.copy(this._environmentAmbientLightColor).multiplyScalar(this._ambientLight.intensity);
     this._proceduralSkyColor.copy(fogColor).lerp(color, 0.18);
     this._proceduralSkyColor.multiplyScalar(Math.max(0.06, this._skyboxIntensity * 0.72));
 
@@ -1714,7 +1724,7 @@ export default class Renderer {
       precipitationIntensity = this._proceduralSkySettings.precipitationIntensity * exposedSkyAmount * (0.45 + this._proceduralSkySettings.storminess * 0.55);
     }
 
-    color.copy(fogColor).lerp(this._ambientLight.color, 0.48).multiplyScalar(1.08);
+    color.copy(fogColor).lerp(this._environmentAmbientLightColor, 0.48).multiplyScalar(1.08);
     this._proceduralPrecipitation.update(
       cameraPosition,
       this._game.camera.activeCamera.quaternion,
@@ -2053,8 +2063,8 @@ export default class Renderer {
     this._renderer.info.autoReset = false;
     this._renderer.localClippingEnabled = false;
     this._renderer.shadowMap.enabled = true;
-    this._renderer.toneMapping = ACESFilmicToneMapping;
-    this._renderer.toneMappingExposure = 1.04;
+    this._renderer.toneMapping = NeutralToneMapping;
+    this._renderer.toneMappingExposure = COLOR_PRESERVING_TONE_MAPPING_EXPOSURE;
     // Be explicit about output space; this is cheap and avoids surprises across Three.js versions.
     this._renderer.outputColorSpace = SRGBColorSpace;
     this._applyShadowSettings();

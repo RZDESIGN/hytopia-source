@@ -22,8 +22,8 @@ const BLOCK_OUTGOING_LIGHT_LINES = [
   'vec3 outgoingLight = totalDiffuse + totalSpecular + totalEmissiveRadiance;',
 ];
 
-function applyBlockColorPunch(fragmentShader: string): string {
-  if (fragmentShader.includes('blockHighlight')) {
+function applyBlockBrightnessLift(fragmentShader: string): string {
+  if (fragmentShader.includes('blockBrightnessLift')) {
     return fragmentShader;
   }
 
@@ -33,15 +33,14 @@ function applyBlockColorPunch(fragmentShader: string): string {
         outgoingLightLine,
         `
           vec3 outgoingLight = reflectedLight.directDiffuse * 1.04
-            + reflectedLight.indirectDiffuse * 0.89
+            + reflectedLight.indirectDiffuse * 0.96
             + reflectedLight.directSpecular * 0.68
             + reflectedLight.indirectSpecular * 0.52
             + totalEmissiveRadiance;
 
           float blockLuma = dot( outgoingLight, vec3( 0.2126, 0.7152, 0.0722 ) );
-          float blockHighlight = smoothstep( 0.26, 0.96, blockLuma );
-          outgoingLight = mix( vec3( blockLuma ), outgoingLight, 1.05 + blockHighlight * 0.04 );
-          outgoingLight *= 0.995 + blockHighlight * 0.025;
+          float blockBrightnessLift = smoothstep( 0.26, 0.96, blockLuma );
+          outgoingLight *= 1.0 + blockBrightnessLift * 0.035;
         `,
       );
     }
@@ -68,7 +67,7 @@ class MeshBlockMaterial extends MeshStandardMaterial {
 
   public override onBeforeCompile(params: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer): void {
     super.onBeforeCompile(params, renderer);
-    params.fragmentShader = applyBlockColorPunch(applyDirectionalShadowEdgeFade(params.fragmentShader, params.uniforms as Record<string, { value: number }>));
+    params.fragmentShader = applyBlockBrightnessLift(applyDirectionalShadowEdgeFade(params.fragmentShader, params.uniforms as Record<string, { value: number }>));
   }
 }
 
