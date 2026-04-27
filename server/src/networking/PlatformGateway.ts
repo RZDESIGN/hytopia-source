@@ -12,12 +12,24 @@ import type { ServiceResponseDto } from '@hytopia.com/creative-lib/dist/types/se
 const LOCAL_DATA_DIRECTORY = './dev/persistence';
 const NOTIFICATION_SERVICE_URL = process.env.HYTOPIA_NOTIFICATION_SERVICE_URL || 'https://prod.notifications.hytopia.com';
 const SELFHOST_ENABLED = process.env.HYTOPIA_SELFHOST === '1' || process.env.HYTOPIA_API_KEY === 'selfhost-local';
-const DEFAULT_SKIN_TEXTURE_URI = 'https://d3qkovarww0lj1.cloudfront.net/' +
-                                 '?skin_tone=SKIN_COLOR_1' +
-                                 '&clothing=CLOTHING_1' +
-                                 '&hair_style=HAIR_STYLE_1' +
-                                 '&hair_color=HAIR_COLOR_1' +
-                                 '&eye_color=00FF00';
+const SELFHOST_USERS_PATH = process.env.HYTOPIA_SELFHOST_USERS_PATH || '/hytopia-manager/public/users.json';
+const SELFHOST_ASSET_BASE_URL = (process.env.HYTOPIA_SELFHOST_ASSET_BASE || '').replace(/\/+$/, '');
+const DEFAULT_LOCKER = {
+  skinTone: 3,
+  clothing: 1,
+  hairStyle: 3,
+  hairColor: 5,
+  eyeColor: '00FF00',
+} as const;
+const VALID_EYE_COLORS = new Set(['00FF00', '2F80ED', '7A4A20', 'D99A2B', '8E5CF2', 'B9C1CC']);
+
+type SelfHostLocker = {
+  skinTone: number;
+  clothing: number;
+  hairStyle: number;
+  hairColor: number;
+  eyeColor: string;
+};
 
 /**
  * The cosmetics of a player.
@@ -84,6 +96,39 @@ export type Session = LobbyMembershipDto;
 
 /** @internal */
 export type SessionResult = ServiceResponseDto<Session, SessionErrorCodes>;
+
+function normalizeLocker(input: unknown): SelfHostLocker {
+  const locker = input && typeof input === 'object' ? input as Partial<SelfHostLocker> : {};
+  const eyeColor = String(locker.eyeColor || '').toUpperCase();
+  return {
+    skinTone: clampInteger(locker.skinTone, 1, 5, DEFAULT_LOCKER.skinTone),
+    clothing: clampInteger(locker.clothing, 1, 41, DEFAULT_LOCKER.clothing),
+    hairStyle: clampInteger(locker.hairStyle, 1, 10, DEFAULT_LOCKER.hairStyle),
+    hairColor: clampInteger(locker.hairColor, 1, 10, DEFAULT_LOCKER.hairColor),
+    eyeColor: VALID_EYE_COLORS.has(eyeColor) ? eyeColor : DEFAULT_LOCKER.eyeColor,
+  };
+}
+
+function buildCloudfrontSkinTextureUri(locker: SelfHostLocker): string {
+  const params = new URLSearchParams({
+    skin_tone: `SKIN_COLOR_${locker.skinTone}`,
+    clothing: `CLOTHING_${locker.clothing}`,
+    hair_style: `HAIR_STYLE_${locker.hairStyle}`,
+    hair_color: `HAIR_COLOR_${locker.hairColor}`,
+    eye_color: locker.eyeColor,
+  });
+  return `https://d3qkovarww0lj1.cloudfront.net/?${params.toString()}`;
+}
+
+function lockerSignature(locker: SelfHostLocker): string {
+  return [locker.skinTone, locker.clothing, locker.hairStyle, locker.hairColor, locker.eyeColor].join('-');
+}
+
+function clampInteger(value: unknown, min: number, max: number, fallback: number): number {
+  const number = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
 
 /**
  * Accesses HYTOPIA platform services (sessions, cosmetics, persistence, notifications).
@@ -161,6 +206,9 @@ export default class PlatformGateway {
    */
   public get isGatewayAvailable(): boolean { return !!this._creativeGateway; }
 
+  /** @internal */
+  public get isSelfHost(): boolean { return SELFHOST_ENABLED; }
+
   /**
    * Retrieves global key-value data for the current game.
    *
@@ -205,12 +253,7 @@ export default class PlatformGateway {
    */
   public async getPlayerCosmetics(userId: string): Promise<PlayerCosmetics | void> {
     if (SELFHOST_ENABLED) {
-      return {
-        equippedItems: [],
-        hairModelUri: undefined,
-        hairTextureUri: undefined,
-        skinTextureUri: DEFAULT_SKIN_TEXTURE_URI,
-      };
+      return this._getSelfHostPlayerCosmetics(userId);
     }
 
     const iterator = this._gqlWs.iterate<PlayerCosmeticsGqlUserById, { id: string }>({
@@ -276,6 +319,37 @@ export default class PlatformGateway {
       return;
     } finally {
       await iterator.return?.();
+    }
+  }
+
+  private async _getSelfHostPlayerCosmetics(userId: string): Promise<PlayerCosmetics> {
+    const account = await this._readSelfHostAccount(userId);
+    const locker = normalizeLocker(account?.locker);
+    const assetBase = SELFHOST_ASSET_BASE_URL;
+    const skinTextureUri = account?.id && assetBase
+      ? `${assetBase}/api/public/locker/texture/${encodeURIComponent(account.id)}.png?v=${encodeURIComponent(lockerSignature(locker))}`
+      : buildCloudfrontSkinTextureUri(locker);
+
+    return {
+      equippedItems: [],
+      hairModelUri: assetBase ? `${assetBase}/player-locker/hair/hair-${String(locker.hairStyle).padStart(4, '0')}.gltf` : undefined,
+      hairTextureUri: assetBase ? `${assetBase}/player-locker/Textures/hairstyle-texture/${locker.hairStyle}/hair-${locker.hairStyle}-${locker.hairColor}.png` : undefined,
+      skinTextureUri,
+    };
+  }
+
+  private async _readSelfHostAccount(userId: string): Promise<{ id: string, locker?: unknown } | undefined> {
+    try {
+      const parsed = JSON.parse(await fs.promises.readFile(SELFHOST_USERS_PATH, 'utf8'));
+      const account = parsed?.users?.[userId];
+      if (!account?.id) return;
+      return { id: account.id, locker: account.locker };
+    } catch (error) {
+      const err = error as { code?: string, message?: string };
+      if (err?.code !== 'ENOENT') {
+        ErrorHandler.warning(`PlatformGateway.getPlayerCosmetics(): Failed to read self-host users at ${SELFHOST_USERS_PATH}: ${err?.message || error}`);
+      }
+      return;
     }
   }
 
