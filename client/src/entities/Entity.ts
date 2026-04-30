@@ -23,11 +23,11 @@ import {
   Quaternion,
   type QuaternionLike,
   Texture,
+  Vector2,
   Vector3,
   type Vector3Like,
   WebGLProgramParametersWithUniforms,
 } from 'three';
-import type { Vector2 } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js'
 import { type EntityId } from './EntityConstants';
 import EntityStats from './EntityStats';
@@ -41,6 +41,7 @@ import { CustomTextureWrapper } from '../textures/CustomTextureManager';
 import { lerp, slerp, updateAABB, Vector3LikeMutable } from '../three/utils';
 import type { DeserializedModelAnimation, DeserializedModelAnimations, DeserializedModelNodeOverride, DeserializedModelNodeOverrides } from '../network/Deserializer';
 import type { ChunkWorkerBlockEntityBuildMessage } from '../workers/ChunkWorkerConstants';
+import { distanceToVisibilitySegmentSquared } from '../core/VisibilityCulling';
 
 const DEFAULT_ANIMATION_BLEND_TIME_S = 0.1;
 const DEFAULT_OPACITY = 1.0;
@@ -48,6 +49,7 @@ const SKY_LIGHT_INTERPOLATION_TIME_S = 0.1;
 const TRANSFORM_INTERPOLATION_TIME_S = 0.04;
 const LOOP_MODE_ONCE = 0;
 const LOOP_MODE_LOOP = 1;
+const toVec2 = new Vector2();
 const LOOP_MODE_PING_PONG = 2;
 const BLEND_MODE_ADDITIVE = 0;
 
@@ -2508,7 +2510,7 @@ export default class Entity {
   }
 
   // Second update pass: Apply ViewDistance with updated local position
-  public applyViewDistance(viewDistanceSquared: number, fromVec2: Vector2): boolean {
+  public applyViewDistance(viewDistanceSquared: number, fromVec2: Vector2, anchorVec2?: Vector2): boolean {
     if (this.attached) {
       // Keep child entities always visible, and make their visibility depend on the parent entity.
       this.visible = true;
@@ -2519,9 +2521,7 @@ export default class Entity {
       // sync their visibility with the chunk. Otherwise, there could be cases where a chunk is invisible
       // but the entity remains visible, which could make the entity appear to be floating in mid-air.
       const coord = this.position;
-      const dx = fromVec2.x - coord.x;
-      const dz = fromVec2.y - coord.z;
-      this._distanceToCameraSquared = dx * dx + dz * dz;
+      this._distanceToCameraSquared = distanceToVisibilitySegmentSquared(toVec2.set(coord.x, coord.z), fromVec2, anchorVec2);
       this.visible = this._distanceToCameraSquared <= viewDistanceSquared;
       if (this.visible) {
         EntityStats.inViewDistanceCount++;

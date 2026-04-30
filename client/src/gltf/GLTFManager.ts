@@ -715,6 +715,26 @@ export default class GLTFManager {
     return cloneBuckets;
   }
 
+  private _hasInstancedGeometryAttribute(geometry: BufferGeometry): boolean {
+    for (const name in geometry.attributes) {
+      if (geometry.attributes[name] instanceof InstancedBufferAttribute) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private _canUseInstancedMesh(sourceMesh: Mesh, clonedMesh: Mesh): boolean {
+    return !(sourceMesh instanceof InstancedMesh)
+      && !(clonedMesh instanceof InstancedMesh)
+      && !Array.isArray(sourceMesh.material)
+      && !Array.isArray(clonedMesh.material)
+      && !this._hasInstancedGeometryAttribute(sourceMesh.geometry)
+      && !this._hasInstancedGeometryAttribute(clonedMesh.geometry)
+      && !this._getMeshMaterials(sourceMesh).some(material => material instanceof EmissiveMeshHeroMaterial);
+  }
+
   private _registerClonedMesh(entry: GLTFEntry, sourceMesh: Mesh, clonedMesh: Mesh): SourceMeshCloneBuckets {
     const cloneBuckets = this._getOrCreateCloneBuckets(entry, sourceMesh);
     cloneBuckets.all.add(clonedMesh);
@@ -1075,9 +1095,7 @@ export default class GLTFManager {
 
         const cloneBuckets = this._getOrCreateCloneBuckets(entry, sourceMesh);
 
-        const skipInstancing = Array.isArray(sourceMesh.material)
-          || Array.isArray(clonedMesh.material)
-          || this._getMeshMaterials(sourceMesh).some(material => material instanceof EmissiveMeshHeroMaterial);
+        const skipInstancing = !this._canUseInstancedMesh(sourceMesh, clonedMesh);
 
         if (!skipInstancing) {
           const desiredCapacity = this._getInstancedMeshCapacity(cloneBuckets.all.size + 1);
@@ -1589,10 +1607,23 @@ export default class GLTFManager {
     const needsEmissiveAttribute = counters ? counters.nonDefaultEmissive > 0 : true;
 
     let instancedMeshIndex = 0;
-    while (clonedMeshes.length > instancedMeshPairs[instancedMeshIndex].opaque.instanceMatrix.count) {
+    while (
+      instancedMeshIndex < instancedMeshPairs.length &&
+      clonedMeshes.length > instancedMeshPairs[instancedMeshIndex].opaque.instanceMatrix.count
+    ) {
       instancedMeshIndex++;
     }
     const targetPair = instancedMeshPairs[instancedMeshIndex];
+    if (!targetPair) {
+      for (const clonedMesh of clonedMeshes) {
+        this._setClonedMeshDefaultLayerEnabled(clonedMesh, true);
+      }
+      console.warn(
+        `GLTFManager._processClonedMeshes(): No InstancedMesh capacity for ${clonedMeshes.length} cloned meshes; rendering individually.`,
+      );
+      return -1;
+    }
+
     const instancedMesh = isTransparent ? targetPair.transparent : targetPair.opaque;
     const instanceMatrixAttribute = instancedMesh.instanceMatrix;
     const instanceMatrixArray = instanceMatrixAttribute.array as Float32Array;

@@ -3,7 +3,7 @@ import ParticleEmitter from './ParticleEmitter';
 import { type ParticleEmitterID } from './ParticleEmitterConstants';
 import { ParticleEmitterCoreOptions } from './ParticleEmitterCore';
 import { RendererEventType, type RendererEventPayload } from '../core/Renderer';
-import { isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
+import { distanceToVisibilitySegmentSquared, isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import EventRouter from '../events/EventRouter';
 import Game from '../Game';
 import { type DeserializedParticleEmitter } from '../network/Deserializer';
@@ -12,6 +12,7 @@ import { toVector3 } from '../three/utils';
 
 // Working variables
 const fromVec2 = new Vector2();
+const anchorVec2 = new Vector2();
 const toVec2 = new Vector2();
 
 export default class ParticleEmitterManager {
@@ -55,6 +56,10 @@ export default class ParticleEmitterManager {
     const viewDistance = this._game.renderer.viewDistance;
     const viewDistanceSquared = viewDistance * viewDistance;
     const cameraPos = this._game.camera.activeCamera.position;
+    const distanceVisibilityAnchor = this._game.camera.distanceVisibilityAnchor;
+    const resolvedAnchorVec2 = distanceVisibilityAnchor
+      ? anchorVec2.set(distanceVisibilityAnchor.x, distanceVisibilityAnchor.z)
+      : undefined;
     fromVec2.set(cameraPos.x, cameraPos.z);
 
     // TODO: Since emitted particles do not follow the ParticleEmitter's position,
@@ -64,7 +69,10 @@ export default class ParticleEmitterManager {
     // due to the emitter's new position being outside the view distance.
     this._particleEmitters.forEach((particleEmitter) => {
       const pos = particleEmitter.mesh.position;
-      particleEmitter.setVisible(fromVec2.distanceToSquared(toVec2.set(pos.x, pos.z)) <= viewDistanceSquared);
+      const posVec2 = toVec2.set(pos.x, pos.z);
+      particleEmitter.setVisible(
+        distanceToVisibilitySegmentSquared(posVec2, fromVec2, resolvedAnchorVec2) <= viewDistanceSquared,
+      );
     });
   }
 

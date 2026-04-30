@@ -47,6 +47,7 @@ const tempEuler = new Euler();
 const tempMatrix3 = new Matrix3();
 const tempMatrix4 = new Matrix4();
 const DEG2RAD = Math.PI / 180;
+const MATRIX4_COMPONENT_COUNT = 16;
 
 // Helper function to convert orientation to define name
 function orientationToDefine(orientation: ParticleEmitterOrientation): string {
@@ -857,19 +858,28 @@ export default class ParticleEmitterCore {
   private _resize(): void {
     const oldGeometry = this.mesh.geometry as PlaneGeometry;
     const newGeometry = this._createGeometry(this._options.maxParticles);
+    const oldInstanceMatrix = this.mesh.instanceMatrix;
+    const newInstanceMatrix = new InstancedBufferAttribute(
+      new Float32Array(this._options.maxParticles * MATRIX4_COMPONENT_COUNT),
+      MATRIX4_COMPONENT_COUNT,
+    );
+    newInstanceMatrix.setUsage(DynamicDrawUsage);
 
     // Copy existing particle data if possible
     if (this._poolIndex > 0) {
       const copyCount = Math.min(this._poolIndex, this._options.maxParticles);
       this._copyParticleData(oldGeometry, newGeometry, copyCount);
+      (newInstanceMatrix.array as Float32Array).set(
+        (oldInstanceMatrix.array as Float32Array).subarray(0, copyCount * MATRIX4_COMPONENT_COUNT),
+      );
     }
 
     newGeometry.boundingBox = oldGeometry.boundingBox;
     newGeometry.boundingSphere = oldGeometry.boundingSphere;
 
-    // Don't know if switching a geometry in InstancedMesh to a new one is a good design.
     this.mesh.geometry = newGeometry;
-    // TODO: Maybe updating InstancedMesh.count would be hacky. Switch to more elegant way.
+    this.mesh.instanceMatrix = newInstanceMatrix;
+    this.mesh.instanceMatrix.needsUpdate = true;
     this.mesh.count = this._options.maxParticles;
     oldGeometry.dispose();
 

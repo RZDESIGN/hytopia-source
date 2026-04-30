@@ -35,6 +35,7 @@ import {
 
 // Working variables
 const fromVec2 = new Vector2();
+const anchorVec2 = new Vector2();
 const frustum = new Frustum();
 const projScreenMatrix = new Matrix4();
 const NO_ROLLBACK_PREDICTED_INPUT_SET: ReadonlySet<RollbackPredictableInput> = new Set();
@@ -528,11 +529,15 @@ export default class EntityManager {
       const viewDistance = this._game.renderer.viewDistance;
       const viewDistanceSquared = viewDistance * viewDistance;
       const cameraPos = this._game.camera.activeCamera.position;
+      const distanceVisibilityAnchor = this._game.camera.distanceVisibilityAnchor;
+      const resolvedAnchorVec2 = distanceVisibilityAnchor
+        ? anchorVec2.set(distanceVisibilityAnchor.x, distanceVisibilityAnchor.z)
+        : undefined;
 
       fromVec2.set(cameraPos.x, cameraPos.z);
       for (let i = 0; i < dynamicEntities.length; i++) {
         const entity = dynamicEntities[i];
-        if (entity.applyViewDistance(viewDistanceSquared, fromVec2)) {
+        if (entity.applyViewDistance(viewDistanceSquared, fromVec2, resolvedAnchorVec2)) {
           inViewDistanceDynamicEntities.push(entity);
         }
       }
@@ -767,6 +772,22 @@ export default class EntityManager {
           this._dynamicEntityListDirty = true;
         }
         this._purgeEntityVisuals(entity.id);
+        return;
+      }
+
+      if (entity instanceof StaticEntity) {
+        // Server entity packets serialize full state every update. StaticEntity
+        // data has already been copied into instanced buffers at creation time,
+        // so replaying unchanged fields through mutating setters only produces
+        // warnings and cannot update the static instance.
+        if (deserializedEntity.outline !== undefined) {
+          if (deserializedEntity.outline) {
+            this.setOutline(deserializedEntity.id, deserializedEntity.outline);
+          } else {
+            this.removeOutline(deserializedEntity.id);
+          }
+        }
+
         return;
       }
 

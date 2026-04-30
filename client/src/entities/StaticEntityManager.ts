@@ -50,6 +50,8 @@ const UNIFORM_AMBIENT_LIGHT_INTENSITY = 'ambientLightIntensity';
 const STATIC_INSTANCE_SHADOW_LOD_MAX_CAMERA_DISTANCE_RATIO = 0.75;
 const STATIC_INSTANCE_SHADOW_LOD_FOCUS_PADDING_RATIO = 0.3;
 const STATIC_INSTANCE_SHADOW_LOD_MIN_PROJECTED_RADIUS = 0.02;
+const UNIFORM_DISTANCE_VISIBILITY_ANCHOR = 'distanceVisibilityAnchor';
+const UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR = 'hasDistanceVisibilityAnchor';
 
 // Working variables
 const mat4 = new Matrix4();
@@ -58,6 +60,17 @@ const vec3 = new Vector3();
 const sphere = new Sphere();
 
 const UNIFORM_VIEW_DISTANCE_SQUARED = 'viewDistanceSquared';
+
+const getInstanceCapacityForIndex = (currentCapacity: number, instanceIndex: number): number => {
+  let nextCapacity = Math.max(currentCapacity, INITIAL_INSTANCE_COUNT);
+  const requiredCapacity = instanceIndex + 1;
+
+  while (nextCapacity < requiredCapacity) {
+    nextCapacity *= INSTANCE_COUNT_INCREASE_FACTOR;
+  }
+
+  return nextCapacity;
+};
 
 type StaticEntityInstancedMaterial = EmissiveMeshBasicMaterial | EmissiveMeshBasicMaterial[];
 
@@ -111,7 +124,7 @@ const createReusableInstancedGeometry = (sourceGeometry: BufferGeometry): Buffer
 // want to consolidate it and manage it in one place.
 class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEntityInstancedMaterial> {
   private _game: Game;
-  private _uniforms: Record<string, { value: number | Color }>;
+  private _uniforms: Record<string, { value: number | Color | Vector3 }>;
 
   constructor(
     game: Game,
@@ -129,6 +142,16 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
           return isDistanceVisibilityCullingEnabled(game.settingsManager.qualityPerfTradeoff.viewDistance.enabled)
             ? Math.pow(game.renderer.viewDistance, 2)
             : Number.MAX_SAFE_INTEGER;
+        },
+      },
+      [UNIFORM_DISTANCE_VISIBILITY_ANCHOR]: {
+        get value(): Vector3 {
+          return game.camera.distanceVisibilityAnchor ?? game.camera.activeCamera.position;
+        },
+      },
+      [UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR]: {
+        get value(): number {
+          return game.camera.distanceVisibilityAnchor ? 1 : 0;
         },
       },
       [UNIFORM_RAW_AMBIENT_LIGHT_COLOR]: { value: game.renderer.ambientLight.color },
@@ -187,6 +210,8 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
           'void main() {',
           `
             uniform float ${UNIFORM_VIEW_DISTANCE_SQUARED};
+            uniform vec3 ${UNIFORM_DISTANCE_VISIBILITY_ANCHOR};
+            uniform float ${UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR};
 
             attribute float ${INSTANCE_LIGHT_LEVEL_ATTRIBUTE};
             varying float ${INSTANCE_LIGHT_LEVEL_VARYING};
@@ -217,8 +242,20 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
               ${WORLD_NORMAL_Y_VARYING} = getWorldNormalY(normal, instanceMatrix);
 
               // Early View Distance check
-              vec3 toCamera = instanceMatrix[3].xyz - cameraPosition;
-              float distanceSquared = toCamera.x * toCamera.x + toCamera.z * toCamera.z;
+              vec2 instanceXZ = instanceMatrix[3].xz;
+              vec2 closestVisibilityPoint = cameraPosition.xz;
+              if (${UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR} > 0.5) {
+                vec2 segment = ${UNIFORM_DISTANCE_VISIBILITY_ANCHOR}.xz - cameraPosition.xz;
+                float segmentLengthSquared = dot(segment, segment);
+                if (segmentLengthSquared > 0.000001) {
+                  float segmentT = clamp(dot(instanceXZ - cameraPosition.xz, segment) / segmentLengthSquared, 0.0, 1.0);
+                  closestVisibilityPoint = cameraPosition.xz + segment * segmentT;
+                }
+              }
+
+              vec2 toVisibilitySegment = instanceXZ - closestVisibilityPoint;
+              float distanceSquared = dot(toVisibilitySegment, toVisibilitySegment);
+
               if (distanceSquared > ${UNIFORM_VIEW_DISTANCE_SQUARED}) {
                 gl_Position = vec4(9999.0, 9999.0, 9999.0, 1.0);
                 return;
@@ -388,7 +425,10 @@ export default class StaticEntityManager {
       let instancedMesh = entry.sourceToInstancedMesh.get(sourceMesh);
 
       if (!instancedMesh || instanceIndex >= instancedMesh.instanceMatrix.count) {
-        const newInstanceCount = instancedMesh ? instancedMesh.instanceMatrix.count * INSTANCE_COUNT_INCREASE_FACTOR : INITIAL_INSTANCE_COUNT;
+        // GLTF load callbacks can resolve out of order, so the next slot may be
+        // far beyond a single growth step when many map entities share a model.
+        const currentInstanceCount = instancedMesh?.instanceMatrix.count ?? 0;
+        const newInstanceCount = getInstanceCapacityForIndex(currentInstanceCount, instanceIndex);
         const material = instancedMesh
           ? instancedMesh.material
           : cloneInstancedMaterial(sourceMesh.material);

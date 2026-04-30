@@ -79,10 +79,12 @@ export default class Game {
     this._blockTextureAtlasManager = new BlockTextureAtlasManager(this);
     this._blockMaterialManager = new BlockMaterialManager(this);
     this._blockTypeManager = new BlockTypeManager(this);
+    // EntityManager updates the game camera after local prediction; register it
+    // before visibility-culling managers so they use this frame's camera target.
+    this._entityManager = new EntityManager(this);
     this._chunkManager = new ChunkManager(this);
     this._chunkMeshManager = new ChunkMeshManager(this);
     this._customTextureManager = new CustomTextureManager();
-    this._entityManager = new EntityManager(this);    
     this._lightManager = new LightManager(this);
     this._gltfManager = new GLTFManager(this);
     this._lightLevelManager = new LightLevelManager();

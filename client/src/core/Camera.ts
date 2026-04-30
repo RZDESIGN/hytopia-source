@@ -126,6 +126,8 @@ export default class Camera {
   private _gameCameraShoulderPositionOffset: Vector3 = new Vector3();
   private _gameCameraLocalAttachmentPosition: Vector3 | undefined;
   private _gameCameraLocalAttachmentSourceKey: string | undefined;
+  private _distanceVisibilityAnchor: Vector3 = new Vector3();
+  private _hasDistanceVisibilityAnchor: boolean = false;
 
   private _spectatorCamera: PerspectiveCamera;
   private _spectatorCameraPitch: number = 0;
@@ -184,6 +186,12 @@ export default class Camera {
 
   public get isGameCameraActive(): boolean {
     return this._activeCamera === this._gameCamera;
+  }
+
+  public get distanceVisibilityAnchor(): Vector3 | undefined {
+    return this._activeCamera === this._gameCamera && this._hasDistanceVisibilityAnchor
+      ? this._distanceVisibilityAnchor
+      : undefined;
   }
 
   public get isOrthographicGameCameraActive(): boolean {
@@ -980,7 +988,14 @@ export default class Camera {
     return target;
   }
 
+  private _setDistanceVisibilityAnchor(position: Vector3): void {
+    this._distanceVisibilityAnchor.copy(position);
+    this._hasDistanceVisibilityAnchor = true;
+  }
+
   private _updateGameCamera(frameDeltaS: number): void {
+    this._hasDistanceVisibilityAnchor = false;
+
     if (!this._gameCameraAttachedEntity && !this._gameCameraAttachedPosition) {
       return console.warn(`Camera._updateGameCamera(): No camera attachment or position set for game camera.`);
     }
@@ -1105,6 +1120,8 @@ export default class Camera {
       if (lookAtPosition && lookAtDirection) {
         this._lookAt(gameCamera, lookAtPosition);
       }
+
+      this._setDistanceVisibilityAnchor(lookAtPosition ?? attachedPosition);
     }
 
     if (this._gameCameraMode === CameraMode.THIRD_PERSON) {
@@ -1115,6 +1132,7 @@ export default class Camera {
       // Default +y 0.5 offset for better default player perspective for now.
       // Devs can adjust this with their own provided offset for gameCameraOffset in the sdk.
       lookAtTarget.y += 0.5;
+      this._setDistanceVisibilityAnchor(lookAtTarget);
 
       // Position camera based on look direction or orientation
       if (lookAtDirection) {
