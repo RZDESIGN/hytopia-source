@@ -231,7 +231,7 @@ test('chunk add interest lookup uses indexed player centers', () => {
     (synchronizer as any)._setPlayerChunkInterestCenterKey(playerNear, '0,0,0', nearState);
 
     const farState = (synchronizer as any)._getOrCreatePlayerChunkInterestState(playerFar);
-    (synchronizer as any)._setPlayerChunkInterestCenterKey(playerFar, '160,0,0', farState);
+    (synchronizer as any)._setPlayerChunkInterestCenterKey(playerFar, '272,0,0', farState);
 
     const interestedPlayers = (synchronizer as any)._getPlayersInterestedInChunk({
       originCoordinate: { x: 0, y: 0, z: 0 },
@@ -299,7 +299,7 @@ test('chunk interest refresh incrementally adds and removes only edge chunks for
   };
   makeChunk(0, 0, 0);
   makeChunk(16, 0, 0);
-  makeChunk(112, 0, 0);
+  makeChunk(272, 0, 0);
 
   const player = {
     camera: {
@@ -343,9 +343,9 @@ test('chunk interest refresh incrementally adds and removes only edge chunks for
 
   (synchronizer as any)._refreshPlayerChunkInterest(player);
 
-  expect(queuedLoads).toEqual([ '112,0,0' ]);
+  expect(queuedLoads).toEqual([ '272,0,0' ]);
   expect(queuedRemovals).toEqual([]);
-  expect(Array.from((synchronizer as any)._getOrCreateLoadedChunkKeys(player)).sort()).toEqual([ '0,0,0', '112,0,0', '16,0,0' ]);
+  expect(Array.from((synchronizer as any)._getOrCreateLoadedChunkKeys(player)).sort()).toEqual([ '0,0,0', '16,0,0', '272,0,0' ]);
 });
 
 test('chunk interest refresh falls back to full recompute for teleports', () => {
@@ -547,7 +547,7 @@ test('static environment entities stay loaded outside chunk interest', () => {
     opacity: 1,
     parent: undefined,
     parentNodeName: undefined,
-    position: { x: 112, y: 0, z: 0 },
+    position: { x: 272, y: 0, z: 0 },
     serialize() {
       return {
         e: true,
@@ -604,7 +604,7 @@ test('static environment entities stay loaded outside chunk interest', () => {
   (synchronizer as any)._queueEntityRemovalForPlayer = (entity: { id: number }) => {
     removals.push(entity.id);
   };
-  (synchronizer as any)._refreshPlayerEntityInterestIncremental(player, { x: 16, y: 0, z: 0 }, [], [ '112,0,0' ]);
+  (synchronizer as any)._refreshPlayerEntityInterestIncremental(player, { x: 16, y: 0, z: 0 }, [], [ '272,0,0' ]);
 
   expect(loadedEntityIds.has(staticEnvironmentEntity.id)).toBe(true);
   expect(removals).not.toContain(staticEnvironmentEntity.id);
@@ -677,13 +677,13 @@ test('attached entity and particle spatial interest follows world ancestor inste
   expect(index.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(childEntity.id)).toBe(true);
   expect(particleIndex.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(particleEmitter.id)).toBe(true);
 
-  parentEntity.position = { x: 160, y: 2, z: 0 };
+  parentEntity.position = { x: 272, y: 2, z: 0 };
   (synchronizer as any)._updateEntitySpatialInterest(parentEntity);
 
   expect(index.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(middleEntity.id)).toBe(false);
   expect(index.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(childEntity.id)).toBe(false);
   expect(particleIndex.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(particleEmitter.id)).toBe(false);
-  expect(index.collectIdsInRange({ x: 160, y: 0, z: 0 }).has(middleEntity.id)).toBe(true);
-  expect(index.collectIdsInRange({ x: 160, y: 0, z: 0 }).has(childEntity.id)).toBe(true);
-  expect(particleIndex.collectIdsInRange({ x: 160, y: 0, z: 0 }).has(particleEmitter.id)).toBe(true);
+  expect(index.collectIdsInRange({ x: 272, y: 0, z: 0 }).has(middleEntity.id)).toBe(true);
+  expect(index.collectIdsInRange({ x: 272, y: 0, z: 0 }).has(childEntity.id)).toBe(true);
+  expect(particleIndex.collectIdsInRange({ x: 272, y: 0, z: 0 }).has(particleEmitter.id)).toBe(true);
 });

@@ -295,7 +295,7 @@ test('streams static environment entities outside chunk interest', async t => {
       ma: [],
       mo: [],
       o: 1,
-      p: [112, 0, 0],
+      p: [272, 0, 0],
       r: [0, 0, 0, 1],
     },
     type: 'entity_state_patch',
@@ -444,7 +444,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
     worldTick: 2,
   });
   harness.send({
-    chunk: { b: farChunkBlocks, c: [160, 0, 0] },
+    chunk: { b: farChunkBlocks, c: [272, 0, 0] },
     type: 'chunk_state_patch',
     worldId,
     worldTick: 2,
@@ -462,7 +462,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
   harness.send({
     entity: {
       i: 7002,
-      p: [160, 2, 3],
+      p: [272, 2, 3],
       r: [0, 0, 0, 1],
     },
     type: 'entity_state_patch',
@@ -482,7 +482,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
   harness.send({
     particleEmitter: {
       i: 8002,
-      p: [160, 2, 2],
+      p: [272, 2, 2],
       tu: 'particles/far.png',
     },
     type: 'particle_emitter_state_patch',
@@ -504,7 +504,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
   harness.send({
     sceneUI: {
       i: 9002,
-      p: [160, 3, 1],
+      p: [272, 3, 1],
       s: { label: 'far' },
       t: 'nametag',
       v: 30,
@@ -553,7 +553,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
   assert.deepEqual(sceneUILoads.map(sceneUI => sceneUI.i), [9001]);
 
   harness.send({
-    camera: { e: null, p: [160, 2, 3] },
+    camera: { e: null, p: [272, 2, 3] },
     playerId: 'player-e',
     type: 'player_camera',
     worldId,
@@ -569,10 +569,10 @@ test('streams nearby chunks and spatial state only after player camera interest 
   const farEntityPackets = farInterestPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
   const farParticlePackets = farInterestPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).flatMap(packet => packet[1]);
   const farSceneUIPackets = farInterestPackets.filter(packet => packet[0] === SCENE_UIS_PACKET_ID).flatMap(packet => packet[1]);
-  assert.deepEqual(farChunkPackets.map(chunk => chunk.c).sort(), [[0, 0, 0], [160, 0, 0]]);
+  assert.deepEqual(farChunkPackets.map(chunk => chunk.c).sort(), [[0, 0, 0], [272, 0, 0]]);
   assert.deepEqual(
     farChunkPackets.map(chunk => chunk.rm === true ? { c: chunk.c, rm: true } : { c: chunk.c, rm: false }).sort((a, b) => a.c[0] - b.c[0]),
-    [{ c: [0, 0, 0], rm: true }, { c: [160, 0, 0], rm: false }],
+    [{ c: [0, 0, 0], rm: true }, { c: [272, 0, 0], rm: false }],
   );
   assert.deepEqual(
     farEntityPackets.map(entity => entity.rm ? { i: entity.i, rm: true } : { i: entity.i, rm: false }).sort((a, b) => a.i - b.i),
@@ -594,7 +594,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
     worldTick: 5,
   });
   harness.send({
-    block: { c: [160, 0, 1], i: 4 },
+    block: { c: [272, 0, 1], i: 4 },
     type: 'block_state_patch',
     worldId,
     worldTick: 5,
@@ -605,7 +605,7 @@ test('streams nearby chunks and spatial state only after player camera interest 
   });
   const blockDeltaPackets = decodeWirePackets(blockDeltaMessage.wireBytes);
   assert.deepEqual(blockDeltaPackets.map(packet => packet[0]), [ BLOCKS_PACKET_ID ]);
-  assert.deepEqual(blockDeltaPackets[0][1], [{ c: [160, 0, 1], i: 4 }]);
+  assert.deepEqual(blockDeltaPackets[0][1], [{ c: [272, 0, 1], i: 4 }]);
 });
 
 test('shadow host spatial interest follows camera target before physical attachment', async t => {
@@ -635,7 +635,7 @@ test('shadow host spatial interest follows camera target before physical attachm
     entity: {
       i: 7102,
       n: 'Camera Boom',
-      p: [160, 2, 3],
+      p: [272, 2, 3],
       r: [0, 0, 0, 1],
     },
     type: 'entity_state_patch',
@@ -698,7 +698,7 @@ test('shadow host spatial interest follows camera target before physical attachm
   harness.send({
     entity: {
       i: 7101,
-      p: [160, 2, 3],
+      p: [272, 2, 3],
     },
     type: 'entity_state_patch',
     worldId,
@@ -781,7 +781,7 @@ test('coalesces same-tick spatial interest loads with same-channel patches to la
     entity: {
       i: 7101,
       n: 'Far Bot',
-      p: [160, 2, 3],
+      p: [272, 2, 3],
       r: [0, 0, 0, 1],
     },
     type: 'entity_state_patch',
@@ -791,7 +791,7 @@ test('coalesces same-tick spatial interest loads with same-channel patches to la
   harness.send({
     particleEmitter: {
       i: 8101,
-      p: [160, 2, 2],
+      p: [272, 2, 2],
       tu: 'particles/far.png',
     },
     type: 'particle_emitter_state_patch',
@@ -801,7 +801,7 @@ test('coalesces same-tick spatial interest loads with same-channel patches to la
   harness.send({
     sceneUI: {
       i: 9101,
-      p: [160, 3, 1],
+      p: [272, 3, 1],
       s: { label: 'far' },
       t: 'nametag',
       v: 30,
@@ -818,7 +818,7 @@ test('coalesces same-tick spatial interest loads with same-channel patches to la
   await harness.waitForMessage(message => message.type === 'player_packet_batch' && message.playerId === 'player-f');
 
   harness.send({
-    camera: { e: null, p: [160, 2, 3] },
+    camera: { e: null, p: [272, 2, 3] },
     playerId: 'player-f',
     type: 'player_camera',
     worldId,

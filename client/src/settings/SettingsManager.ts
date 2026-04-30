@@ -120,8 +120,8 @@ export const QUALITY_PRESETS = {
     resolution: { multiplier: 1.05 },
     viewDistance: {
       enabled: true,
-      distance: 400,
-      fog: { enabled: true, far: 360, near: 300 },
+      distance: 224,
+      fog: { enabled: true, far: 200, near: 160 },
     },
     postProcessing: {
       atmosphere: {
@@ -178,8 +178,8 @@ export const QUALITY_PRESETS = {
     resolution: { multiplier: 0.85 },
     viewDistance: {
       enabled: true,
-      distance: 160,
-      fog: { enabled: true, far: 145, near: 112 },
+      distance: 144,
+      fog: { enabled: true, far: 128, near: 96 },
     },
     environmentalAnimations: {
       enabled: false,
@@ -244,8 +244,8 @@ export const QUALITY_PRESETS = {
     resolution: { multiplier: 0.7 },
     viewDistance: {
       enabled: true,
-      distance: 100,
-      fog: { enabled: true, far: 90, near: 68 },
+      distance: 88,
+      fog: { enabled: true, far: 80, near: 60 },
     },
     environmentalAnimations: {
       enabled: false,
@@ -303,7 +303,7 @@ export const QUALITY_PRESETS = {
     viewDistance: {
       enabled: true,
       distance: 56,
-      fog: { enabled: true, far: 54, near: 32 },
+      fog: { enabled: true, far: 52, near: 32 },
     },
     environmentalAnimations: {
       enabled: false,

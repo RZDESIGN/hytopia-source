@@ -11,15 +11,17 @@ export const UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR = 'hasDistanceVisibilityAnch
 type DistanceFogUniformValue = number | Vector3;
 type DistanceFogUniforms = Record<string, { value: DistanceFogUniformValue }>;
 
-export const createDistanceFogUniforms = (game: Game): DistanceFogUniforms => ({
+const fallbackDistanceVisibilityAnchor = new Vector3();
+
+export const createDistanceFogUniforms = (game?: Game): DistanceFogUniforms => ({
   [UNIFORM_DISTANCE_VISIBILITY_ANCHOR]: {
     get value(): Vector3 {
-      return game.camera.distanceVisibilityAnchor ?? game.camera.activeCamera.position;
+      return game?.camera?.distanceVisibilityAnchor ?? game?.camera?.activeCamera?.position ?? fallbackDistanceVisibilityAnchor;
     },
   },
   [UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR]: {
     get value(): number {
-      return game.camera.distanceVisibilityAnchor ? 1 : 0;
+      return game?.camera?.distanceVisibilityAnchor ? 1 : 0;
     },
   },
 });
