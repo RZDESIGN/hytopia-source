@@ -137,7 +137,6 @@ const DIRECTIONAL_SHADOW_CASCADE_MIN_MAP_SIZE = 512;
 const NEAR_CONTACT_SHADOW_STRENGTH = 0.58;
 const DIRECTIONAL_SHADOW_CONTRAST_DEFAULT = 1.45;
 const DIRECTIONAL_SHADOW_CONTRAST_HIGH = 2.18;
-const DIRECTIONAL_SHADOW_CONTRAST_ULTRA = 2.34;
 const PROCEDURAL_SKY_ENVIRONMENT_BASE_UPDATE_INTERVAL_S = MobileManager.isMobile ? 5.0 : 2.5;
 const PROCEDURAL_SKY_ENVIRONMENT_TRANSITION_UPDATE_INTERVAL_S = MobileManager.isMobile ? 1.5 : 0.5;
 const PROCEDURAL_SKY_ENVIRONMENT_BOX_SIZE = 24;
@@ -1889,9 +1888,6 @@ export default class Renderer {
 
   private _updateDirectionalShadowContrast(): void {
     switch (this._game.settingsManager.qualityPresetLevel) {
-      case 'ULTRA':
-        setDirectionalShadowContrast(DIRECTIONAL_SHADOW_CONTRAST_ULTRA);
-        break;
       case 'HIGH':
         setDirectionalShadowContrast(DIRECTIONAL_SHADOW_CONTRAST_HIGH);
         break;

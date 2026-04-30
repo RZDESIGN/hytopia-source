@@ -427,7 +427,7 @@ export default class Entity {
   }
 
   public get parent(): Entity | undefined {
-    return this._parentEntityId ? this._game.entityManager.getEntity(this._parentEntityId) : undefined;
+    return this._parentEntityId != null ? this._game.entityManager.getEntity(this._parentEntityId) : undefined;
   }
   
   public get parentEntityId(): number | null | undefined {
@@ -2390,7 +2390,7 @@ export default class Entity {
   }
 
   public addToScene(): void {
-    if (this.parentEntityId) {
+    if (this.parentEntityId != null) {
       this._attach();
     } else {
       this._detach();
@@ -2511,8 +2511,9 @@ export default class Entity {
 
   // Second update pass: Apply ViewDistance with updated local position
   public applyViewDistance(viewDistanceSquared: number, fromVec2: Vector2, anchorVec2?: Vector2): boolean {
-    if (this.attached) {
+    if (this.attached || this.parentEntityId != null) {
       // Keep child entities always visible, and make their visibility depend on the parent entity.
+      // A child can temporarily be pending attachment when its packet arrives before the parent.
       this.visible = true;
       // Note: Ignores child entities for EntityStats.visibleCount so far because of no easy solution.
       // TODO: Count visible child entities properly

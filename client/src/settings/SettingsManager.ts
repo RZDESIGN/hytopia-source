@@ -100,64 +100,7 @@ export type ClientSettings = {
 // Preset levels to balance visual quality and performance, switching dynamically
 // based on FPS.
 // TODO: Consider allowing users to opt out of the automatic switching feature.
-export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
-  ULTRA: {
-    antialias: true,
-    blobShadows: {
-      enabled: false,
-    },
-    terrainMeshing: {
-      mode: 'fast',
-    },
-    shadows: {
-      enabled: true,
-      type: 'pcf',
-      directionalDistance: 40,
-      directionalMapSize: 768,
-      spotlightMapSize: 512,
-      maxSpotlightShadows: 1,
-    },
-    resolution: { multiplier: 1.3 },
-    viewDistance: {
-      enabled: true,
-      distance: 450,
-      fog: { enabled: true, far: 400, near: 340 },
-    },
-    postProcessing: {
-      atmosphere: {
-        enabled: false,
-        cloudShadowStrength: 0.0,
-        heightFogDensity: 0.0,
-        heightFogHeightFalloff: 0.052,
-        sunInscatterStrength: 0.0,
-      },
-      outline: true,
-      bloom: true,
-      gtao: {
-        enabled: false,
-        maxDistance: 72,
-        strength: 0.38,
-        worldRadius: 5.1,
-      },
-      lut: {
-        enabled: false,
-        intensity: 0.0,
-      },
-      smaa: true,
-      taa: {
-        enabled: false,
-        historyWeight: 0.0,
-        sharpenStrength: 0.0,
-      },
-    },
-    localReflections: {
-      enabled: false,
-      maxSkyExposure: 0.0,
-      positionDelta: 2.2,
-      textureSize: 192,
-      updateIntervalS: 1.6,
-    },
-  },
+export const QUALITY_PRESETS = {
   HIGH: {
     antialias: true,
     blobShadows: {
@@ -177,8 +120,8 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     resolution: { multiplier: 1.05 },
     viewDistance: {
       enabled: true,
-      distance: 250,
-      fog: { enabled: true, far: 230, near: 185 },
+      distance: 400,
+      fog: { enabled: true, far: 360, near: 300 },
     },
     postProcessing: {
       atmosphere: {
@@ -399,17 +342,24 @@ export const QUALITY_PRESETS: Record<string, QualityPerfTradeoff> = {
     },
     fpsCap: 30,
   },
-};
+} satisfies Record<string, QualityPerfTradeoff>;
 
-// POWER_SAVING remains excluded from automatic control. ULTRA is allowed on desktop so
-// sustained high FPS can promote beyond HIGH when the device can afford it.
-const AUTOMATIC_QUALITY_LEVELS: (keyof typeof QUALITY_PRESETS)[] = ['ULTRA', 'HIGH', 'MEDIUM', 'LOW'];
+export type QualityPresetLevel = keyof typeof QUALITY_PRESETS;
+
+function resolveQualityPreset(preset: string): QualityPresetLevel | undefined {
+  if (preset in QUALITY_PRESETS) {
+    return preset as QualityPresetLevel;
+  }
+}
+
+// POWER_SAVING remains excluded from automatic control.
+const AUTOMATIC_QUALITY_LEVELS: QualityPresetLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
 
 // The default quality level is currently hardcoding to HIGH or MEDIUM, but
 // it might also be a good idea to save the adjusted quality level to LocalStorage or
 // elsewhere, and load it when the client starts. This would allow the game to resume at an
 // appropriate quality level.
-const DEFAULT_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = 'MEDIUM';
+const DEFAULT_QUALITY_LEVEL: QualityPresetLevel = 'MEDIUM';
 
 // TODO: Introduce a Client settings UI or something similar to allow users to intuitively update the settings.
 const DEFAULT_CLIENT_SETTINGS: ClientSettings = {
@@ -457,9 +407,9 @@ const QUALITY_ADJUSTMENT_WARMUP_TIME = 5;
 // we set a maximum number of quality adjustment attempts.
 const MAX_QUALITY_BOUNCE_COUNT = 5;
 
-// A max quality level to prevent quality bouncing. Mobile stays capped at MEDIUM for
-// stability, while desktop can now climb to ULTRA through automatic adjustment.
-const MAX_QUALITY_LEVEL: keyof typeof QUALITY_PRESETS = MobileManager.isMobile ? 'MEDIUM' : 'ULTRA';
+// A max quality level to prevent quality bouncing. Mobile stays capped at MEDIUM
+// for stability, while desktop tops out at HIGH.
+const MAX_QUALITY_LEVEL: QualityPresetLevel = MobileManager.isMobile ? 'MEDIUM' : 'HIGH';
 
 type PerformanceStats = {
   duration: number;
@@ -475,7 +425,7 @@ export default class SettingsManager {
   private _game: Game;
   private _autoAdjustment: boolean = true;
   private _clientSettings: ClientSettings;
-  private _currentPresetLevel: keyof typeof QUALITY_PRESETS = DEFAULT_QUALITY_LEVEL;
+  private _currentPresetLevel: QualityPresetLevel = DEFAULT_QUALITY_LEVEL;
   private _elapsedTimeSinceWorldPacketReceived: number = 0;
   private _highFpsStats: PerformanceStats = {
     duration: 0,
@@ -505,7 +455,7 @@ export default class SettingsManager {
 
   public get clientSettings(): ClientSettings { return this._clientSettings; }
   public get qualityPerfTradeoff(): QualityPerfTradeoff { return this._clientSettings.qualityPerfTradeoff; }
-  public get qualityPresetLevel(): keyof typeof QUALITY_PRESETS { return this._currentPresetLevel; }
+  public get qualityPresetLevel(): QualityPresetLevel { return this._currentPresetLevel; }
   public get terrainMeshingMode(): TerrainMeshingMode { return this._clientSettings.qualityPerfTradeoff.terrainMeshing.mode; }
 
   public setDistantBlockViewMode(mode: DistantBlockViewMode): void {
@@ -635,19 +585,21 @@ export default class SettingsManager {
     this._changeQualityIfNeeded(fps < this._getLowFpsThreshold(targetFps), deltaTime, this._lowFpsStats, DECREASE_QUALITY);
   }
 
-  public setQualityPreset(preset: keyof typeof QUALITY_PRESETS | undefined): void {
+  public setQualityPreset(preset: string | undefined): void {
     if (preset === undefined) {
       this._autoAdjustment = true;
       return;
     }
 
-    if (!QUALITY_PRESETS[preset]) {
+    const resolvedPreset = resolveQualityPreset(preset);
+
+    if (!resolvedPreset) {
       return console.warn(`SettingsManager: Invalid quality preset received by client: ${preset}`);
     }
 
     this._autoAdjustment = false;
-    this._clientSettings.qualityPerfTradeoff = this._applyMobileOverrides({ ...QUALITY_PRESETS[preset] });
-    this._currentPresetLevel = preset;
+    this._clientSettings.qualityPerfTradeoff = this._applyMobileOverrides({ ...QUALITY_PRESETS[resolvedPreset] });
+    this._currentPresetLevel = resolvedPreset;
 
     // Reset stats for auto adjust ment in case auto adjust ment will be enabled again
     this._highFpsStats.duration = 0;
@@ -658,7 +610,7 @@ export default class SettingsManager {
 
     this._emitUpdateEvent();
 
-    console.log('SettingsManager: Quality preset explicitly set to:', preset);
+    console.log('SettingsManager: Quality preset explicitly set to:', resolvedPreset);
   }
 
   private _reachedMaxBounceCount(): boolean {

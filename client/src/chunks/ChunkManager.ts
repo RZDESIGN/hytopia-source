@@ -45,6 +45,7 @@ const vec2 = new Vector3();
 const BLOCK_PREDICTION_TIMEOUT_MS = 1500;
 const BLOCK_RAYCAST_EPSILON = 0.01;
 const HALF_BATCH_WORLD_SIZE = BATCH_WORLD_SIZE / 2;
+const BATCH_HORIZONTAL_BOUNDING_RADIUS = Math.SQRT2 * HALF_BATCH_WORLD_SIZE;
 const VISIBILITY_CELL_SIZE = BATCH_WORLD_SIZE / 4;
 const VIEW_DISTANCE_SQUARED_EPSILON = 0.0001;
 
@@ -203,7 +204,7 @@ export default class ChunkManager {
     if (modeChanged || viewDistanceChanged || cellChanged || fullRefreshRequested) {
       this._refreshVisibleBatches(
         fromVec2.set(cameraPos.x, cameraPos.z),
-        viewDistanceSquared,
+        viewDistance,
         modeChanged || fullRefreshRequested,
         resolvedAnchorVec2,
       );
@@ -1264,21 +1265,22 @@ export default class ChunkManager {
 
   // Distance is calculated ignoring the Y-axis (Up direction) to process distant batches
   // without regard to elevation, aiming for a more natural appearance.
-  private _isBatchInRange(batchId: BatchId, fromVec2: Vector2, viewDistanceSquared: number, anchorVec2?: Vector2): boolean {
+  private _isBatchInRange(batchId: BatchId, fromVec2: Vector2, viewDistance: number, anchorVec2?: Vector2): boolean {
     const batchOrigin = Chunk.batchIdToBatchOrigin(batchId);
     const batchCenterVec2 = toVec2.set(
       batchOrigin.x + HALF_BATCH_WORLD_SIZE,
       batchOrigin.z + HALF_BATCH_WORLD_SIZE,
     );
+    const paddedViewDistance = viewDistance + BATCH_HORIZONTAL_BOUNDING_RADIUS;
 
-    return distanceToVisibilitySegmentSquared(batchCenterVec2, fromVec2, anchorVec2) <= viewDistanceSquared;
+    return distanceToVisibilitySegmentSquared(batchCenterVec2, fromVec2, anchorVec2) <= paddedViewDistance * paddedViewDistance;
   }
 
-  private _refreshVisibleBatches(fromVec2: Vector2, viewDistanceSquared: number, forceApplyAll: boolean, anchorVec2?: Vector2): void {
+  private _refreshVisibleBatches(fromVec2: Vector2, viewDistance: number, forceApplyAll: boolean, anchorVec2?: Vector2): void {
     const nextVisibleBatchIds: Set<BatchId> = new Set();
 
     for (const batchId of this._game.chunkMeshManager.batchIds) {
-      const inRange = this._isBatchInRange(batchId, fromVec2, viewDistanceSquared, anchorVec2);
+      const inRange = this._isBatchInRange(batchId, fromVec2, viewDistance, anchorVec2);
       if (inRange) {
         nextVisibleBatchIds.add(batchId);
       }
@@ -1332,7 +1334,7 @@ export default class ChunkManager {
     const inRange = this._isBatchInRange(
       batchId,
       fromVec2.set(cameraPos.x, cameraPos.z),
-      viewDistance * viewDistance,
+      viewDistance,
       resolvedAnchorVec2,
     );
 

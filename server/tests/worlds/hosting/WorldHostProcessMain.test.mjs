@@ -275,6 +275,96 @@ test('merges nested entity patches into bootstrap state for future joins', async
   assert.equal(mergedEntity.mo[0].h, false);
 });
 
+test('streams static environment entities outside chunk interest', async t => {
+  const harness = await createChildHarness(t);
+  const worldId = 107;
+
+  harness.send({
+    options: createWorldBootOptions(worldId),
+    processId: 'shadow-test',
+    type: 'world_boot',
+    world: createWorldDescriptor(worldId),
+  });
+  await harness.waitForMessage(message => message.type === 'world_ready' && message.world?.id === worldId);
+
+  harness.send({
+    entity: {
+      e: true,
+      i: 7301,
+      m: 'models/environment/trackside-palm.gltf',
+      ma: [],
+      mo: [],
+      o: 1,
+      p: [112, 0, 0],
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 2,
+  });
+  harness.send({
+    player: createPlayerDescriptor('player-static-env'),
+    type: 'player_attach',
+    worldId,
+  });
+  await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-static-env';
+  });
+
+  harness.send({
+    camera: { e: null, p: [0, 0, 0] },
+    playerId: 'player-static-env',
+    type: 'player_camera',
+    worldId,
+    worldTick: 3,
+  });
+
+  const bootstrapPackets = [];
+  const bootstrapStartedAt = Date.now();
+  while (Date.now() - bootstrapStartedAt < 4_000) {
+    const batchMessage = await harness.waitForMessage(message => {
+      return message.type === 'player_packet_batch' && message.playerId === 'player-static-env';
+    }, 4_000 - (Date.now() - bootstrapStartedAt));
+    bootstrapPackets.push(...decodeWirePackets(batchMessage.wireBytes));
+
+    const entityPayloads = bootstrapPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+    const staticEnvironmentEntity = entityPayloads.find(entity => entity.i === 7301 && entity.e === true);
+    if (staticEnvironmentEntity) {
+      assert.equal(staticEnvironmentEntity.m, 'models/environment/trackside-palm.gltf');
+      break;
+    }
+  }
+
+  const bootstrappedEntityPayloads = bootstrapPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+  assert.equal(bootstrappedEntityPayloads.some(entity => entity.i === 7301 && entity.e === true), true);
+
+  harness.send({
+    entity: {
+      i: 7301,
+      t: [255, 0, 0],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 4,
+  });
+
+  const updateStartedAt = Date.now();
+  while (Date.now() - updateStartedAt < 4_000) {
+    const batchMessage = await harness.waitForMessage(message => {
+      return message.type === 'player_packet_batch' && message.playerId === 'player-static-env';
+    }, 4_000 - (Date.now() - updateStartedAt));
+    const packets = decodeWirePackets(batchMessage.wireBytes);
+    const entityPayloads = packets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+    const tintUpdate = entityPayloads.find(entity => entity.i === 7301 && entity.t);
+    if (tintUpdate) {
+      assert.deepEqual(tintUpdate.t, [255, 0, 0]);
+      return;
+    }
+  }
+
+  assert.fail('Timed out waiting for long-range static environment entity update.');
+});
+
 test('routes targeted entity batches only to the addressed player', async t => {
   const harness = await createChildHarness(t);
   const worldId = 103;
@@ -516,6 +606,112 @@ test('streams nearby chunks and spatial state only after player camera interest 
   const blockDeltaPackets = decodeWirePackets(blockDeltaMessage.wireBytes);
   assert.deepEqual(blockDeltaPackets.map(packet => packet[0]), [ BLOCKS_PACKET_ID ]);
   assert.deepEqual(blockDeltaPackets[0][1], [{ c: [160, 0, 1], i: 4 }]);
+});
+
+test('shadow host spatial interest follows camera target before physical attachment', async t => {
+  const harness = await createChildHarness(t);
+  const worldId = 108;
+
+  harness.send({
+    options: createWorldBootOptions(worldId),
+    processId: 'shadow-test',
+    type: 'world_boot',
+    world: createWorldDescriptor(worldId),
+  });
+  await harness.waitForMessage(message => message.type === 'world_ready' && message.world?.id === worldId);
+
+  harness.send({
+    entity: {
+      i: 7101,
+      n: 'Kart Root',
+      p: [1, 2, 3],
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    entity: {
+      i: 7102,
+      n: 'Camera Boom',
+      p: [160, 2, 3],
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    entity: {
+      i: 7103,
+      n: 'Parented Target Focus',
+      p: [1000, 0, 1000],
+      pe: 7101,
+      r: [0, 0, 0, 1],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    particleEmitter: {
+      e: 7103,
+      i: 8101,
+      p: [-1000, 0, -1000],
+      tu: 'particles/attached.png',
+    },
+    type: 'particle_emitter_state_patch',
+    worldId,
+    worldTick: 3,
+  });
+  harness.send({
+    player: createPlayerDescriptor('player-focus'),
+    type: 'player_attach',
+    worldId,
+  });
+
+  const bootstrapMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-focus';
+  });
+  const bootstrapPackets = decodeWirePackets(bootstrapMessage.wireBytes);
+  assert.equal(bootstrapPackets.some(packet => packet[0] === ENTITIES_PACKET_ID), false);
+
+  harness.send({
+    camera: { e: 7102, et: 7103 },
+    playerId: 'player-focus',
+    type: 'player_camera',
+    worldId,
+    worldTick: 4,
+  });
+
+  const focusInterestMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-focus';
+  });
+  const focusInterestPackets = decodeWirePackets(focusInterestMessage.wireBytes);
+  const entityLoads = focusInterestPackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+  const particleLoads = focusInterestPackets.filter(packet => packet[0] === PARTICLE_EMITTERS_PACKET_ID).flatMap(packet => packet[1]);
+
+  assert.deepEqual(entityLoads.map(entity => entity.i).sort((a, b) => a - b), [7101, 7103]);
+  assert.deepEqual(particleLoads.map(particleEmitter => particleEmitter.i), [8101]);
+
+  harness.send({
+    entity: {
+      i: 7101,
+      p: [160, 2, 3],
+    },
+    type: 'entity_state_patch',
+    worldId,
+    worldTick: 5,
+  });
+
+  const parentMoveMessage = await harness.waitForMessage(message => {
+    return message.type === 'player_packet_batch' && message.playerId === 'player-focus';
+  });
+  const parentMovePackets = decodeWirePackets(parentMoveMessage.wireBytes);
+  const parentMoveEntityLoads = parentMovePackets.filter(packet => packet[0] === ENTITIES_PACKET_ID).flatMap(packet => packet[1]);
+
+  assert.equal(parentMoveEntityLoads.some(entity => entity.i === 7102 && !entity.rm), true);
 });
 
 test('applies block deltas to mirrored typed-array chunk state for future chunk loads', async t => {

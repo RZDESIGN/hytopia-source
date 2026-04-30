@@ -227,6 +227,7 @@ export default class NetworkSynchronizer {
     horizontalRadius: CHUNK_STREAM_HORIZONTAL_RADIUS,
     verticalRadius: CHUNK_STREAM_VERTICAL_RADIUS,
   });
+  private _longRangeStaticEnvironmentEntityIds: Set<number> = new Set();
   private _longRangeSceneUIIds: Set<number> = new Set();
   private _spatialInterestIndexesInitialized: boolean = false;
   private _loadedSceneUIs: Set<number> = new Set();
@@ -2808,6 +2809,8 @@ export default class NetworkSynchronizer {
       loadedEntityIds.add(playerEntity.id);
     }
 
+    this._refreshPlayerLongRangeStaticEnvironmentEntityInterest(player, loadedEntityIds, desiredEntityIds);
+
     for (const loadedEntityId of Array.from(loadedEntityIds)) {
       if (desiredEntityIds.has(loadedEntityId)) {
         continue;
@@ -2860,6 +2863,10 @@ export default class NetworkSynchronizer {
     }
 
     for (const entityId of leavingEntityIds) {
+      if (this._longRangeStaticEnvironmentEntityIds.has(entityId)) {
+        continue;
+      }
+
       if (!loadedEntityIds.has(entityId)) {
         continue;
       }
@@ -2871,6 +2878,34 @@ export default class NetworkSynchronizer {
 
       this._queueEntityRemovalForPlayer(entity, player);
       loadedEntityIds.delete(entityId);
+    }
+
+    this._refreshPlayerLongRangeStaticEnvironmentEntityInterest(player, loadedEntityIds);
+  }
+
+  private _refreshPlayerLongRangeStaticEnvironmentEntityInterest(
+    player: Player,
+    loadedEntityIds: Set<number>,
+    desiredEntityIds?: Set<number>,
+  ): void {
+    for (const entityId of this._longRangeStaticEnvironmentEntityIds) {
+      if (desiredEntityIds?.has(entityId)) {
+        continue;
+      }
+
+      const entity = this._world.entityManager.getEntity(entityId);
+      if (!entity || !this._isLongRangeStaticEnvironmentEntity(entity)) {
+        this._longRangeStaticEnvironmentEntityIds.delete(entityId);
+        continue;
+      }
+
+      desiredEntityIds?.add(entityId);
+      if (loadedEntityIds.has(entityId)) {
+        continue;
+      }
+
+      this._queueEntityStateForPlayer(entity, player);
+      loadedEntityIds.add(entityId);
     }
   }
 
@@ -3105,6 +3140,7 @@ export default class NetworkSynchronizer {
     this._entitySpatialInterestIndex.clear();
     this._particleEmitterSpatialInterestIndex.clear();
     this._sceneUISpatialInterestIndex.clear();
+    this._longRangeStaticEnvironmentEntityIds.clear();
     this._longRangeSceneUIIds.clear();
 
     for (const entity of this._world.entityManager.getAllEntities()) {
@@ -3112,7 +3148,12 @@ export default class NetworkSynchronizer {
         continue;
       }
 
-      this._entitySpatialInterestIndex.update(entity.id, entity.position);
+      this._entitySpatialInterestIndex.update(
+        entity.id,
+        this._getEntitySpatialInterestAnchor(entity),
+        this._getEntitySpatialInterestAttachedEntityId(entity),
+      );
+      this._refreshLongRangeStaticEnvironmentEntity(entity);
     }
 
     for (const particleEmitter of this._world.particleEmitterManager.getAllParticleEmitters()) {
@@ -3122,7 +3163,7 @@ export default class NetworkSynchronizer {
 
       this._particleEmitterSpatialInterestIndex.update(
         particleEmitter.id,
-        particleEmitter.attachedToEntity?.position ?? particleEmitter.position,
+        this._getParticleEmitterSpatialInterestAnchor(particleEmitter),
         particleEmitter.attachedToEntity?.id,
       );
     }
@@ -3134,7 +3175,7 @@ export default class NetworkSynchronizer {
 
       this._sceneUISpatialInterestIndex.update(
         sceneUI.id,
-        sceneUI.attachedToEntity?.position ?? sceneUI.position,
+        this._getSceneUISpatialInterestAnchor(sceneUI),
         sceneUI.attachedToEntity?.id,
       );
 
@@ -3150,15 +3191,34 @@ export default class NetworkSynchronizer {
     }
 
     this._ensureSpatialInterestIndexesInitialized();
-    if (this._entitySpatialInterestIndex.update(entity.id, entity.position)) {
+    if (this._entitySpatialInterestIndex.update(
+      entity.id,
+      this._getEntitySpatialInterestAnchor(entity),
+      this._getEntitySpatialInterestAttachedEntityId(entity),
+    )) {
       this._refreshAttachedSpatialInterestForEntity(entity.id);
     }
+
+    this._refreshLongRangeStaticEnvironmentEntity(entity);
   }
 
   private _removeEntitySpatialInterest(entityId: number): void {
     this._ensureSpatialInterestIndexesInitialized();
     this._entitySpatialInterestIndex.remove(entityId);
+    this._longRangeStaticEnvironmentEntityIds.delete(entityId);
     this._refreshAttachedSpatialInterestForEntity(entityId);
+  }
+
+  private _refreshLongRangeStaticEnvironmentEntity(entity: Entity): void {
+    if (entity.id === undefined) {
+      return;
+    }
+
+    if (this._isLongRangeStaticEnvironmentEntity(entity)) {
+      this._longRangeStaticEnvironmentEntityIds.add(entity.id);
+    } else {
+      this._longRangeStaticEnvironmentEntityIds.delete(entity.id);
+    }
   }
 
   private _updateParticleEmitterSpatialInterest(particleEmitter: ParticleEmitter): void {
@@ -3169,7 +3229,7 @@ export default class NetworkSynchronizer {
     this._ensureSpatialInterestIndexesInitialized();
     this._particleEmitterSpatialInterestIndex.update(
       particleEmitter.id,
-      particleEmitter.attachedToEntity?.position ?? particleEmitter.position,
+      this._getParticleEmitterSpatialInterestAnchor(particleEmitter),
       particleEmitter.attachedToEntity?.id,
     );
   }
@@ -3187,7 +3247,7 @@ export default class NetworkSynchronizer {
     this._ensureSpatialInterestIndexesInitialized();
     this._sceneUISpatialInterestIndex.update(
       sceneUI.id,
-      sceneUI.attachedToEntity?.position ?? sceneUI.position,
+      this._getSceneUISpatialInterestAnchor(sceneUI),
       sceneUI.attachedToEntity?.id,
     );
 
@@ -3205,6 +3265,22 @@ export default class NetworkSynchronizer {
   }
 
   private _refreshAttachedSpatialInterestForEntity(entityId: number): void {
+    const childEntityIds = this._entitySpatialInterestIndex.getAttachedIds(entityId);
+    if (childEntityIds) {
+      for (const childEntityId of Array.from(childEntityIds)) {
+        if (childEntityId === entityId) {
+          continue;
+        }
+
+        const childEntity = this._world.entityManager.getEntity(childEntityId);
+        if (childEntity) {
+          this._updateEntitySpatialInterest(childEntity);
+        } else {
+          this._removeEntitySpatialInterest(childEntityId);
+        }
+      }
+    }
+
     const particleEmitterIds = this._particleEmitterSpatialInterestIndex.getAttachedIds(entityId);
     if (particleEmitterIds) {
       for (const particleEmitterId of Array.from(particleEmitterIds)) {
@@ -3260,10 +3336,10 @@ export default class NetworkSynchronizer {
   }
 
   private _getChunkInterestCenter(player: Player): Vector3Like | undefined {
-    return player.camera.attachedToPosition ??
-      player.camera.attachedToEntity?.position ??
+    return (player.camera.targetEntity ? this._getEntitySpatialInterestAnchor(player.camera.targetEntity) : undefined) ??
       player.camera.targetPosition ??
-      player.camera.targetEntity?.position ??
+      (player.camera.attachedToEntity ? this._getEntitySpatialInterestAnchor(player.camera.attachedToEntity) : undefined) ??
+      player.camera.attachedToPosition ??
       this._world.entityManager.getPlayerEntitiesByPlayer(player)[0]?.position;
   }
 
@@ -3639,14 +3715,73 @@ export default class NetworkSynchronizer {
       return true;
     }
 
-    return this._isPositionInChunkInterestRange(entity.position, centerChunkOrigin);
+    if (this._isLongRangeStaticEnvironmentEntity(entity)) {
+      return true;
+    }
+
+    return this._isPositionInChunkInterestRange(this._getEntitySpatialInterestAnchor(entity), centerChunkOrigin);
+  }
+
+  private _isLongRangeStaticEnvironmentEntity(entity: Entity): boolean {
+    return entity.isEnvironmental === true &&
+      entity.modelUri !== undefined &&
+      !entity.blockTextureUri &&
+      !entity.parent &&
+      !entity.parentNodeName &&
+      entity.modelAnimations.length === 0 &&
+      entity.modelNodeOverrides.length === 0 &&
+      !entity.modelTextureUri &&
+      entity.opacity === 1;
+  }
+
+  private _getEntitySpatialInterestAnchor(entity: Entity | undefined): Vector3Like | undefined {
+    if (!entity) {
+      return undefined;
+    }
+
+    if (!entity.parent) {
+      return entity.position;
+    }
+
+    let anchorEntity: Entity = entity;
+    const visitedEntities = new Set<Entity>();
+
+    while (anchorEntity.parent) {
+      if (visitedEntities.has(anchorEntity)) {
+        return undefined;
+      }
+
+      visitedEntities.add(anchorEntity);
+      anchorEntity = anchorEntity.parent;
+      if (!anchorEntity.isSpawned) {
+        return undefined;
+      }
+    }
+
+    return anchorEntity.position;
+  }
+
+  private _getEntitySpatialInterestAttachedEntityId(entity: Entity): number | undefined {
+    return entity.parent?.id;
+  }
+
+  private _getParticleEmitterSpatialInterestAnchor(particleEmitter: ParticleEmitter): Vector3Like | undefined {
+    return this._getAttachedSpatialInterestAnchor(particleEmitter.attachedToEntity, particleEmitter.position);
+  }
+
+  private _getSceneUISpatialInterestAnchor(sceneUI: SceneUI): Vector3Like | undefined {
+    return this._getAttachedSpatialInterestAnchor(sceneUI.attachedToEntity, sceneUI.position);
+  }
+
+  private _getAttachedSpatialInterestAnchor(attachedToEntity: Entity | undefined, fallbackPosition: Vector3Like | undefined): Vector3Like | undefined {
+    return attachedToEntity ? this._getEntitySpatialInterestAnchor(attachedToEntity) : fallbackPosition;
   }
 
   private _shouldSyncParticleEmitterToPlayer(
     particleEmitter: ParticleEmitter,
     centerChunkOrigin: Vector3Like,
   ): boolean {
-    const anchor = particleEmitter.attachedToEntity?.position ?? particleEmitter.position;
+    const anchor = this._getParticleEmitterSpatialInterestAnchor(particleEmitter);
     return anchor ? this._isPositionInChunkInterestRange(anchor, centerChunkOrigin) : false;
   }
 
@@ -3655,7 +3790,7 @@ export default class NetworkSynchronizer {
     center: Vector3Like,
     centerChunkOrigin: Vector3Like,
   ): boolean {
-    const anchor = sceneUI.attachedToEntity?.position ?? sceneUI.position;
+    const anchor = this._getSceneUISpatialInterestAnchor(sceneUI);
     if (!anchor) {
       return false;
     }

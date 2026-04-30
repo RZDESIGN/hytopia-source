@@ -176,15 +176,17 @@ const cloneChunkSchema = chunk => ({
   b: cloneChunkBlocks(chunk?.b),
   r: Array.isArray(chunk?.r) ? [ ...chunk.r ] : chunk?.r,
 });
-const cloneCameraSchema = camera => ({
-  ...camera,
-  h: Array.isArray(camera?.h) ? [ ...camera.h ] : camera?.h,
-  o: Array.isArray(camera?.o) ? [ ...camera.o ] : camera?.o,
-  p: Array.isArray(camera?.p) ? [ ...camera.p ] : camera?.p,
-  pl: Array.isArray(camera?.pl) ? [ ...camera.pl ] : camera?.pl,
-  pt: Array.isArray(camera?.pt) ? [ ...camera.pt ] : camera?.pt,
-  s: Array.isArray(camera?.s) ? [ ...camera.s ] : camera?.s,
-});
+const cloneCameraSchema = camera => {
+  const cloned = { ...camera };
+
+  for (const key of ['h', 'o', 'p', 'pl', 'pt', 's']) {
+    if (Object.prototype.hasOwnProperty.call(camera ?? {}, key)) {
+      cloned[key] = Array.isArray(camera[key]) ? [ ...camera[key] ] : camera[key];
+    }
+  }
+
+  return cloned;
+};
 const cloneEntityModelAnimationSchema = entityModelAnimation => ({ ...entityModelAnimation });
 const cloneEntityModelNodeOverrideSchema = entityModelNodeOverride => ({
   ...entityModelNodeOverride,
@@ -411,6 +413,7 @@ class ShadowHostedWorldRuntime {
       horizontalRadius: CHUNK_STREAM_HORIZONTAL_RADIUS,
       verticalRadius: CHUNK_STREAM_VERTICAL_RADIUS,
     });
+    this.longRangeStaticEnvironmentEntityIds = new Set();
     this.longRangeSceneUIIds = new Set();
     this.loadedEntityIdsByPlayer = new Map();
     this.loadedChunkKeysByPlayer = new Map();
@@ -543,10 +546,32 @@ class ShadowHostedWorldRuntime {
 
   queueCamera(playerId, camera, worldTick) {
     const existingCamera = this.currentCameraStateByPlayerId.get(playerId);
-    this.currentCameraStateByPlayerId.set(playerId, {
+    const cameraPatch = cloneCameraSchema(camera);
+    const nextCamera = {
       ...existingCamera,
-      ...cloneCameraSchema(camera),
-    });
+      ...cameraPatch,
+    };
+
+    if (Array.isArray(cameraPatch.p) && cameraPatch.p.length === 3) {
+      delete nextCamera.e;
+    }
+    if (Number.isFinite(cameraPatch.e)) {
+      delete nextCamera.p;
+    }
+    if (Array.isArray(cameraPatch.pt) && cameraPatch.pt.length === 3) {
+      delete nextCamera.et;
+      delete nextCamera.pl;
+    }
+    if (Number.isFinite(cameraPatch.et)) {
+      delete nextCamera.pt;
+      delete nextCamera.pl;
+    }
+    if (Array.isArray(cameraPatch.pl)) {
+      delete nextCamera.pt;
+      delete nextCamera.et;
+    }
+
+    this.currentCameraStateByPlayerId.set(playerId, nextCamera);
 
     this.queuePacket(playerId, [
       CAMERA_PACKET_ID,
@@ -855,11 +880,9 @@ class ShadowHostedWorldRuntime {
       this.currentEntityStateById.set(entityId, mergeEntitySchema(existingEntity, entity));
     }
 
-    if (entity.rm) {
-      this.removeEntitySpatialInterest(entityId);
-    } else {
-      this.updateEntitySpatialInterestById(entityId);
-    }
+    const spatialInterestRefresh = entity.rm
+      ? this.removeEntitySpatialInterest(entityId)
+      : this.updateEntitySpatialInterestById(entityId);
 
     for (const playerId of this.players.keys()) {
       const loadedEntityIds = this.getOrCreateLoadedEntityIds(playerId);
@@ -910,12 +933,15 @@ class ShadowHostedWorldRuntime {
       ]);
     }
 
-    if (!entity?.p && !entity?.rm) {
+    if (!entity?.p && !entity?.rm && !Object.prototype.hasOwnProperty.call(entity ?? {}, 'pe')) {
       return;
     }
 
+    const affectedEntityIds = spatialInterestRefresh.affectedEntityIds;
+    affectedEntityIds.add(entityId);
+
     for (const [ playerId, camera ] of this.currentCameraStateByPlayerId.entries()) {
-      if (camera?.e !== entityId && camera?.et !== entityId) {
+      if (!affectedEntityIds.has(camera?.e) && !affectedEntityIds.has(camera?.et)) {
         continue;
       }
 
@@ -923,13 +949,13 @@ class ShadowHostedWorldRuntime {
       this.syncPlayerSpatialInterest(playerId, resolvedWorldTick);
     }
 
-    if (this.particleEmitterSpatialInterestIndex.hasAttachedIds(entityId)) {
+    if (spatialInterestRefresh.particleEmitterChanged) {
       for (const playerId of this.players.keys()) {
         this.syncPlayerParticleEmitterInterest(playerId, resolvedWorldTick);
       }
     }
 
-    if (this.sceneUISpatialInterestIndex.hasAttachedIds(entityId)) {
+    if (spatialInterestRefresh.sceneUIChanged) {
       for (const playerId of this.players.keys()) {
         this.syncPlayerSceneUIInterest(playerId, resolvedWorldTick);
       }
@@ -1115,12 +1141,8 @@ class ShadowHostedWorldRuntime {
       return undefined;
     }
 
-    if (Array.isArray(camera.p) && camera.p.length === 3) {
-      return camera.p;
-    }
-
-    if (Number.isFinite(camera.e)) {
-      const entityPosition = this.currentEntityStateById.get(camera.e)?.p;
+    if (Number.isFinite(camera.et)) {
+      const entityPosition = this.getEntitySpatialInterestAnchor(this.currentEntityStateById.get(camera.et));
       if (Array.isArray(entityPosition) && entityPosition.length === 3) {
         return entityPosition;
       }
@@ -1130,11 +1152,15 @@ class ShadowHostedWorldRuntime {
       return camera.pt;
     }
 
-    if (Number.isFinite(camera.et)) {
-      const entityPosition = this.currentEntityStateById.get(camera.et)?.p;
+    if (Number.isFinite(camera.e)) {
+      const entityPosition = this.getEntitySpatialInterestAnchor(this.currentEntityStateById.get(camera.e));
       if (Array.isArray(entityPosition) && entityPosition.length === 3) {
         return entityPosition;
       }
+    }
+
+    if (Array.isArray(camera.p) && camera.p.length === 3) {
+      return camera.p;
     }
 
     return undefined;
@@ -1189,29 +1215,31 @@ class ShadowHostedWorldRuntime {
     this.entitySpatialInterestIndex.clear();
     this.particleEmitterSpatialInterestIndex.clear();
     this.sceneUISpatialInterestIndex.clear();
+    this.longRangeStaticEnvironmentEntityIds.clear();
     this.longRangeSceneUIIds.clear();
 
     for (const [entityId, entity] of this.currentEntityStateById.entries()) {
-      this.entitySpatialInterestIndex.update(entityId, entity?.p);
+      this.entitySpatialInterestIndex.update(
+        entityId,
+        this.getEntitySpatialInterestAnchor(entity),
+        this.getEntitySpatialInterestAttachedEntityId(entity),
+      );
+      this.refreshLongRangeStaticEnvironmentEntity(entityId);
     }
 
     for (const [particleEmitterId, particleEmitter] of this.currentParticleEmitterStateById.entries()) {
       this.particleEmitterSpatialInterestIndex.update(
         particleEmitterId,
-        Number.isFinite(particleEmitter?.e)
-          ? this.currentEntityStateById.get(particleEmitter.e)?.p
-          : particleEmitter?.p,
-        Number.isFinite(particleEmitter?.e) ? particleEmitter.e : undefined,
+        this.getAttachedStateSpatialInterestAnchor(particleEmitter),
+        this.getAttachedStateSpatialInterestAttachedEntityId(particleEmitter),
       );
     }
 
     for (const [sceneUIId, sceneUI] of this.currentSceneUIStateById.entries()) {
       this.sceneUISpatialInterestIndex.update(
         sceneUIId,
-        Number.isFinite(sceneUI?.e)
-          ? this.currentEntityStateById.get(sceneUI.e)?.p
-          : sceneUI?.p,
-        Number.isFinite(sceneUI?.e) ? sceneUI.e : undefined,
+        this.getAttachedStateSpatialInterestAnchor(sceneUI),
+        this.getAttachedStateSpatialInterestAttachedEntityId(sceneUI),
       );
       if (this.isLongRangeSceneUI(sceneUI)) {
         this.longRangeSceneUIIds.add(sceneUIId);
@@ -1219,49 +1247,85 @@ class ShadowHostedWorldRuntime {
     }
   }
 
-  updateEntitySpatialInterestById(entityId) {
-    this.ensureSpatialInterestIndex();
-    if (this.entitySpatialInterestIndex.update(entityId, this.currentEntityStateById.get(entityId)?.p)) {
-      this.refreshAttachedSpatialInterestForEntity(entityId);
-    }
+  createSpatialInterestRefresh() {
+    return {
+      affectedEntityIds: new Set(),
+      entityChanged: false,
+      particleEmitterChanged: false,
+      sceneUIChanged: false,
+    };
   }
 
-  removeEntitySpatialInterest(entityId) {
+  updateEntitySpatialInterestById(
+    entityId,
+    result = this.createSpatialInterestRefresh(),
+    visitedEntityIds = new Set(),
+  ) {
     this.ensureSpatialInterestIndex();
-    this.entitySpatialInterestIndex.remove(entityId);
-    this.refreshAttachedSpatialInterestForEntity(entityId);
+    const entity = this.currentEntityStateById.get(entityId);
+    if (this.entitySpatialInterestIndex.update(
+      entityId,
+      this.getEntitySpatialInterestAnchor(entity),
+      this.getEntitySpatialInterestAttachedEntityId(entity),
+    )) {
+      result.entityChanged = true;
+      result.affectedEntityIds.add(entityId);
+      this.refreshAttachedSpatialInterestForEntity(entityId, result, visitedEntityIds);
+    }
+
+    this.refreshLongRangeStaticEnvironmentEntity(entityId);
+    return result;
+  }
+
+  removeEntitySpatialInterest(
+    entityId,
+    result = this.createSpatialInterestRefresh(),
+    visitedEntityIds = new Set(),
+  ) {
+    this.ensureSpatialInterestIndex();
+    if (this.entitySpatialInterestIndex.remove(entityId)) {
+      result.entityChanged = true;
+      result.affectedEntityIds.add(entityId);
+    }
+
+    this.longRangeStaticEnvironmentEntityIds.delete(entityId);
+    this.refreshAttachedSpatialInterestForEntity(entityId, result, visitedEntityIds);
+    return result;
+  }
+
+  refreshLongRangeStaticEnvironmentEntity(entityId) {
+    const entity = this.currentEntityStateById.get(entityId);
+    if (this.isLongRangeStaticEnvironmentEntity(entity)) {
+      this.longRangeStaticEnvironmentEntityIds.add(entityId);
+    } else {
+      this.longRangeStaticEnvironmentEntityIds.delete(entityId);
+    }
   }
 
   updateParticleEmitterSpatialInterestById(particleEmitterId) {
     this.ensureSpatialInterestIndex();
 
     const particleEmitter = this.currentParticleEmitterStateById.get(particleEmitterId);
-    const attachedEntityId = Number.isFinite(particleEmitter?.e) ? particleEmitter.e : undefined;
-    this.particleEmitterSpatialInterestIndex.update(
+    return this.particleEmitterSpatialInterestIndex.update(
       particleEmitterId,
-      attachedEntityId !== undefined
-        ? this.currentEntityStateById.get(attachedEntityId)?.p
-        : particleEmitter?.p,
-      attachedEntityId,
+      this.getAttachedStateSpatialInterestAnchor(particleEmitter),
+      this.getAttachedStateSpatialInterestAttachedEntityId(particleEmitter),
     );
   }
 
   removeParticleEmitterSpatialInterest(particleEmitterId) {
     this.ensureSpatialInterestIndex();
-    this.particleEmitterSpatialInterestIndex.remove(particleEmitterId);
+    return this.particleEmitterSpatialInterestIndex.remove(particleEmitterId);
   }
 
   updateSceneUISpatialInterestById(sceneUIId) {
     this.ensureSpatialInterestIndex();
 
     const sceneUI = this.currentSceneUIStateById.get(sceneUIId);
-    const attachedEntityId = Number.isFinite(sceneUI?.e) ? sceneUI.e : undefined;
-    this.sceneUISpatialInterestIndex.update(
+    const changed = this.sceneUISpatialInterestIndex.update(
       sceneUIId,
-      attachedEntityId !== undefined
-        ? this.currentEntityStateById.get(attachedEntityId)?.p
-        : sceneUI?.p,
-      attachedEntityId,
+      this.getAttachedStateSpatialInterestAnchor(sceneUI),
+      this.getAttachedStateSpatialInterestAttachedEntityId(sceneUI),
     );
 
     if (this.isLongRangeSceneUI(sceneUI)) {
@@ -1269,22 +1333,50 @@ class ShadowHostedWorldRuntime {
     } else {
       this.longRangeSceneUIIds.delete(sceneUIId);
     }
+
+    return changed;
   }
 
   removeSceneUISpatialInterest(sceneUIId) {
     this.ensureSpatialInterestIndex();
-    this.sceneUISpatialInterestIndex.remove(sceneUIId);
+    const changed = this.sceneUISpatialInterestIndex.remove(sceneUIId);
     this.longRangeSceneUIIds.delete(sceneUIId);
+    return changed;
   }
 
-  refreshAttachedSpatialInterestForEntity(entityId) {
+  refreshAttachedSpatialInterestForEntity(
+    entityId,
+    result = this.createSpatialInterestRefresh(),
+    visitedEntityIds = new Set(),
+  ) {
+    if (visitedEntityIds.has(entityId)) {
+      return result;
+    }
+
+    visitedEntityIds.add(entityId);
+
+    const childEntityIds = this.entitySpatialInterestIndex.getAttachedIds(entityId);
+    if (childEntityIds) {
+      for (const childEntityId of Array.from(childEntityIds)) {
+        if (childEntityId === entityId) {
+          continue;
+        }
+
+        if (this.currentEntityStateById.has(childEntityId)) {
+          this.updateEntitySpatialInterestById(childEntityId, result, visitedEntityIds);
+        } else {
+          this.removeEntitySpatialInterest(childEntityId, result, visitedEntityIds);
+        }
+      }
+    }
+
     const particleEmitterIds = this.particleEmitterSpatialInterestIndex.getAttachedIds(entityId);
     if (particleEmitterIds) {
       for (const particleEmitterId of Array.from(particleEmitterIds)) {
         if (this.currentParticleEmitterStateById.has(particleEmitterId)) {
-          this.updateParticleEmitterSpatialInterestById(particleEmitterId);
+          result.particleEmitterChanged = this.updateParticleEmitterSpatialInterestById(particleEmitterId) || result.particleEmitterChanged;
         } else {
-          this.removeParticleEmitterSpatialInterest(particleEmitterId);
+          result.particleEmitterChanged = this.removeParticleEmitterSpatialInterest(particleEmitterId) || result.particleEmitterChanged;
         }
       }
     }
@@ -1293,12 +1385,14 @@ class ShadowHostedWorldRuntime {
     if (sceneUIIds) {
       for (const sceneUIId of Array.from(sceneUIIds)) {
         if (this.currentSceneUIStateById.has(sceneUIId)) {
-          this.updateSceneUISpatialInterestById(sceneUIId);
+          result.sceneUIChanged = this.updateSceneUISpatialInterestById(sceneUIId) || result.sceneUIChanged;
         } else {
-          this.removeSceneUISpatialInterest(sceneUIId);
+          result.sceneUIChanged = this.removeSceneUISpatialInterest(sceneUIId) || result.sceneUIChanged;
         }
       }
     }
+
+    return result;
   }
 
   isLongRangeSceneUI(sceneUI) {
@@ -1536,7 +1630,71 @@ class ShadowHostedWorldRuntime {
       return false;
     }
 
-    return this.isPositionInChunkInterestRange(entity?.p, centerChunkOrigin);
+    if (this.isLongRangeStaticEnvironmentEntity(entity)) {
+      return true;
+    }
+
+    return this.isPositionInChunkInterestRange(this.getEntitySpatialInterestAnchor(entity), centerChunkOrigin);
+  }
+
+  isLongRangeStaticEnvironmentEntity(entity) {
+    return entity?.e === true &&
+      typeof entity.m === 'string' &&
+      entity.m.length > 0 &&
+      entity.bt == null &&
+      !Number.isFinite(entity.pe) &&
+      entity.pn == null &&
+      (!Array.isArray(entity.ma) || entity.ma.length === 0) &&
+      (!Array.isArray(entity.mo) || entity.mo.length === 0) &&
+      entity.mt == null &&
+      (entity.o === undefined || entity.o === 1);
+  }
+
+  getEntitySpatialInterestAnchor(entity) {
+    if (!Number.isFinite(entity?.pe)) {
+      return entity?.p;
+    }
+
+    let anchorEntity = entity;
+    const visitedEntityIds = new Set();
+
+    for (;;) {
+      const attachedEntityId = this.getEntitySpatialInterestAttachedEntityId(anchorEntity);
+      if (attachedEntityId === undefined) {
+        return anchorEntity?.p;
+      }
+
+      const anchorEntityId = Number(anchorEntity?.i);
+      if (Number.isFinite(anchorEntityId)) {
+        if (visitedEntityIds.has(anchorEntityId)) {
+          return undefined;
+        }
+
+        visitedEntityIds.add(anchorEntityId);
+      }
+
+      anchorEntity = this.currentEntityStateById.get(attachedEntityId);
+      if (!anchorEntity) {
+        return undefined;
+      }
+    }
+  }
+
+  getEntitySpatialInterestAttachedEntityId(entity) {
+    return Number.isFinite(entity?.pe) ? entity.pe : undefined;
+  }
+
+  getAttachedStateSpatialInterestAnchor(state) {
+    const attachedEntityId = this.getAttachedStateSpatialInterestAttachedEntityId(state);
+    if (attachedEntityId !== undefined) {
+      return this.getEntitySpatialInterestAnchor(this.currentEntityStateById.get(attachedEntityId));
+    }
+
+    return state?.p;
+  }
+
+  getAttachedStateSpatialInterestAttachedEntityId(state) {
+    return Number.isFinite(state?.e) ? state.e : undefined;
   }
 
   shouldSyncParticleEmitterToPlayer(
@@ -1548,9 +1706,7 @@ class ShadowHostedWorldRuntime {
       return false;
     }
 
-    const anchor = Number.isFinite(particleEmitter?.e)
-      ? this.currentEntityStateById.get(particleEmitter.e)?.p
-      : particleEmitter?.p;
+    const anchor = this.getAttachedStateSpatialInterestAnchor(particleEmitter);
     return this.isPositionInChunkInterestRange(anchor, centerChunkOrigin);
   }
 
@@ -1565,9 +1721,7 @@ class ShadowHostedWorldRuntime {
       return false;
     }
 
-    const anchor = Number.isFinite(sceneUI?.e)
-      ? this.currentEntityStateById.get(sceneUI.e)?.p
-      : sceneUI?.p;
+    const anchor = this.getAttachedStateSpatialInterestAnchor(sceneUI);
     if (!Array.isArray(anchor) || anchor.length !== 3) {
       return false;
     }
@@ -1678,6 +1832,8 @@ class ShadowHostedWorldRuntime {
       ]);
     }
 
+    this.syncPlayerLongRangeStaticEnvironmentEntityInterest(playerId, resolvedWorldTick, loadedEntityIds, desiredEntityIds);
+
     for (const loadedEntityId of Array.from(loadedEntityIds)) {
       if (desiredEntityIds.has(loadedEntityId)) {
         continue;
@@ -1712,6 +1868,10 @@ class ShadowHostedWorldRuntime {
     }
 
     for (const entityId of leavingEntityIds) {
+      if (this.longRangeStaticEnvironmentEntityIds.has(entityId)) {
+        continue;
+      }
+
       if (!loadedEntityIds.has(entityId)) {
         continue;
       }
@@ -1725,6 +1885,34 @@ class ShadowHostedWorldRuntime {
       this.queuePacket(playerId, [
         ENTITIES_PACKET_ID,
         [ { i: entityId, rm: true } ],
+        resolvedWorldTick,
+      ]);
+    }
+
+    this.syncPlayerLongRangeStaticEnvironmentEntityInterest(playerId, resolvedWorldTick, loadedEntityIds);
+  }
+
+  syncPlayerLongRangeStaticEnvironmentEntityInterest(playerId, resolvedWorldTick, loadedEntityIds, desiredEntityIds) {
+    for (const entityId of this.longRangeStaticEnvironmentEntityIds) {
+      if (desiredEntityIds?.has(entityId)) {
+        continue;
+      }
+
+      const entity = this.currentEntityStateById.get(entityId);
+      if (!this.isLongRangeStaticEnvironmentEntity(entity)) {
+        this.longRangeStaticEnvironmentEntityIds.delete(entityId);
+        continue;
+      }
+
+      desiredEntityIds?.add(entityId);
+      if (loadedEntityIds.has(entityId)) {
+        continue;
+      }
+
+      loadedEntityIds.add(entityId);
+      this.queuePacket(playerId, [
+        ENTITIES_PACKET_ID,
+        [ cloneEntitySchema(entity) ],
         resolvedWorldTick,
       ]);
     }

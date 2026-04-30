@@ -172,6 +172,7 @@ export default class EntityManager {
   private _game: Game;
   private _entities: Map<EntityId, Entity | StaticEntity> = new Map();
   private _loggedIncompleteEntityIds: Set<EntityId> = new Set();
+  private _pendingEntityCreates: Map<EntityId, DeserializedEntity> = new Map();
   private _lastRemovedEntityServerTickById: Map<EntityId, number> = new Map();
   private _worldId: number | undefined;
   private _dynamicEntities: Set<Entity> = new Set();
@@ -624,6 +625,8 @@ export default class EntityManager {
   private _onWorldPacket = (payload: NetworkManagerEventPayload.IWorldPacket): void => {
     if (this._worldId !== payload.deserializedWorld.id) {
       this._worldId = payload.deserializedWorld.id;
+      this._pendingEntityCreates.clear();
+      this._loggedIncompleteEntityIds.clear();
       this._lastRemovedEntityServerTickById.clear();
     }
 
@@ -641,11 +644,40 @@ export default class EntityManager {
     this._outlines.delete(entityId);
   }
 
+  private _retryAttachChildren(parentEntityId: EntityId): void {
+    for (const entity of this._dynamicEntities) {
+      if (
+        entity.id === parentEntityId ||
+        entity.parentEntityId !== parentEntityId ||
+        entity.attached
+      ) {
+        continue;
+      }
+
+      entity.addToScene();
+    }
+  }
+
+  private _mergePendingEntityCreate(deserializedEntity: DeserializedEntity): DeserializedEntity {
+    const pending = this._pendingEntityCreates.get(deserializedEntity.id);
+    const merged: DeserializedEntity = pending ? { ...pending } : { id: deserializedEntity.id };
+
+    for (const key of Object.keys(deserializedEntity) as (keyof DeserializedEntity)[]) {
+      const value = deserializedEntity[key];
+      if (value !== undefined) {
+        (merged as Record<keyof DeserializedEntity, unknown>)[key] = value;
+      }
+    }
+
+    return merged;
+  }
+
   private _updateEntity = (deserializedEntity: DeserializedEntity, serverTick: number): void => {
     let entity = this._entities.get(deserializedEntity.id);
     if (!entity) {
       if (deserializedEntity.removed) {
         if (deserializedEntity.id !== undefined) {
+          this._pendingEntityCreates.delete(deserializedEntity.id);
           const previousRemovedServerTick = this._lastRemovedEntityServerTickById.get(deserializedEntity.id) ?? -Infinity;
           if (serverTick > previousRemovedServerTick) {
             this._lastRemovedEntityServerTickById.set(deserializedEntity.id, serverTick);
@@ -668,46 +700,52 @@ export default class EntityManager {
         this._purgeEntityVisuals(deserializedEntity.id);
       }
 
+      const createEntityData = this._mergePendingEntityCreate(deserializedEntity);
+
       if (
-        deserializedEntity.id === undefined ||
-        deserializedEntity.position === undefined ||
-        deserializedEntity.rotation === undefined ||
-        (!deserializedEntity.blockTextureUri && !deserializedEntity.modelUri)
+        createEntityData.id === undefined ||
+        createEntityData.position === undefined ||
+        createEntityData.rotation === undefined ||
+        (!createEntityData.blockTextureUri && !createEntityData.modelUri)
       ) {
         if (
-          deserializedEntity.id !== undefined &&
-          !this._loggedIncompleteEntityIds.has(deserializedEntity.id)
+          createEntityData.id !== undefined &&
+          !this._loggedIncompleteEntityIds.has(createEntityData.id)
         ) {
-          this._loggedIncompleteEntityIds.add(deserializedEntity.id);
-          console.info(`EntityManager._onEntityCreateUpdate(): Entity ${deserializedEntity.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, deserializedEntity);
+          this._loggedIncompleteEntityIds.add(createEntityData.id);
+          console.info(`EntityManager._onEntityCreateUpdate(): Entity ${createEntityData.id} not yet created, this can be safely ignored if no gameplay bugs are experienced.`, createEntityData);
+        }
+        if (createEntityData.id !== undefined) {
+          this._pendingEntityCreates.set(createEntityData.id, createEntityData);
         }
         return;
       }
 
-      this._loggedIncompleteEntityIds.delete(deserializedEntity.id);
+      this._pendingEntityCreates.delete(createEntityData.id);
+      this._loggedIncompleteEntityIds.delete(createEntityData.id);
 
       const entityData = {
-        id: deserializedEntity.id,
-        blockTextureUri: deserializedEntity.blockTextureUri,
-        blockHalfExtents: deserializedEntity.blockHalfExtents,
-        emissiveColor: deserializedEntity.emissiveColor,
-        emissiveIntensity: deserializedEntity.emissiveIntensity,
-        isEnvironmental: deserializedEntity.isEnvironmental,
-        modelAnimations: deserializedEntity.modelAnimations,
-        modelNodeOverrides: deserializedEntity.modelNodeOverrides,
-        modelTextureUri: deserializedEntity.modelTextureUri,
-        modelUri: deserializedEntity.modelUri,
-        name: deserializedEntity.name || '',
-        opacity: deserializedEntity.opacity,
-        parentEntityId: deserializedEntity.parentEntityId,
-        parentNodeName: deserializedEntity.parentNodeName,
-        position: new Vector3(deserializedEntity.position.x, deserializedEntity.position.y, deserializedEntity.position.z),
-        positionInterpolationMs: deserializedEntity.positionInterpolationMs,
-        rotation: new Quaternion(deserializedEntity.rotation.x, deserializedEntity.rotation.y, deserializedEntity.rotation.z, deserializedEntity.rotation.w),
-        rotationInterpolationMs: deserializedEntity.rotationInterpolationMs,
-        scale: deserializedEntity.scale,
-        scaleInterpolationMs: deserializedEntity.scaleInterpolationMs,
-        tintColor: deserializedEntity.tintColor,
+        id: createEntityData.id,
+        blockTextureUri: createEntityData.blockTextureUri,
+        blockHalfExtents: createEntityData.blockHalfExtents,
+        emissiveColor: createEntityData.emissiveColor,
+        emissiveIntensity: createEntityData.emissiveIntensity,
+        isEnvironmental: createEntityData.isEnvironmental,
+        modelAnimations: createEntityData.modelAnimations,
+        modelNodeOverrides: createEntityData.modelNodeOverrides,
+        modelTextureUri: createEntityData.modelTextureUri,
+        modelUri: createEntityData.modelUri,
+        name: createEntityData.name || '',
+        opacity: createEntityData.opacity,
+        parentEntityId: createEntityData.parentEntityId,
+        parentNodeName: createEntityData.parentNodeName,
+        position: new Vector3(createEntityData.position.x, createEntityData.position.y, createEntityData.position.z),
+        positionInterpolationMs: createEntityData.positionInterpolationMs,
+        rotation: new Quaternion(createEntityData.rotation.x, createEntityData.rotation.y, createEntityData.rotation.z, createEntityData.rotation.w),
+        rotationInterpolationMs: createEntityData.rotationInterpolationMs,
+        scale: createEntityData.scale,
+        scaleInterpolationMs: createEntityData.scaleInterpolationMs,
+        tintColor: createEntityData.tintColor,
       };
 
       // Check if this should be a Static Environment Entity.
@@ -717,20 +755,20 @@ export default class EntityManager {
       // whether it can become a Static Environment Entity. However, in the future, there
       // may be a way to access Environment Entities, and in that case, it will likely be
       // necessary to introduce an explicit flag indicating whether it is static.
-      if (deserializedEntity.isEnvironmental === true
-        && deserializedEntity.modelUri !== undefined
-        && !deserializedEntity.blockTextureUri
-        && !deserializedEntity.parentEntityId
-        && !deserializedEntity.parentNodeName
-        && !deserializedEntity.modelAnimations?.length
-        && !deserializedEntity.modelNodeOverrides?.length
-        && !deserializedEntity.modelTextureUri
-        && (deserializedEntity.opacity === undefined || deserializedEntity.opacity === 1.0)
+      if (createEntityData.isEnvironmental === true
+        && createEntityData.modelUri !== undefined
+        && !createEntityData.blockTextureUri
+        && createEntityData.parentEntityId == null
+        && !createEntityData.parentNodeName
+        && !createEntityData.modelAnimations?.length
+        && !createEntityData.modelNodeOverrides?.length
+        && !createEntityData.modelTextureUri
+        && (createEntityData.opacity === undefined || createEntityData.opacity === 1.0)
       ) {
         entity = new StaticEntity(this._game, entityData);
         this._staticEnvironmentEntityManager.add(entity as StaticEntity);
       } else {
-        const shouldSuppressAnimations = deserializedEntity.isEnvironmental ? this._shouldSuppressEnvironmentAnimations : false;
+        const shouldSuppressAnimations = createEntityData.isEnvironmental ? this._shouldSuppressEnvironmentAnimations : false;
         entity = new Entity(this._game, entityData, shouldSuppressAnimations);
         this._dynamicEntities.add(entity);
         this._dynamicEntityListDirty = true;
@@ -738,6 +776,7 @@ export default class EntityManager {
 
       this._entities.set(entity.id, entity);
       this._lastRemovedEntityServerTickById.delete(entity.id);
+      this._retryAttachChildren(entity.id);
 
       // Since the geometry for Block Entities depends on the Block Texture Atlas and other factors,
       // it needs to be constructed in the WebWorker just like Chunk Blocks Mesh. Therefore, a request
@@ -747,10 +786,11 @@ export default class EntityManager {
       }
 
       // Apply initial outline if present at spawn
-      if (deserializedEntity.outline) {
-        this.setOutline(deserializedEntity.id, deserializedEntity.outline);
+      if (createEntityData.outline) {
+        this.setOutline(createEntityData.id, createEntityData.outline);
       }
     } else {
+      this._pendingEntityCreates.delete(deserializedEntity.id);
       if (deserializedEntity.removed) {
         const previousRemovedServerTick = this._lastRemovedEntityServerTickById.get(entity.id) ?? -Infinity;
         if (serverTick > previousRemovedServerTick) {

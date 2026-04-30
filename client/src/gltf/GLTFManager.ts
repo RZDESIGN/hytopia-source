@@ -20,6 +20,7 @@ import {
   OrthographicCamera,
   PlaneGeometry,
   Scene,
+  SkinnedMesh,
   Source,
   Texture,
   Vector3,
@@ -728,8 +729,12 @@ export default class GLTFManager {
   private _canUseInstancedMesh(sourceMesh: Mesh, clonedMesh: Mesh): boolean {
     return !(sourceMesh instanceof InstancedMesh)
       && !(clonedMesh instanceof InstancedMesh)
+      && !(sourceMesh instanceof SkinnedMesh)
+      && !(clonedMesh instanceof SkinnedMesh)
       && !Array.isArray(sourceMesh.material)
       && !Array.isArray(clonedMesh.material)
+      && Object.keys(sourceMesh.geometry.morphAttributes).length === 0
+      && Object.keys(clonedMesh.geometry.morphAttributes).length === 0
       && !this._hasInstancedGeometryAttribute(sourceMesh.geometry)
       && !this._hasInstancedGeometryAttribute(clonedMesh.geometry)
       && !this._getMeshMaterials(sourceMesh).some(material => material instanceof EmissiveMeshHeroMaterial);
@@ -859,6 +864,25 @@ export default class GLTFManager {
       opaque: new InstancedMeshEx(sourceMesh.geometry.clone(), opaqueMaterial, count),
       transparent: new InstancedMeshEx(sourceMesh.geometry.clone(), transparentMaterial, count),
     };
+  }
+
+  private _hasInstancedMeshCapacity(instancedMesh: InstancedMeshEx, requiredCount: number): boolean {
+    if (requiredCount > instancedMesh.instanceMatrix.count) {
+      return false;
+    }
+
+    if (instancedMesh.instanceColor && requiredCount > instancedMesh.instanceColor.count) {
+      return false;
+    }
+
+    for (const name in instancedMesh.geometry.attributes) {
+      const attribute = instancedMesh.geometry.attributes[name];
+      if (attribute instanceof InstancedBufferAttribute && requiredCount > attribute.count * attribute.meshPerAttribute) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private _disposeInstancedMeshPair(pair: InstancedMeshPair, disposeMaterials: boolean): void {
@@ -1625,6 +1649,17 @@ export default class GLTFManager {
     }
 
     const instancedMesh = isTransparent ? targetPair.transparent : targetPair.opaque;
+    if (!this._hasInstancedMeshCapacity(instancedMesh, clonedMeshes.length)) {
+      for (const clonedMesh of clonedMeshes) {
+        this._setClonedMeshDefaultLayerEnabled(clonedMesh, true);
+      }
+      instancedMesh.count = 0;
+      console.warn(
+        `GLTFManager._processClonedMeshes(): InstancedMesh attribute capacity is insufficient for ${clonedMeshes.length} cloned meshes; rendering individually.`,
+      );
+      return -1;
+    }
+
     const instanceMatrixAttribute = instancedMesh.instanceMatrix;
     const instanceMatrixArray = instanceMatrixAttribute.array as Float32Array;
     const instanceSkyLightAttribute = instancedMesh.geometry.getAttribute(INSTANCE_SKY_LIGHT_ATTRIBUTE)! as InstancedBufferAttribute;

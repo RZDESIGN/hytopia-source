@@ -21,8 +21,8 @@ import type { DeserializedModelAnimations, DeserializedModelNodeOverrides } from
 // Specifically, compared to regular Entities, the processing differs as follows:
 // * Entity data does not need to be updated after creation
 // * Data is copied to InstancedMesh only when the Entity is added
-// * View distance handling is done in the shader
-// * Frustum culling is not performed
+// * View distance handling is done in the shader with conservative padding
+// * Per-instance frustum culling is not performed
 //
 // Currently, the goal is to implement StaticEntity with minimal changes, so we
 // made small modifications to Entity, and StaticEntity inherits from it.

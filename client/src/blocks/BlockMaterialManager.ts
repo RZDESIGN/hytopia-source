@@ -6,6 +6,8 @@ import {
   MeshStandardMaterial,
   ShaderMaterial,
   Texture,
+  UniformsLib,
+  UniformsUtils,
   Vector3,
   WebGLProgramParametersWithUniforms,
   WebGLRenderer,
@@ -13,6 +15,14 @@ import {
 import { ALPHA_TEST_THRESHOLD, BlockTextureAtlasEventType, WATER_SURFACE_Y_OFFSET } from './BlockConstants';
 import Game from '../Game';
 import EventRouter from '../events/EventRouter';
+import {
+  applyDistanceFogToStandardShader,
+  createDistanceFogUniforms,
+  DISTANCE_FOG_FRAGMENT_DECLARATION,
+  DISTANCE_FOG_FRAGMENT,
+  DISTANCE_FOG_VERTEX_DECLARATION,
+  DISTANCE_FOG_WORLD_POSITION_VARYING,
+} from '../core/DistanceFogShader';
 import { applyDirectionalShadowEdgeFade } from '../three/directionalShadowFade';
 
 const UNIFORM_RAW_AMBIENT_LIGHT_COLOR = 'rawAmbientLightColor';
@@ -50,7 +60,9 @@ function applyBlockBrightnessLift(fragmentShader: string): string {
 }
 
 class MeshBlockMaterial extends MeshStandardMaterial {
-  constructor(_game: Game, transparent: boolean, hasLightLevel: boolean = true) {
+  private _game: Game;
+
+  constructor(game: Game, transparent: boolean, hasLightLevel: boolean = true) {
     super({
       map: null, // set later,
       side: FrontSide,
@@ -62,11 +74,13 @@ class MeshBlockMaterial extends MeshStandardMaterial {
       roughness: hasLightLevel ? 0.972 : 0.988,
     });
 
+    this._game = game;
     this.name = hasLightLevel ? 'MeshBlockMaterial' : 'MeshBlockMaterialNonLit';
   }
 
   public override onBeforeCompile(params: WebGLProgramParametersWithUniforms, renderer: WebGLRenderer): void {
     super.onBeforeCompile(params, renderer);
+    applyDistanceFogToStandardShader(params, this._game);
     params.fragmentShader = applyBlockBrightnessLift(applyDirectionalShadowEdgeFade(params.fragmentShader, params.uniforms as Record<string, { value: number }>));
   }
 }
@@ -89,10 +103,11 @@ const ATTRIBUTE_SURFACE_FLAG = 'surfaceFlag';
 const ATTRIBUTE_WIND_DATA = 'windData';
 
 class MeshLiquidMaterial extends ShaderMaterial {
-  constructor() {
+  constructor(game: Game) {
     // TODO: Support Light Level
     super({
       uniforms: {
+        ...UniformsUtils.clone(UniformsLib.fog),
         [UNIFORM_TIME]: { value: 0 },
         [UNIFORM_TEXTURE_ATLAS]: { value: null }, // set later
         [UNIFORM_AMBIENT_LIGHT_COLOR]: { value: new Color() },
@@ -104,6 +119,7 @@ class MeshLiquidMaterial extends ShaderMaterial {
         [UNIFORM_REFLECTION_TEXTURE]: { value: null },
         [UNIFORM_REFLECTION_TEXTURE_MATRIX]: { value: new Matrix4() },
         [UNIFORM_REFLECTION_ENABLED]: { value: 0 },
+        ...createDistanceFogUniforms(game),
       },
       vertexShader: `
         uniform float ${UNIFORM_TIME};
@@ -119,6 +135,9 @@ class MeshLiquidMaterial extends ShaderMaterial {
         varying vec4 vFoamLevel;
         varying vec4 vFoamLevelDiag;
         varying float vSurfaceFlag;
+        ${DISTANCE_FOG_VERTEX_DECLARATION}
+
+        #include <fog_pars_vertex>
 
         void main() {
           vFoamLevel = ${ATTRIBUTE_FOAM_LEVEL};
@@ -168,9 +187,12 @@ class MeshLiquidMaterial extends ShaderMaterial {
 
           vec4 displacedWorldPos = modelMatrix * vec4(pos, 1.0);
           vWorldPos = displacedWorldPos.xyz;
+          ${DISTANCE_FOG_WORLD_POSITION_VARYING} = displacedWorldPos.xyz;
           vViewVector = normalize(cameraPosition - displacedWorldPos.xyz);
 
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+          vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
         }
       `,
       fragmentShader: `
@@ -193,6 +215,9 @@ class MeshLiquidMaterial extends ShaderMaterial {
         varying vec4 vFoamLevel;
         varying vec4 vFoamLevelDiag;
         varying float vSurfaceFlag;
+        ${DISTANCE_FOG_FRAGMENT_DECLARATION}
+
+        #include <fog_pars_fragment>
 
         float hash(vec2 p) {
           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -298,11 +323,13 @@ class MeshLiquidMaterial extends ShaderMaterial {
           }
 
           gl_FragColor = vec4(color, 0.8);
+          ${DISTANCE_FOG_FRAGMENT}
         }
       `,
       // Transparent double-sided liquids need the default two-pass rendering
       // path; forcing a single pass exposes internal triangle/edge artifacts.
       depthWrite: false,
+      fog: true,
       side: DoubleSide,
       transparent: true,
     });
@@ -334,14 +361,16 @@ class MeshLiquidMaterial extends ShaderMaterial {
 }
 
 class MeshFoliageMaterial extends ShaderMaterial {
-  constructor() {
+  constructor(game: Game) {
     super({
       uniforms: {
+        ...UniformsUtils.clone(UniformsLib.fog),
         [UNIFORM_TIME]: { value: 0 },
         [UNIFORM_TEXTURE_ATLAS]: { value: null },
         [UNIFORM_RAW_AMBIENT_LIGHT_COLOR]: { value: new Color() },
         [UNIFORM_AMBIENT_LIGHT_INTENSITY]: { value: 1 },
         [UNIFORM_INTERACTION_CENTER]: { value: new Vector3() },
+        ...createDistanceFogUniforms(game),
       },
       vertexShader: `
         uniform float ${UNIFORM_TIME};
@@ -353,6 +382,9 @@ class MeshFoliageMaterial extends ShaderMaterial {
         varying vec2 vUv;
         varying vec4 vColor;
         varying float vTipWeight;
+        ${DISTANCE_FOG_VERTEX_DECLARATION}
+
+        #include <fog_pars_vertex>
 
         void main() {
           vUv = uv;
@@ -385,7 +417,11 @@ class MeshFoliageMaterial extends ShaderMaterial {
             pos.y -= flatten;
           }
 
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+          vec4 finalWorldPos = modelMatrix * vec4(pos, 1.0);
+          ${DISTANCE_FOG_WORLD_POSITION_VARYING} = finalWorldPos.xyz;
+          vec4 mvPosition = viewMatrix * finalWorldPos;
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
         }
       `,
       fragmentShader: `
@@ -396,6 +432,9 @@ class MeshFoliageMaterial extends ShaderMaterial {
         varying vec2 vUv;
         varying vec4 vColor;
         varying float vTipWeight;
+        ${DISTANCE_FOG_FRAGMENT_DECLARATION}
+
+        #include <fog_pars_fragment>
 
         void main() {
           vec4 texColor = texture2D(${UNIFORM_TEXTURE_ATLAS}, vUv);
@@ -408,8 +447,10 @@ class MeshFoliageMaterial extends ShaderMaterial {
           vec3 litColor = texColor.rgb * vColor.rgb * ambientLight * bladeGradient;
 
           gl_FragColor = vec4(litColor, texColor.a);
+          ${DISTANCE_FOG_FRAGMENT}
         }
       `,
+      fog: true,
       side: DoubleSide,
     });
   }
@@ -440,8 +481,8 @@ export default class BlockMaterialManager {
     this._transparentMaterial = new MeshBlockMaterial(game, true, true);
     this._opaqueNonLitMaterial = new MeshBlockMaterial(game, false, false);
     this._transparentNonLitMaterial = new MeshBlockMaterial(game, true, false);
-    this._foliageMaterial = new MeshFoliageMaterial();
-    this._liquidMaterial = new MeshLiquidMaterial();
+    this._foliageMaterial = new MeshFoliageMaterial(game);
+    this._liquidMaterial = new MeshLiquidMaterial(game);
 
     EventRouter.instance.on(
       BlockTextureAtlasEventType.Ready,

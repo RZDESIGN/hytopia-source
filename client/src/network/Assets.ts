@@ -4,6 +4,7 @@ import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import Game from '../Game';
 
 const TRANSCODER_PATH = '/basis/';
+const PLATFORM_LOCKER_ASSET_PATH = '/player-locker/';
 
 Cache.enabled = true;
 
@@ -77,28 +78,46 @@ export default class Assets {
         // Check .optimized models in priority order.
         // We check .glb first as the preferred optimized format, then fall back
         // to the original extension if needed.
-        const candidateUris = [
-          uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.glb`),
-          uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.$2`),
-        ];
+        const optimizedGlbUri = uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.glb`);
+        const optimizedSourceExtensionUri = uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1${suffix}.$2`);
+        const candidateUris = uri.includes(PLATFORM_LOCKER_ASSET_PATH)
+          ? [optimizedSourceExtensionUri, optimizedGlbUri]
+          : [optimizedGlbUri, optimizedSourceExtensionUri];
 
         // Some SDKs may only have the base optimized model available.
         if (suffix === '-no-animations') {
-          candidateUris.push(uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.glb`));
-          candidateUris.push(uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.$2`));
+          const baseOptimizedGlbUri = uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.glb`);
+          const baseOptimizedSourceExtensionUri = uri.replace(/([^/]+)\.([^.]+)$/, `.optimized/$1/$1.$2`);
+          if (uri.includes(PLATFORM_LOCKER_ASSET_PATH)) {
+            candidateUris.push(baseOptimizedSourceExtensionUri, baseOptimizedGlbUri);
+          } else {
+            candidateUris.push(baseOptimizedGlbUri, baseOptimizedSourceExtensionUri);
+          }
         }
 
-        const candidateExists = await Promise.all(candidateUris.map(async candidateUri => {
-          try {
-            return await Assets.urlExists(candidateUri);
-          } catch {
-            return false;
+        if (uri.includes(PLATFORM_LOCKER_ASSET_PATH)) {
+          for (const candidateUri of candidateUris) {
+            try {
+              if (await Assets.urlExists(candidateUri)) {
+                return candidateUri;
+              }
+            } catch {
+              continue;
+            }
           }
-        }));
+        } else {
+          const candidateExists = await Promise.all(candidateUris.map(async candidateUri => {
+            try {
+              return await Assets.urlExists(candidateUri);
+            } catch {
+              return false;
+            }
+          }));
 
-        for (let i = 0; i < candidateUris.length; i++) {
-          if (candidateExists[i]) {
-            return candidateUris[i];
+          for (let i = 0; i < candidateUris.length; i++) {
+            if (candidateExists[i]) {
+              return candidateUris[i];
+            }
           }
         }
 

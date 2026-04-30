@@ -15,7 +15,7 @@ const createHarness = () => {
   controller.applyDirectionalMovementRotations = false;
   controller.facesCameraWhenIdle = true;
 
-  const player = {
+  const player: any = {
     id: 'player-1',
     lastAppliedInputSequenceNumber: 77,
     world: undefined as any,
@@ -241,6 +241,51 @@ test('chunk add interest lookup uses indexed player centers', () => {
   } finally {
     (PlayerManager.instance as any).getConnectedPlayersByWorldSet = originalGetConnectedPlayersByWorldSet;
   }
+});
+
+test('chunk interest center follows camera focus before physical camera attachment', () => {
+  const kartEntity = {
+    id: 9,
+    isSpawned: true,
+    position: { x: 32, y: 0, z: 0 },
+  };
+  const focusEntity = {
+    id: 10,
+    isSpawned: true,
+    parent: kartEntity,
+    position: { x: 1000, y: 0, z: 1000 },
+  };
+  const cameraBoomEntity = {
+    id: 11,
+    isSpawned: true,
+    parent: kartEntity,
+    position: { x: -1000, y: 0, z: -1000 },
+  };
+  const player = {
+    camera: {
+      attachedToEntity: cameraBoomEntity,
+      attachedToPosition: undefined,
+      targetEntity: focusEntity,
+      targetPosition: undefined,
+    },
+  };
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+
+  expect((synchronizer as any)._getChunkInterestCenter(player)).toBe(kartEntity.position);
+
+  player.camera.targetEntity = undefined;
+  player.camera.targetPosition = { x: 48, y: 0, z: 0 };
+  expect((synchronizer as any)._getChunkInterestCenter(player)).toBe(player.camera.targetPosition);
+
+  player.camera.targetPosition = undefined;
+  expect((synchronizer as any)._getChunkInterestCenter(player)).toBe(kartEntity.position);
 });
 
 test('chunk interest refresh incrementally adds and removes only edge chunks for adjacent movement', () => {
@@ -488,4 +533,157 @@ test('entity spatial interest only refreshes attached indexes when the entity ch
   (synchronizer as any)._updateEntitySpatialInterest(entity);
 
   expect(attachedRefreshCalls).toBe(2);
+});
+
+test('static environment entities stay loaded outside chunk interest', () => {
+  const staticEnvironmentEntity = {
+    blockTextureUri: undefined,
+    id: 9001,
+    isEnvironmental: true,
+    modelAnimations: [],
+    modelNodeOverrides: [],
+    modelTextureUri: undefined,
+    modelUri: 'models/environment/trackside-palm.gltf',
+    opacity: 1,
+    parent: undefined,
+    parentNodeName: undefined,
+    position: { x: 112, y: 0, z: 0 },
+    serialize() {
+      return {
+        e: true,
+        i: this.id,
+        m: this.modelUri,
+        o: this.opacity,
+        p: [ this.position.x, this.position.y, this.position.z ],
+        r: [ 0, 0, 0, 1 ],
+      };
+    },
+  };
+  const entities = new Map([
+    [ staticEnvironmentEntity.id, staticEnvironmentEntity ],
+  ]);
+  const player = {};
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getAllEntities() {
+        return Array.from(entities.values());
+      },
+      getEntity(id: number) {
+        return entities.get(id);
+      },
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    particleEmitterManager: {
+      getAllParticleEmitters() {
+        return [];
+      },
+    },
+    sceneUIManager: {
+      getAllSceneUIs() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+
+  (synchronizer as any)._ensureSpatialInterestIndexesInitialized();
+  (synchronizer as any)._refreshPlayerEntityInterestFull(player, { x: 0, y: 0, z: 0 });
+
+  const loadedEntityIds = (synchronizer as any)._getOrCreateLoadedEntityIds(player);
+  const perPlayerEntitySyncs = (synchronizer as any)._queuedEntitySyncs.perPlayer.get(player);
+  expect(loadedEntityIds.has(staticEnvironmentEntity.id)).toBe(true);
+  expect(perPlayerEntitySyncs?.get(staticEnvironmentEntity.id)).toEqual(expect.objectContaining({
+    e: true,
+    i: staticEnvironmentEntity.id,
+    m: staticEnvironmentEntity.modelUri,
+  }));
+
+  const removals: number[] = [];
+  (synchronizer as any)._queueEntityRemovalForPlayer = (entity: { id: number }) => {
+    removals.push(entity.id);
+  };
+  (synchronizer as any)._refreshPlayerEntityInterestIncremental(player, { x: 16, y: 0, z: 0 }, [], [ '112,0,0' ]);
+
+  expect(loadedEntityIds.has(staticEnvironmentEntity.id)).toBe(true);
+  expect(removals).not.toContain(staticEnvironmentEntity.id);
+});
+
+test('attached entity and particle spatial interest follows world ancestor instead of local offset', () => {
+  const parentEntity = {
+    id: 77,
+    isSpawned: true,
+    position: { x: 0, y: 2, z: 0 },
+  };
+  const middleEntity = {
+    id: 78,
+    isSpawned: true,
+    parent: parentEntity,
+    position: { x: 1000, y: 0, z: 1000 },
+  };
+  const childEntity = {
+    id: 79,
+    isSpawned: true,
+    parent: middleEntity,
+    position: { x: 1000, y: 0, z: 1000 },
+  };
+  const particleEmitter = {
+    attachedToEntity: childEntity,
+    id: 901,
+    position: { x: -1000, y: 0, z: -1000 },
+  };
+  const entities = new Map([
+    [ parentEntity.id, parentEntity ],
+    [ middleEntity.id, middleEntity ],
+    [ childEntity.id, childEntity ],
+  ]);
+  const particleEmitters = new Map([
+    [ particleEmitter.id, particleEmitter ],
+  ]);
+  const synchronizer = new NetworkSynchronizer({
+    entityManager: {
+      getAllEntities() {
+        return Array.from(entities.values());
+      },
+      getEntity(id: number) {
+        return entities.get(id);
+      },
+      getPlayerEntitiesByPlayer() {
+        return [];
+      },
+    },
+    particleEmitterManager: {
+      getAllParticleEmitters() {
+        return Array.from(particleEmitters.values());
+      },
+      getParticleEmitterById(id: number) {
+        return particleEmitters.get(id);
+      },
+    },
+    sceneUIManager: {
+      getAllSceneUIs() {
+        return [];
+      },
+    },
+    final() {},
+  } as any);
+
+  (synchronizer as any)._ensureSpatialInterestIndexesInitialized();
+
+  const index = (synchronizer as any)._entitySpatialInterestIndex;
+  const particleIndex = (synchronizer as any)._particleEmitterSpatialInterestIndex;
+  expect(index.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(middleEntity.id)).toBe(true);
+  expect(index.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(childEntity.id)).toBe(true);
+  expect(particleIndex.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(particleEmitter.id)).toBe(true);
+
+  parentEntity.position = { x: 160, y: 2, z: 0 };
+  (synchronizer as any)._updateEntitySpatialInterest(parentEntity);
+
+  expect(index.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(middleEntity.id)).toBe(false);
+  expect(index.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(childEntity.id)).toBe(false);
+  expect(particleIndex.collectIdsInRange({ x: 0, y: 0, z: 0 }).has(particleEmitter.id)).toBe(false);
+  expect(index.collectIdsInRange({ x: 160, y: 0, z: 0 }).has(middleEntity.id)).toBe(true);
+  expect(index.collectIdsInRange({ x: 160, y: 0, z: 0 }).has(childEntity.id)).toBe(true);
+  expect(particleIndex.collectIdsInRange({ x: 160, y: 0, z: 0 }).has(particleEmitter.id)).toBe(true);
 });

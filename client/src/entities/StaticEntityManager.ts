@@ -13,6 +13,7 @@ import {
   WebGLProgramParametersWithUniforms,
 } from 'three';
 import EmissiveMeshBasicMaterial from '../gltf/EmissiveMeshBasicMaterial';
+import { applyDistanceFogToStandardShader } from '../core/DistanceFogShader';
 import { isAngleVisibilityCullingEnabled, isDistanceVisibilityCullingEnabled } from '../core/VisibilityCulling';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import EntityStats from './EntityStats';
@@ -52,6 +53,10 @@ const STATIC_INSTANCE_SHADOW_LOD_FOCUS_PADDING_RATIO = 0.3;
 const STATIC_INSTANCE_SHADOW_LOD_MIN_PROJECTED_RADIUS = 0.02;
 const UNIFORM_DISTANCE_VISIBILITY_ANCHOR = 'distanceVisibilityAnchor';
 const UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR = 'hasDistanceVisibilityAnchor';
+// Static environment props should use the same horizon as chunk meshes. The
+// shader adds each model source radius below so large props do not pop when
+// their origin crosses the view-distance edge.
+const STATIC_INSTANCE_VIEW_DISTANCE_PADDING_RATIO = 1;
 
 // Working variables
 const mat4 = new Matrix4();
@@ -59,7 +64,17 @@ const box3 = new Box3();
 const vec3 = new Vector3();
 const sphere = new Sphere();
 
-const UNIFORM_VIEW_DISTANCE_SQUARED = 'viewDistanceSquared';
+const UNIFORM_VIEW_DISTANCE = 'viewDistance';
+const UNIFORM_SOURCE_BOUNDING_RADIUS = 'sourceBoundingRadius';
+
+const getStaticInstanceViewDistance = (game: Game): number => {
+  if (!isDistanceVisibilityCullingEnabled(game.settingsManager.qualityPerfTradeoff.viewDistance.enabled)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  const viewDistance = game.renderer.viewDistance;
+  return viewDistance * STATIC_INSTANCE_VIEW_DISTANCE_PADDING_RATIO;
+};
 
 const getInstanceCapacityForIndex = (currentCapacity: number, instanceIndex: number): number => {
   let nextCapacity = Math.max(currentCapacity, INITIAL_INSTANCE_COUNT);
@@ -125,6 +140,7 @@ const createReusableInstancedGeometry = (sourceGeometry: BufferGeometry): Buffer
 class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEntityInstancedMaterial> {
   private _game: Game;
   private _uniforms: Record<string, { value: number | Color | Vector3 }>;
+  private _sourceBoundingRadius: number;
 
   constructor(
     game: Game,
@@ -136,14 +152,19 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
     super(geometry, material, count);
 
     this._game = game;
+    if (this.geometry.boundingSphere === null) {
+      this.geometry.computeBoundingSphere();
+    }
+    this._sourceBoundingRadius = this.geometry.boundingSphere
+      ? this.geometry.boundingSphere.center.length() + this.geometry.boundingSphere.radius
+      : 0;
     this._uniforms = {
-      [UNIFORM_VIEW_DISTANCE_SQUARED]: {
+      [UNIFORM_VIEW_DISTANCE]: {
         get value(): number {
-          return isDistanceVisibilityCullingEnabled(game.settingsManager.qualityPerfTradeoff.viewDistance.enabled)
-            ? Math.pow(game.renderer.viewDistance, 2)
-            : Number.MAX_SAFE_INTEGER;
+          return getStaticInstanceViewDistance(game);
         },
       },
+      [UNIFORM_SOURCE_BOUNDING_RADIUS]: { value: this._sourceBoundingRadius },
       [UNIFORM_DISTANCE_VISIBILITY_ANCHOR]: {
         get value(): Vector3 {
           return game.camera.distanceVisibilityAnchor ?? game.camera.activeCamera.position;
@@ -204,12 +225,18 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
       for (const key in this._uniforms) {
         params.uniforms[key] = this._uniforms[key as keyof typeof this._uniforms];
       }
+      applyDistanceFogToStandardShader(
+        params,
+        this._game,
+        '(modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz',
+      );
 
       params.vertexShader = params.vertexShader
         .replace(
           'void main() {',
           `
-            uniform float ${UNIFORM_VIEW_DISTANCE_SQUARED};
+            uniform float ${UNIFORM_VIEW_DISTANCE};
+            uniform float ${UNIFORM_SOURCE_BOUNDING_RADIUS};
             uniform vec3 ${UNIFORM_DISTANCE_VISIBILITY_ANCHOR};
             uniform float ${UNIFORM_HAS_DISTANCE_VISIBILITY_ANCHOR};
 
@@ -255,8 +282,13 @@ class StaticEntityInstancedMesh extends InstancedMesh<BufferGeometry, StaticEnti
 
               vec2 toVisibilitySegment = instanceXZ - closestVisibilityPoint;
               float distanceSquared = dot(toVisibilitySegment, toVisibilitySegment);
+              float instanceScale = max(
+                length(instanceMatrix[0].xyz),
+                max(length(instanceMatrix[1].xyz), length(instanceMatrix[2].xyz))
+              );
+              float visibilityDistance = ${UNIFORM_VIEW_DISTANCE} + ${UNIFORM_SOURCE_BOUNDING_RADIUS} * instanceScale;
 
-              if (distanceSquared > ${UNIFORM_VIEW_DISTANCE_SQUARED}) {
+              if (distanceSquared > visibilityDistance * visibilityDistance) {
                 gl_Position = vec4(9999.0, 9999.0, 9999.0, 1.0);
                 return;
               }

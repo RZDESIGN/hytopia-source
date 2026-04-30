@@ -35,7 +35,7 @@ const FRAME_BUDGETS_BY_PRESET: Record<string, FrameBudgetThresholds> = {
     sceneUI: 12,
     transparentFaces: 50000,
     triangles: 2600000,
-    visibleChunks: 360,
+    visibleChunks: 480,
   },
   LOW: {
     drawCalls: 650,
@@ -51,13 +51,6 @@ const FRAME_BUDGETS_BY_PRESET: Record<string, FrameBudgetThresholds> = {
     transparentFaces: 10000,
     triangles: 550000,
     visibleChunks: 120,
-  },
-  ULTRA: {
-    drawCalls: 1500,
-    sceneUI: 14,
-    transparentFaces: 70000,
-    triangles: 3600000,
-    visibleChunks: 480,
   },
 };
 
