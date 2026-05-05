@@ -951,6 +951,8 @@ export class DefaultPlayerEntity extends PlayerEntity {
     constructor(options: DefaultPlayerEntityOptions);
     get cosmeticHiddenSlots(): PlayerCosmeticSlot[];
     // @internal (undocumented)
+    despawn(): void;
+    // @internal (undocumented)
     spawn(world: World, position: Vector3Like, rotation?: QuaternionLike): void;
 }
 
@@ -2557,6 +2559,8 @@ export class PlayerCamera extends EventRouter implements protocol.Serializable {
     setForwardOffset(forwardOffset: number): void;
     setFov(fov: number): void;
     setMode(mode: PlayerCameraMode): void;
+    setModelHiddenNodes(modelHiddenNodes: string[]): void;
+    setModelShownNodes(modelShownNodes: string[]): void;
     setOffset(offset: Vector3Like): void;
     // @internal (undocumented)
     setOrientationPitch(pitch: number): void;

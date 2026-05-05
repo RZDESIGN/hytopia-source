@@ -795,6 +795,34 @@ Sets the mode of the camera.
 </td></tr>
 <tr><td>
 
+[setModelHiddenNodes(modelHiddenNodes)](./server.playercamera.setmodelhiddennodes.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Hides nodes on the view model (or attached entity's model if no view model is set).
+
+
+</td></tr>
+<tr><td>
+
+[setModelShownNodes(modelShownNodes)](./server.playercamera.setmodelshownnodes.md)
+
+
+</td><td>
+
+
+</td><td>
+
+Shows nodes on the view model (or attached entity's model if no view model is set), overriding hidden nodes.
+
+
+</td></tr>
+<tr><td>
+
 [setOffset(offset)](./server.playercamera.setoffset.md)
 
 

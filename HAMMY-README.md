@@ -67,6 +67,31 @@ cd server && npm run build:server
 cd ../sdk && npm version patch --no-git-tag-version && npm publish --access public
 ```
 
+### Release handoff: 0.15.16 camera compatibility
+
+`hammy-hytopia` 0.15.16 restores the legacy `PlayerCamera.setModelHiddenNodes()` and `PlayerCamera.setModelShownNodes()` methods as aliases for the newer view-model hidden/shown node APIs. This fixes older games such as Snowballerz that hide first-person arms, torso, and legs through the original camera API.
+
+Files changed for this release:
+
+- `server/src/players/PlayerCamera.ts` adds the compatibility aliases
+- `sdk/server.mjs`, `sdk/server.d.ts`, `sdk/server.api.json`, and `sdk/docs/` are generated from the server build
+- `sdk/package.json` and the root `package-lock.json` are bumped to `0.15.16`
+
+To finish or repeat the npm release:
+
+```bash
+cd sdk
+npm whoami
+npm publish --access public
+npm view hammy-hytopia@0.15.16 version
+```
+
+If `npm whoami` returns `E401`, configure a npm token first:
+
+```bash
+npm config set //registry.npmjs.org/:_authToken <token>
+```
+
 ---
 
 ## Architecture

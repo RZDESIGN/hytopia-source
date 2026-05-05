@@ -3029,6 +3029,10 @@ export declare type DefaultBlockEditPredictionConfig = {
  */
 export declare class DefaultPlayerEntity extends PlayerEntity {
     private _cosmeticHiddenSlots;
+    private _cosmeticEntities;
+    private _cosmeticsRefreshInterval;
+    private _cosmeticsRefreshInFlight;
+    private _cosmeticsSignature;
     /**
      * Creates a new DefaultPlayerEntity instance.
      *
@@ -3052,6 +3056,13 @@ export declare class DefaultPlayerEntity extends PlayerEntity {
      */
     get cosmeticHiddenSlots(): PlayerCosmeticSlot[];
 
+
+    private _startSelfHostCosmeticsRefresh;
+    private _stopSelfHostCosmeticsRefresh;
+    private _loadAndApplyCosmetics;
+    private _applyCosmetics;
+    private _clearCosmeticEntities;
+    private _createCosmeticsSignature;
 }
 
 /**
@@ -9029,6 +9040,29 @@ export declare class PlayerCamera extends EventRouter implements protocol.Serial
      * **Category:** Players
      */
     setViewModel(viewModelUri: string | undefined): void;
+    /**
+     * Hides nodes on the view model (or attached entity's model if no view model is set).
+     *
+     * @remarks
+     * Compatibility alias for `setViewModelHiddenNodes`.
+     *
+     * @param modelHiddenNodes - Node name substrings to hide.
+     *
+     * **Category:** Players
+     */
+    setModelHiddenNodes(modelHiddenNodes: string[]): void;
+    /**
+     * Shows nodes on the view model (or attached entity's model if no view model is set),
+     * overriding hidden nodes.
+     *
+     * @remarks
+     * Compatibility alias for `setViewModelShownNodes`.
+     *
+     * @param modelShownNodes - Node name substrings to show.
+     *
+     * **Category:** Players
+     */
+    setModelShownNodes(modelShownNodes: string[]): void;
     /**
      * Hides nodes on the view model (or attached entity's model if no view model is set).
      *

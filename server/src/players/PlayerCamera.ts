@@ -1183,6 +1183,35 @@ export default class PlayerCamera extends EventRouter implements protocol.Serial
    * Hides nodes on the view model (or attached entity's model if no view model is set).
    *
    * @remarks
+   * Compatibility alias for `setViewModelHiddenNodes`.
+   *
+   * @param modelHiddenNodes - Node name substrings to hide.
+   *
+   * **Category:** Players
+   */
+  public setModelHiddenNodes(modelHiddenNodes: string[]) {
+    this.setViewModelHiddenNodes(modelHiddenNodes);
+  }
+
+  /**
+   * Shows nodes on the view model (or attached entity's model if no view model is set),
+   * overriding hidden nodes.
+   *
+   * @remarks
+   * Compatibility alias for `setViewModelShownNodes`.
+   *
+   * @param modelShownNodes - Node name substrings to show.
+   *
+   * **Category:** Players
+   */
+  public setModelShownNodes(modelShownNodes: string[]) {
+    this.setViewModelShownNodes(modelShownNodes);
+  }
+
+  /**
+   * Hides nodes on the view model (or attached entity's model if no view model is set).
+   *
+   * @remarks
    * Only affects this camera's player. Uses case-insensitive substring matching.
    * Replaces the current set (not a merge).
    *

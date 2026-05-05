@@ -45165,6 +45165,102 @@
             },
             {
               "kind": "Method",
+              "canonicalReference": "server!PlayerCamera#setModelHiddenNodes:member(1)",
+              "docComment": "/**\n * Hides nodes on the view model (or attached entity's model if no view model is set).\n *\n * @remarks\n *\n * Compatibility alias for `setViewModelHiddenNodes`.\n *\n * @param modelHiddenNodes - Node name substrings to hide.\n *\n * **Category:** Players\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setModelHiddenNodes(modelHiddenNodes: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "string[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "modelHiddenNodes",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setModelHiddenNodes"
+            },
+            {
+              "kind": "Method",
+              "canonicalReference": "server!PlayerCamera#setModelShownNodes:member(1)",
+              "docComment": "/**\n * Shows nodes on the view model (or attached entity's model if no view model is set), overriding hidden nodes.\n *\n * @remarks\n *\n * Compatibility alias for `setViewModelShownNodes`.\n *\n * @param modelShownNodes - Node name substrings to show.\n *\n * **Category:** Players\n */\n",
+              "excerptTokens": [
+                {
+                  "kind": "Content",
+                  "text": "setModelShownNodes(modelShownNodes: "
+                },
+                {
+                  "kind": "Content",
+                  "text": "string[]"
+                },
+                {
+                  "kind": "Content",
+                  "text": "): "
+                },
+                {
+                  "kind": "Content",
+                  "text": "void"
+                },
+                {
+                  "kind": "Content",
+                  "text": ";"
+                }
+              ],
+              "isStatic": false,
+              "returnTypeTokenRange": {
+                "startIndex": 3,
+                "endIndex": 4
+              },
+              "releaseTag": "Public",
+              "isProtected": false,
+              "overloadIndex": 1,
+              "parameters": [
+                {
+                  "parameterName": "modelShownNodes",
+                  "parameterTypeTokenRange": {
+                    "startIndex": 1,
+                    "endIndex": 2
+                  },
+                  "isOptional": false
+                }
+              ],
+              "isOptional": false,
+              "isAbstract": false,
+              "name": "setModelShownNodes"
+            },
+            {
+              "kind": "Method",
               "canonicalReference": "server!PlayerCamera#setOffset:member(1)",
               "docComment": "/**\n * Sets the relative offset of the camera from its attachment target.\n *\n * @param offset - The offset to set.\n *\n * **Requires:** Player must be in a world.\n *\n * **Side effects:** Emits `PlayerCameraEvent.SET_OFFSET`.\n *\n * **Category:** Players\n */\n",
               "excerptTokens": [

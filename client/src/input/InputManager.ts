@@ -24,7 +24,13 @@ const DESKTOP_INPUT_UPDATE_HZ = 60;
 const MAX_FIRST_PERSON_INPUT_UPDATE_HZ = 120;
 const GAMEPAD_LEFT_STICK_DEADZONE = 0.18;
 const GAMEPAD_RIGHT_STICK_DEADZONE = 0.12;
-const GAMEPAD_RUN_THRESHOLD = 0.7;
+// Gamepad axes are noisy enough to churn rollback prediction if every tiny
+// direction or trigger threshold change is treated as a new movement state.
+const GAMEPAD_JOYSTICK_DIRECTION_STEPS = 128;
+const GAMEPAD_JOYSTICK_DIRECTION_STEP_RADIANS = (Math.PI * 2) / GAMEPAD_JOYSTICK_DIRECTION_STEPS;
+const GAMEPAD_JOYSTICK_DIRECTION_HYSTERESIS_RADIANS = GAMEPAD_JOYSTICK_DIRECTION_STEP_RADIANS * 0.75;
+const GAMEPAD_RUN_PRESS_THRESHOLD = 0.74;
+const GAMEPAD_RUN_RELEASE_THRESHOLD = 0.64;
 const GAMEPAD_TRIGGER_THRESHOLD = 0.45;
 
 const GAMEPAD_BUTTON_BINDINGS = [
@@ -227,6 +233,7 @@ export default class InputManager {
   private _preferredGamepadIndex: number | undefined;
   private _moveStickState: StickState = { x: 0, y: 0, magnitude: 0 };
   private _lookStickState: StickState = { x: 0, y: 0, magnitude: 0 };
+  private _gamepadRunPressed = false;
   private _lastMovementPacketTickTimeS: number = 0;
   private _nextMovementPacketTickTimeS: number = 0;
   private _movementPacketTimerId: number | undefined;
@@ -256,6 +263,7 @@ export default class InputManager {
       this._clearInputSource('gamepad');
       this._setJoystickDirectionForSource('virtual', undefined);
       this._setJoystickDirectionForSource('gamepad', undefined);
+      this._gamepadRunPressed = false;
     }
     
     this._inputEnabled = enabled;
@@ -906,10 +914,15 @@ export default class InputManager {
 
     if (this._game.camera.isGameCameraActive && hasMoveStick) {
       // Keep gamepad movement aligned with the existing mobile joystick convention used by the server.
-      this._setJoystickDirectionForSource('gamepad', Math.atan2(-this._moveStickState.x, -this._moveStickState.y));
-      this._onInputChange('shift', this._moveStickState.magnitude >= GAMEPAD_RUN_THRESHOLD, 'gamepad');
+      const joystickDirection = this._getStableGamepadJoystickDirection(
+        Math.atan2(-this._moveStickState.x, -this._moveStickState.y),
+      );
+      this._setJoystickDirectionForSource('gamepad', joystickDirection);
+      this._gamepadRunPressed = this._getGamepadRunPressed(this._moveStickState.magnitude);
+      this._onInputChange('shift', this._gamepadRunPressed, 'gamepad');
     } else {
       this._setJoystickDirectionForSource('gamepad', undefined);
+      this._gamepadRunPressed = false;
       this._onInputChange('shift', false, 'gamepad');
     }
 
@@ -937,6 +950,42 @@ export default class InputManager {
     return undefined;
   }
 
+  private _getStableGamepadJoystickDirection(radians: number): number {
+    const previousDirection = this._joystickDirectionBySource.gamepad;
+
+    if (typeof previousDirection === 'number') {
+      const angularDelta = this._getAngularDistanceRadians(radians, previousDirection);
+
+      if (angularDelta < GAMEPAD_JOYSTICK_DIRECTION_HYSTERESIS_RADIANS) {
+        return previousDirection;
+      }
+    }
+
+    return this._quantizeGamepadJoystickDirection(radians);
+  }
+
+  private _getGamepadRunPressed(magnitude: number): boolean {
+    return this._gamepadRunPressed
+      ? magnitude >= GAMEPAD_RUN_RELEASE_THRESHOLD
+      : magnitude >= GAMEPAD_RUN_PRESS_THRESHOLD;
+  }
+
+  private _quantizeGamepadJoystickDirection(radians: number): number {
+    return this._normalizeRadians(
+      Math.round(radians / GAMEPAD_JOYSTICK_DIRECTION_STEP_RADIANS) *
+      GAMEPAD_JOYSTICK_DIRECTION_STEP_RADIANS,
+    );
+  }
+
+  private _getAngularDistanceRadians(a: number, b: number): number {
+    return Math.abs(this._normalizeRadians(a - b));
+  }
+
+  private _normalizeRadians(radians: number): number {
+    const fullTurn = Math.PI * 2;
+    return ((((radians + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI;
+  }
+
   private _normalizeStick(x: number, y: number, deadzone: number, target: StickState): boolean {
     const magnitude = Math.hypot(x, y);
 
@@ -960,6 +1009,7 @@ export default class InputManager {
   private _clearGamepadState(): void {
     this._clearInputSource('gamepad');
     this._setJoystickDirectionForSource('gamepad', undefined);
+    this._gamepadRunPressed = false;
   }
 
   private _onPointerDown = (event: PointerEvent) => {
